@@ -8,6 +8,8 @@ import {
   type CondenseStatus,
 } from "@/lib/api";
 
+const MAX_MB = 150; // free-tier backend ceiling — bigger videos crash it
+
 function fmtMin(s?: number): string {
   if (s == null) return "—";
   const m = Math.floor(s / 60);
@@ -15,10 +17,17 @@ function fmtMin(s?: number): string {
   return `${m}m ${sec.toString().padStart(2, "0")}s`;
 }
 
+function Spinner() {
+  return (
+    <span className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+  );
+}
+
 export function CondenseForm() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [job, setJob] = useState<CondenseStatus | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [fileMB, setFileMB] = useState<number | null>(null);
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -40,36 +49,43 @@ export function CondenseForm() {
     return () => clearInterval(iv);
   }, [jobId, poll]);
 
-  const MAX_MB = 150; // free-tier backend ceiling — bigger videos crash it
+  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    setError("");
+    setFileMB(f ? f.size / (1024 * 1024) : null);
+  }
+
+  const oversize = fileMB != null && fileMB > MAX_MB;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const file = fileRef.current?.files?.[0];
     if (!file) return;
     if (file.size > MAX_MB * 1024 * 1024) {
-      const mb = Math.round(file.size / (1024 * 1024));
       setError(
-        `Vídeo demasiado grande (${mb} MB). O servidor gratuito aguenta até ~${MAX_MB} MB ` +
+        `Vídeo demasiado grande (${Math.round(fileMB!)} MB). O servidor gratuito aguenta até ~${MAX_MB} MB ` +
         `(~4 min de 1080p). Usa um clip mais curto, ou processa jogos completos localmente.`,
       );
       return;
     }
-    setBusy(true);
     setError("");
     setJob(null);
     setJobId(null);
+    setUploading(true);
     try {
       const { job_id } = await uploadForCondense(file);
       setJobId(job_id);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
-      setBusy(false);
+    } finally {
+      setUploading(false);
     }
   }
 
   const done = job?.status === "done";
   const failed = job?.status === "error" || !!error;
-  const processing = !!jobId && !done && !failed;
+  const analysing = !!jobId && !done && !failed;
+  const busy = uploading || analysing;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -79,31 +95,49 @@ export function CondenseForm() {
       </p>
 
       <div>
-        <label className="block text-sm font-medium text-gray-300 mb-1">Vídeo do jogo</label>
+        <div className="flex items-baseline justify-between mb-1">
+          <label className="block text-sm font-medium text-gray-300">Vídeo do jogo</label>
+          <span className={`text-xs ${oversize ? "text-red-400" : "text-gray-500"}`}>
+            máx. {MAX_MB} MB (~4 min)
+          </span>
+        </div>
         <input
           ref={fileRef}
           type="file"
           accept="video/*"
           required
-          disabled={processing}
+          disabled={busy}
+          onChange={onPick}
           className="w-full text-sm text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-brand file:text-white file:text-sm file:font-medium hover:file:bg-brand-dark cursor-pointer disabled:opacity-50"
         />
+        {fileMB != null && (
+          <p className={`text-xs mt-1 ${oversize ? "text-red-400" : "text-green-400"}`}>
+            Selecionado: {Math.round(fileMB)} MB {oversize && "— acima do limite"}
+          </p>
+        )}
       </div>
 
       {!done && (
         <button
           type="submit"
-          disabled={processing}
-          className="w-full py-2.5 bg-brand hover:bg-brand-dark disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-colors"
+          disabled={busy || oversize}
+          className="w-full py-2.5 bg-brand hover:bg-brand-dark disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2"
         >
-          {processing ? "A analisar e cortar…" : "✂️ Cortar tempo útil"}
+          {uploading && <><Spinner /> A enviar vídeo…</>}
+          {analysing && <><Spinner /> A analisar…</>}
+          {!busy && "✂️ Cortar tempo útil"}
         </button>
       )}
 
-      {processing && (
+      {uploading && (
         <div className="flex items-center gap-3 text-sm text-blue-300">
-          <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
-          A processar — isto pode demorar alguns minutos para vídeos longos…
+          <Spinner /> A enviar o vídeo para o servidor…
+        </div>
+      )}
+
+      {analysing && (
+        <div className="flex items-center gap-3 text-sm text-blue-300">
+          <Spinner /> A analisar e cortar — pode demorar alguns minutos (1º pedido acorda o servidor)…
         </div>
       )}
 
@@ -122,7 +156,7 @@ export function CondenseForm() {
           </a>
           <button
             type="button"
-            onClick={() => { setJobId(null); setJob(null); setBusy(false); if (fileRef.current) fileRef.current.value = ""; }}
+            onClick={() => { setJobId(null); setJob(null); setFileMB(null); if (fileRef.current) fileRef.current.value = ""; }}
             className="block w-full text-center py-2 text-gray-400 hover:text-white text-sm"
           >
             Cortar outro vídeo
