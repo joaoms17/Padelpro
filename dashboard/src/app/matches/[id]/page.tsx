@@ -2,13 +2,12 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { use } from "react";
 import { getStatus, getPlayerStats, type MatchStatus, type PlayerStats } from "@/lib/api";
 import { PlayerCard } from "@/components/PlayerCard";
 import { StatusBadge } from "@/components/StatusBadge";
 
-export default function MatchDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id: matchId } = use(params);
+export default function MatchDetailPage({ params }: { params: { id: string } }) {
+  const matchId = params.id;
   const [status,  setStatus]  = useState<MatchStatus | null>(null);
   const [stats,   setStats]   = useState<PlayerStats[]>([]);
   const [loading, setLoading] = useState(true);

@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { use } from "react";
 import { getProgression, type ProgressionPoint } from "@/lib/api";
 import { ProgressionChart } from "@/components/ProgressionChart";
 
@@ -17,9 +16,8 @@ const METRICS: Array<{ key: string; label: string; unit: string; scale?: number 
   { key: "sync_score",     label: "Sincronização",          unit: "%",  scale: 100 },
 ];
 
-export default function PlayerDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
-  const playerId = parseInt(id, 10);
+export default function PlayerDetailPage({ params }: { params: { id: string } }) {
+  const playerId = parseInt(params.id, 10);
   const colour = PLAYER_COLOURS[(playerId - 1) % PLAYER_COLOURS.length];
 
   const [histories, setHistories] = useState<Record<string, ProgressionPoint[]>>({});

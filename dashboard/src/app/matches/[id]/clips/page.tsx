@@ -1,11 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { use } from "react";
 import { ClipBrowser } from "@/components/ClipBrowser";
 
-export default function ClipsPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id: matchId } = use(params);
+export default function ClipsPage({ params }: { params: { id: string } }) {
+  const matchId = params.id;
 
   return (
     <div className="space-y-6">
