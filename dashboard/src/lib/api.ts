@@ -200,3 +200,20 @@ export async function getCondenseStatus(job_id: string): Promise<CondenseStatus>
 export function condenseDownloadUrl(job_id: string): string {
   return `${BASE}/condense/${job_id}/download`;
 }
+
+// ---- Court calibration ----
+
+export async function saveCalibration(
+  court_id: string,
+  points: number[][],
+  frame_width: number,
+  frame_height: number,
+): Promise<{ court_id: string; saved: boolean }> {
+  const r = await fetch(`${BASE}/calibrate/save`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ court_id, points, frame_width, frame_height }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}

@@ -19,6 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="flex gap-4 text-sm">
             <NavLink href="/matches">Jogos</NavLink>
             <NavLink href="/players">Jogadores</NavLink>
+            <NavLink href="/calibrate">Calibrar campo</NavLink>
           </div>
         </nav>
         <main className="flex-1 px-6 py-8 max-w-6xl mx-auto w-full">

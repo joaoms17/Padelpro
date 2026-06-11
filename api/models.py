@@ -86,3 +86,12 @@ class ProgressionResponse(BaseModel):
     player_id: str
     metric:    str
     history:   list[ProgressionPoint]
+
+
+# ---- Calibration ----
+
+class CalibrateRequest(BaseModel):
+    court_id: str
+    points:   list[list[float]]            # 4 corners in video-pixel coords: TL, TR, BR, BL
+    frame_width:  int | None = None
+    frame_height: int | None = None
