@@ -31,6 +31,9 @@ def main() -> None:
     parser.add_argument("--court-id", required=True)
     parser.add_argument("--output", type=Path, default=Path("data/output"))
     parser.add_argument("--device", default="cpu", help="'cpu' ou 'cuda:0'")
+    parser.add_argument("--segment", action="store_true", help="Activar segmentação (poupa 50-70%% compute).")
+    parser.add_argument("--condense", action="store_true", help="Gerar vídeo condensado sem tempo morto.")
+    parser.add_argument("--pose", action="store_true", help="Activar pose + classificador de pancadas (M2).")
     args = parser.parse_args()
 
     cfg = DEFAULT_CONFIG
@@ -38,7 +41,12 @@ def main() -> None:
 
     output_dir = args.output / args.match_id
     pipeline = Pipeline(cfg)
-    result = pipeline.run(args.video, output_dir, args.match_id)
+    result = pipeline.run(
+        args.video, output_dir, args.match_id,
+        segment=args.segment,
+        condense=args.condense,
+        pose=args.pose,
+    )
 
     print(f"\nM1 concluído — match '{args.match_id}'")
     print(f"  CSV de posições : {result.csv_path}")
@@ -46,6 +54,12 @@ def main() -> None:
     print(f"  Frames processados : {len(result.frame_results)}")
     total_tracks = sum(len(fr.tracks) for fr in result.frame_results)
     print(f"  Deteções totais : {total_tracks}")
+    if result.shot_events_path:
+        print(f"  Shot events     : {result.shot_events_path}")
+    if result.segments_path:
+        print(f"  Segmentos       : {result.segments_path}")
+    if result.condensed_video_path:
+        print(f"  Vídeo condensado: {result.condensed_video_path}")
     if total_tracks == 0:
         print("\n  ⚠ Nenhuma deteção — instala os pesos YOLOX/RTMDet (ver README.md).")
 

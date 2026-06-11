@@ -1,1 +1,7 @@
-# TODO (Segmentation milestone): audio + motion → segments.json + timestamp_map.json
+from padelpro_vision.segmentation.segmentation import (
+    Segment,
+    get_active_segments,
+    build_timestamp_map,
+)
+
+__all__ = ["Segment", "get_active_segments", "build_timestamp_map"]
