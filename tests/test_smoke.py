@@ -368,5 +368,135 @@ def test_draw_mini_court():
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
     out   = draw_mini_court(frame, {1: (5.0, 10.0), 2: (7.0, 15.0)})
     assert out.shape == frame.shape
-    # Mini court must have been drawn (not all zeros)
     assert not np.array_equal(out, frame)
+
+
+# ---------------------------------------------------------------------------
+# Indexing tests
+# ---------------------------------------------------------------------------
+
+def test_indexing_imports():
+    from padelpro_vision.indexing import (
+        Rally, Clip, build_rallies, build_clips, query_clips,
+        derive_zone, derive_rally_phase, save_index, load_index,
+    )
+
+
+def test_derive_zone():
+    from padelpro_vision.indexing.indexer import derive_zone
+    assert derive_zone(2.0,  1.0)  == "net_left"
+    assert derive_zone(8.0,  1.0)  == "net_right"
+    assert derive_zone(2.0,  6.0)  == "mid_left"
+    assert derive_zone(8.0, 15.0)  == "back_right"
+    assert derive_zone(None, None) == "unknown"
+
+
+def test_derive_rally_phase():
+    from padelpro_vision.indexing.indexer import derive_rally_phase
+    assert derive_rally_phase(1000.0, 0.0, 9000.0)  == "early"
+    assert derive_rally_phase(5000.0, 0.0, 9000.0)  == "mid"
+    assert derive_rally_phase(8000.0, 0.0, 9000.0)  == "late"
+
+
+def test_build_rallies_and_clips():
+    from padelpro_vision.segmentation.segmentation import Segment
+    from padelpro_vision.strokes.shot_event import ShotEvent
+    from padelpro_vision.indexing.indexer import build_rallies, build_clips, query_clips
+
+    segs = [
+        Segment(start_ms=0.0,    end_ms=15000.0, type="rally"),
+        Segment(start_ms=20000.0, end_ms=35000.0, type="break"),
+        Segment(start_ms=35000.0, end_ms=50000.0, type="rally"),
+    ]
+    events = [
+        ShotEvent("m1", 1, 0, 5000.0,  "smash",  0.9, 125, court_x=4.0, court_y=2.0),  # net_left
+        ShotEvent("m1", 2, 0, 8000.0,  "vibora", 0.8, 200, court_x=8.0, court_y=3.0),  # net_right
+        ShotEvent("m1", 1, 2, 40000.0, "bandeja", 0.85, 1000, court_x=3.0, court_y=5.0),
+    ]
+    rallies = build_rallies("m1", segs)
+    assert len(rallies) == 2
+
+    clips = build_clips("m1", events, rallies, video_duration_ms=60000.0)
+    assert len(clips) == 3
+
+    smashes = query_clips(clips, stroke="smash")
+    assert len(smashes) == 1 and smashes[0].player_id == 1
+
+    net = query_clips(clips, zone="net_left")
+    assert len(net) >= 1
+
+
+def test_save_load_index():
+    from padelpro_vision.indexing.indexer import Rally, Clip, save_index, load_index
+    with tempfile.TemporaryDirectory() as tmp:
+        rallies = [Rally(0, "m1", 0.0, 15000.0, 3)]
+        clips   = [Clip(0, "m1", 0, 1, "smash", 3500.0, 6500.0, "net_left", "early")]
+        r_path, c_path = save_index(rallies, clips, Path(tmp))
+        assert r_path.exists() and c_path.exists()
+        loaded_r, loaded_c = load_index(Path(tmp))
+        assert loaded_r[0].num_shots == 3
+        assert loaded_c[0].stroke_type == "smash"
+
+
+def test_query_clips_combined_filters():
+    from padelpro_vision.indexing.indexer import Clip, query_clips
+    clips = [
+        Clip(0, "m1", 0, 1, "smash",  1000.0, 4000.0, "net_left",  "early"),
+        Clip(1, "m1", 0, 2, "vibora", 5000.0, 8000.0, "mid_right", "mid"),
+        Clip(2, "m1", 0, 1, "vibora", 9000.0, 12000.0, "net_right", "late"),
+    ]
+    # player 1 + vibora → only clip 2
+    result = query_clips(clips, player_id=1, stroke="vibora")
+    assert len(result) == 1 and result[0].clip_id == 2
+
+    # all clips in net zone
+    net = query_clips(clips, zone="net_left")
+    assert len(net) == 1
+
+
+# ---------------------------------------------------------------------------
+# FastAPI tests
+# ---------------------------------------------------------------------------
+
+def test_api_imports():
+    from api.main import app
+    from api.models import (
+        MatchCreate, MatchStatus, RunPipelineRequest,
+        ClipResponse, MontageRequest, PlayerStatsResponse,
+    )
+
+
+def test_api_health():
+    from fastapi.testclient import TestClient
+    from api.main import app
+    client = TestClient(app)
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.json()["status"] == "ok"
+
+
+def test_api_create_match():
+    from fastapi.testclient import TestClient
+    from api.main import app
+    client = TestClient(app)
+    r = client.post("/matches/", json={"court_id": "sintra_court1"})
+    assert r.status_code == 201
+    data = r.json()
+    assert "match_id" in data
+    assert data["status"] == "queued"
+
+
+def test_api_status_not_found():
+    from fastapi.testclient import TestClient
+    from api.main import app
+    client = TestClient(app)
+    r = client.get("/matches/nonexistent-id/status")
+    assert r.status_code == 404
+
+
+def test_api_clips_not_found():
+    from fastapi.testclient import TestClient
+    from api.main import app
+    client = TestClient(app)
+    r = client.get("/clips/matches/nonexistent-match")
+    assert r.status_code == 404

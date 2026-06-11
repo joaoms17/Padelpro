@@ -343,13 +343,23 @@ class Pipeline:
         except Exception as exc:
             logger.warning("Chart generation failed: %s", exc)
 
+        # Build clip index (Indexing milestone)
+        from padelpro_vision.indexing.indexer import build_rallies, build_clips, save_index
+        rallies = build_rallies(match_id, segs)
+        clips   = build_clips(match_id, shot_events, rallies)
+        save_index(rallies, clips, output_dir)
+        logger.info("Index: %d rallies, %d clips", len(rallies), len(clips))
+
         # Supabase push
         if supabase:
-            self._push_to_supabase(match_id, result, shot_events, segs)
+            self._push_to_supabase(match_id, result, shot_events, segs, rallies, clips)
 
         return analytics_path
 
-    def _push_to_supabase(self, match_id: str, result, shot_events: list, segs: list) -> None:
+    def _push_to_supabase(
+        self, match_id: str, result, shot_events: list, segs: list,
+        rallies: list | None = None, clips: list | None = None,
+    ) -> None:
         from padelpro_vision.io.supabase_client import SupabaseClient
         db = SupabaseClient()
         if not db.connected:
@@ -360,6 +370,11 @@ class Pipeline:
             db.upsert_shot_events(shot_events)
         if segs:
             db.upsert_segments(match_id, segs)
+        if rallies:
+            db.upsert_rallies(match_id, [vars(r) for r in rallies])
+        if clips:
+            from dataclasses import asdict
+            db.upsert_clips([asdict(c) for c in clips])
 
     def _write_csv(self, results: list[FrameResult], output_path: Path) -> None:
         with open(output_path, "w", newline="") as f:
