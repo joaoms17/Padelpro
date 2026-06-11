@@ -34,12 +34,12 @@ class CalibrationConfig:
 
 @dataclass
 class SegmentationConfig:
-    play_score_threshold_enter: float = 0.6
-    play_score_threshold_exit: float = 0.3
+    play_score_threshold_enter: float = 0.8
+    play_score_threshold_exit: float = 0.55
     min_rally_duration_s: float = 3.0
-    gap_merge_threshold_s: float = 3.0
-    padding_before_s: float = 2.0
-    padding_after_s: float = 1.0
+    gap_merge_threshold_s: float = 1.0
+    padding_before_s: float = 1.0
+    padding_after_s: float = 0.6
     break_gap_threshold_s: float = 45.0
 
 

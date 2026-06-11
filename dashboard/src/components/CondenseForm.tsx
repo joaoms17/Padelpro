@@ -40,10 +40,20 @@ export function CondenseForm() {
     return () => clearInterval(iv);
   }, [jobId, poll]);
 
+  const MAX_MB = 150; // free-tier backend ceiling — bigger videos crash it
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const file = fileRef.current?.files?.[0];
     if (!file) return;
+    if (file.size > MAX_MB * 1024 * 1024) {
+      const mb = Math.round(file.size / (1024 * 1024));
+      setError(
+        `Vídeo demasiado grande (${mb} MB). O servidor gratuito aguenta até ~${MAX_MB} MB ` +
+        `(~4 min de 1080p). Usa um clip mais curto, ou processa jogos completos localmente.`,
+      );
+      return;
+    }
     setBusy(true);
     setError("");
     setJob(null);
