@@ -1,4 +1,4 @@
-"""Smoke tests for M1 + Segmentation + M2 — no real video or model weights required."""
+"""Smoke tests for M1 + Segmentation + M2 + M3 — no real video or model weights required."""
 
 from __future__ import annotations
 import sys
@@ -245,3 +245,128 @@ def test_stroke_classifier_reset():
     clf.update(1, est._stub_pose(box))
     clf.reset(track_id=1)
     assert 1 not in clf._windows
+
+
+# ---------------------------------------------------------------------------
+# M3: Projection + Analytics tests
+# ---------------------------------------------------------------------------
+
+def test_projection_imports():
+    from padelpro_vision.projection import project_point, project_points, foot_point, project_track_positions
+
+
+def test_project_point_identity():
+    """With an identity-like homography, points should map close to input."""
+    from padelpro_vision.projection.projection import project_point
+    H = np.eye(3, dtype=np.float64)
+    cx, cy = project_point(H, 100.0, 200.0)
+    assert abs(cx - 100.0) < 1e-6
+    assert abs(cy - 200.0) < 1e-6
+
+
+def test_project_points_batch():
+    from padelpro_vision.projection.projection import project_points
+    H = np.eye(3, dtype=np.float64)
+    pts = np.array([[10.0, 20.0], [30.0, 40.0]], dtype=np.float64)
+    out = project_points(H, pts)
+    assert out.shape == (2, 2)
+    assert np.allclose(out, pts)
+
+
+def test_foot_point():
+    from padelpro_vision.detection.detector import PlayerBox
+    from padelpro_vision.projection.projection import foot_point
+    box = PlayerBox(100.0, 50.0, 200.0, 300.0, 0.9)
+    px, py = foot_point(box)
+    assert px == 150.0
+    assert py == 300.0
+
+
+def test_project_empty_points():
+    from padelpro_vision.projection.projection import project_points
+    H = np.eye(3, dtype=np.float64)
+    out = project_points(H, np.empty((0, 2)))
+    assert out.shape == (0, 2)
+
+
+def test_analytics_imports():
+    from padelpro_vision.analytics import PlayerStats, MatchAnalyticsResult, compute_match_analytics
+
+
+def test_compute_distance():
+    from padelpro_vision.analytics.analytics import _compute_distance_and_speed
+    positions = [
+        (0.0,    0.0, 0.0),
+        (1000.0, 3.0, 4.0),   # 5 m in 1 s → 5 m/s
+        (2000.0, 3.0, 4.0),   # no movement
+    ]
+    dist, avg, mx = _compute_distance_and_speed(positions)
+    assert abs(dist - 5.0) < 0.01
+
+
+def test_compute_heatmap():
+    from padelpro_vision.analytics.analytics import _compute_heatmap
+    positions = [(float(i) * 100, 5.0, 10.0) for i in range(20)]
+    grid = _compute_heatmap(positions)
+    arr = np.array(grid)
+    assert arr.shape == (20, 10)
+    assert arr.max() == pytest.approx(1.0)
+
+
+def test_compute_zones():
+    from padelpro_vision.analytics.analytics import _compute_zones
+    # All positions deep in attack zone (y < 4m, team_side=0)
+    positions = [(float(i) * 100, 5.0, 1.0) for i in range(20)]
+    atk, dfn, trn = _compute_zones(positions, team_side=0)
+    assert atk == pytest.approx(100.0)
+    assert dfn == pytest.approx(0.0)
+    assert trn == pytest.approx(0.0)
+
+
+def test_compute_match_analytics_no_crash():
+    from padelpro_vision.analytics.analytics import compute_match_analytics
+    track_positions = {
+        1: [(float(i) * 200, float(i) * 0.3, float(i) * 0.15) for i in range(50)],
+        2: [(float(i) * 200, 10.0 - float(i) * 0.3, 20.0 - float(i) * 0.15) for i in range(50)],
+    }
+    result = compute_match_analytics("test_match", track_positions, [], {1: 0, 2: 1})
+    assert len(result.player_stats) == 2
+    assert 0.0 <= result.sync_score <= 1.0
+    assert result.player_stats[0].distance_m > 0
+
+
+def test_player_stats_dataclass():
+    from padelpro_vision.analytics.analytics import PlayerStats
+    ps = PlayerStats(match_id="m1", player_id=1, distance_m=250.0, avg_speed_ms=2.1)
+    assert ps.distance_m == 250.0
+    assert ps.shots_json == "{}"
+
+
+def test_supabase_client_no_credentials():
+    """Should not raise even when credentials are absent."""
+    import os
+    orig_url = os.environ.pop("SUPABASE_URL", None)
+    orig_key = os.environ.pop("SUPABASE_KEY", None)
+    try:
+        from padelpro_vision.io.supabase_client import SupabaseClient
+        db = SupabaseClient()
+        assert not db.connected
+    finally:
+        if orig_url: os.environ["SUPABASE_URL"] = orig_url
+        if orig_key: os.environ["SUPABASE_KEY"] = orig_key
+
+
+def test_annotate_frame_no_tracks():
+    from padelpro_vision.viz.visualizer import annotate_frame
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    out   = annotate_frame(frame, [])
+    assert out.shape == frame.shape
+
+
+def test_draw_mini_court():
+    from padelpro_vision.viz.visualizer import draw_mini_court
+    frame = np.zeros((480, 640, 3), dtype=np.uint8)
+    out   = draw_mini_court(frame, {1: (5.0, 10.0), 2: (7.0, 15.0)})
+    assert out.shape == frame.shape
+    # Mini court must have been drawn (not all zeros)
+    assert not np.array_equal(out, frame)
