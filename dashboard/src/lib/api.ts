@@ -2,7 +2,12 @@
  * Calls to the FastAPI backend (/api/pipeline/* proxied by Next.js).
  */
 
-const BASE = "/api/pipeline";
+// When NEXT_PUBLIC_API_URL is set (e.g. a deployed backend on Render), call it
+// directly — CORS is open on the API. Otherwise fall back to the Next.js
+// rewrite proxy at /api/pipeline (local dev convenience).
+const BASE = process.env.NEXT_PUBLIC_API_URL?.trim()
+  ? process.env.NEXT_PUBLIC_API_URL.trim().replace(/\/$/, "")
+  : "/api/pipeline";
 
 export interface MatchStatus {
   match_id: string;
@@ -163,4 +168,35 @@ export async function getProgression(player_id: number, metric: string): Promise
   const r = await fetch(`${BASE}/analytics/progression/${player_id}/${metric}`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
+}
+
+// ---- Condense ("useful time") ----
+
+export interface CondenseStatus {
+  job_id: string;
+  status: string;            // processing | done | error
+  filename?: string;
+  total_s?: number;
+  useful_s?: number;
+  useful_pct?: number;
+  rallies?: number;
+  error?: string;
+}
+
+export async function uploadForCondense(file: File): Promise<{ job_id: string }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const r = await fetch(`${BASE}/condense/upload`, { method: "POST", body: fd });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function getCondenseStatus(job_id: string): Promise<CondenseStatus> {
+  const r = await fetch(`${BASE}/condense/${job_id}/status`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export function condenseDownloadUrl(job_id: string): string {
+  return `${BASE}/condense/${job_id}/download`;
 }

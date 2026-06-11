@@ -92,6 +92,10 @@ def _audio_energy_per_second(wav_path: Path) -> np.ndarray:
         s = samples[i * framerate: (i + 1) * framerate]
         if len(s) > 0:
             energy[i] = float(np.sqrt(np.mean(s ** 2)))
+    # Robust normalisation by the 90th percentile (see motion notes above).
+    ref = np.percentile(energy[energy > 0], 90) if np.any(energy > 0) else 0.0
+    if ref > 0:
+        energy = np.clip(energy / ref, 0.0, 1.0)
     return energy
 
 
@@ -135,9 +139,12 @@ def _motion_energy_per_second(video_path: Path, target_fps: float = 5.0, scale: 
 
     nonzero = counts > 0
     motion[nonzero] /= counts[nonzero]
-    peak = motion.max()
-    if peak > 0:
-        motion /= peak
+    # Robust normalisation: divide by the 90th percentile (not the max) so a
+    # single outlier second (camera jolt, person crossing close) doesn't crush
+    # the whole signal. Active play then sits around ~1.0, dead time near 0.
+    ref = np.percentile(motion[motion > 0], 90) if np.any(motion > 0) else 0.0
+    if ref > 0:
+        motion = np.clip(motion / ref, 0.0, 1.0)
     return motion
 
 

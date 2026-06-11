@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import matches, analytics, clips
+from api.routers import matches, analytics, clips, condense
 
 app = FastAPI(
     title="PadelPro Vision API",
@@ -35,6 +35,7 @@ app.add_middleware(
 app.include_router(matches.router)
 app.include_router(analytics.router)
 app.include_router(clips.router)
+app.include_router(condense.router)
 
 
 @app.get("/health")

@@ -1,0 +1,10 @@
+# Render Blueprint — deploy the PadelPro Vision backend (API) as a Docker web service.
+# In Render: New + → Blueprint → connect the joaoms17/Padelpro repo → it reads this file.
+services:
+  - type: web
+    name: padelpro-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    autoDeploy: true

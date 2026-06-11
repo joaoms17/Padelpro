@@ -5,10 +5,12 @@ import Link from "next/link";
 import { listMatches, type MatchStatus } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { UploadForm } from "@/components/UploadForm";
+import { CondenseForm } from "@/components/CondenseForm";
 
 export default function MatchesPage() {
   const [matches, setMatches] = useState<MatchStatus[]>([]);
   const [showUpload, setShowUpload] = useState(false);
+  const [showCondense, setShowCondense] = useState(false);
 
   const refresh = useCallback(() => {
     listMatches().then(setMatches).catch(() => {});
@@ -24,13 +26,28 @@ export default function MatchesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-white">Jogos</h1>
-        <button
-          onClick={() => setShowUpload(!showUpload)}
-          className="px-4 py-2 bg-brand hover:bg-brand-dark text-white rounded-lg text-sm font-medium transition-colors"
-        >
-          {showUpload ? "Fechar" : "+ Novo jogo"}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setShowCondense(!showCondense); setShowUpload(false); }}
+            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white rounded-lg text-sm font-medium transition-colors"
+          >
+            {showCondense ? "Fechar" : "✂️ Cortar tempo útil"}
+          </button>
+          <button
+            onClick={() => { setShowUpload(!showUpload); setShowCondense(false); }}
+            className="px-4 py-2 bg-brand hover:bg-brand-dark text-white rounded-lg text-sm font-medium transition-colors"
+          >
+            {showUpload ? "Fechar" : "+ Novo jogo"}
+          </button>
+        </div>
       </div>
+
+      {showCondense && (
+        <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-md">
+          <h2 className="text-lg font-semibold text-white mb-1">Cortar tempo útil</h2>
+          <CondenseForm />
+        </div>
+      )}
 
       {showUpload && (
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-md">
