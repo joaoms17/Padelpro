@@ -8,3 +8,6 @@ services:
     plan: free
     healthCheckPath: /health
     autoDeploy: true
+    envVars:
+      - key: PADELPRO_ACCESS_CODE
+        sync: false   # define o valor no dashboard do Render (partilha-o com a equipa)

@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -e ".[backend]"
 
 # App code
 COPY api ./api
+COPY scripts ./scripts
 COPY config.py ./
 
 ENV PORT=8000
