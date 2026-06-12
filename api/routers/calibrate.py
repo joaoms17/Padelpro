@@ -25,7 +25,7 @@ async def save_calibration(body: CalibrateRequest):
         raise HTTPException(status_code=400, detail="São precisos 4 pontos (cantos do campo).")
 
     from config import DEFAULT_CONFIG
-    from padelpro_vision.calibration.calibration import CourtCalibrator
+    from padelpro_vision.calibration.calibration import CourtCalibrator, validate_homography
     from padelpro_vision.constants.court import COURT_CORNERS_M
 
     cal = CourtCalibrator(DEFAULT_CONFIG.calibration.homography_cache_dir)
@@ -34,9 +34,10 @@ async def save_calibration(body: CalibrateRequest):
         H = cal._compute_homography(body.points, court_pts)
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Não foi possível calcular a homografia: {exc}")
-    cal.save(H, body.court_id)
-    logger.info("Calibração guardada para campo '%s'.", body.court_id)
-    return {"court_id": body.court_id, "saved": True, "H": H.tolist()}
+    quality = validate_homography(H, body.points, court_pts)
+    cal.save(H, body.court_id, quality=quality)
+    logger.info("Calibração guardada para campo '%s' (%s).", body.court_id, quality["rating"])
+    return {"court_id": body.court_id, "saved": True, "H": H.tolist(), "quality": quality}
 
 
 @router.get("/{court_id}")

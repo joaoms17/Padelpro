@@ -13,6 +13,7 @@ import csv
 import json
 import logging
 import sys
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -84,6 +85,7 @@ class Pipeline:
         video_path = Path(video_path)
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        t_start = time.monotonic()
 
         info = get_video_info(video_path)
         logger.info(
@@ -131,20 +133,31 @@ class Pipeline:
                     condensed_path = None
 
         # ----------------------------------------------------------------
-        # Load homography (for analytics)
+        # Load homography (analytics + court gating of detections)
         # ----------------------------------------------------------------
         H: np.ndarray | None = None
-        if analytics:
-            if homography_path and Path(homography_path).exists():
-                from padelpro_vision.calibration.calibration import CourtCalibrator
-                cal = CourtCalibrator(Path(homography_path).parent)
-                court_id = Path(homography_path).stem
-                H = cal.load(court_id)
-            if H is None:
-                logger.warning(
-                    "No homography available for analytics — court positions will be pixel-based. "
-                    "Run scripts/calibrate_court.py first."
-                )
+        homography_quality: dict | None = None
+        if homography_path and Path(homography_path).exists():
+            from padelpro_vision.calibration.calibration import CourtCalibrator
+            cal = CourtCalibrator(Path(homography_path).parent)
+            court_id = Path(homography_path).stem
+            H = cal.load(court_id)
+            homography_quality = cal.load_quality(court_id)
+        if analytics and H is None:
+            logger.warning(
+                "No homography available for analytics — court positions will be pixel-based. "
+                "Run scripts/calibrate_court.py first."
+            )
+
+        # Court gate: drop detections whose feet land far off the court
+        # (spectators, neighbouring courts) before they pollute tracking.
+        if H is not None:
+            from padelpro_vision.tracking.tracker import make_court_gate
+            self._tracker.detection_filter = make_court_gate(
+                H,
+                margin_x_m=self._cfg.quality.court_margin_x_m,
+                margin_y_m=self._cfg.quality.court_margin_y_m,
+            )
 
         # ----------------------------------------------------------------
         # Pose + stroke setup
@@ -160,7 +173,14 @@ class Pipeline:
                 weights_path=self._cfg.model.pose_weights,
                 device=self._cfg.model.device,
             )
-            stroke_clf = StrokeClassifier(mode="rules")
+            # Use the trained TCN when available (feedback loop retrains it);
+            # StrokeClassifier falls back to rules if loading fails.
+            tcn_weights = self._cfg.model.detector_weights.parent / "stroke_tcn.pth"
+            if tcn_weights.exists():
+                stroke_clf = StrokeClassifier(mode="tcn", weights_path=tcn_weights,
+                                              device=self._cfg.model.device)
+            else:
+                stroke_clf = StrokeClassifier(mode="rules")
 
         # ----------------------------------------------------------------
         # Detection + tracking loop
@@ -171,6 +191,9 @@ class Pipeline:
         all_shot_events: list = []
         # {track_id: [(ts_ms, px, py)]}  — pixel foot positions
         pixel_positions: dict[int, list] = {}
+        # {"player:frame": normalised 17x2 keypoint window} — training features
+        # for the feedback loop (saved only for events that survive fusion)
+        pose_windows: dict[str, list] = {}
 
         try:
             from tqdm import tqdm
@@ -203,12 +226,18 @@ class Pipeline:
 
                 # M2: pose + strokes
                 if pose_estimator is not None and stroke_clf is not None:
+                    from padelpro_vision.strokes.classifier import pose_to_features
                     from padelpro_vision.strokes.shot_event import ShotEvent
                     for t in tracks:
                         p = pose_estimator.estimate(frame, t.box)
                         stroke_clf.update(t.track_id, p)
                         stroke_type, conf = stroke_clf.classify(t.track_id)
                         if stroke_type != "other":
+                            window = list(stroke_clf._windows.get(t.track_id, []))
+                            pose_windows[f"{t.track_id}:{frame_idx}"] = [
+                                pose_to_features(pw).reshape(17, 2).tolist()
+                                for pw in window
+                            ]
                             rally_id = next(
                                 (i for i, (s, e) in enumerate(rally_index) if s <= ts_ms <= e), -1
                             )
@@ -220,6 +249,7 @@ class Pipeline:
                                 stroke_type=stroke_type,
                                 confidence=conf,
                                 frame_idx=frame_idx,
+                                wrist_speed=stroke_clf.wrist_speed(t.track_id),
                             )
                             fr.shot_events.append(ev)
                             all_shot_events.append(ev)
@@ -242,9 +272,34 @@ class Pipeline:
         self._write_csv(frame_results, csv_path)
 
         # ----------------------------------------------------------------
-        # Shot events
+        # Shot events: consolidate per-frame bursts + audio onset cross-check
         # ----------------------------------------------------------------
         shot_events_path: Path | None = None
+        if all_shot_events:
+            from padelpro_vision.strokes.audio_fusion import (
+                consolidate_shot_events,
+                fuse_events_with_onsets,
+            )
+            n_raw = len(all_shot_events)
+            all_shot_events = consolidate_shot_events(
+                all_shot_events, min_gap_ms=self._cfg.strokes.event_min_gap_ms
+            )
+            try:
+                from padelpro_vision.segmentation.segmentation import get_audio_onsets
+                onsets = get_audio_onsets(video_path)
+            except Exception as exc:
+                logger.warning("Audio onset extraction failed: %s", exc)
+                onsets = []
+            all_shot_events = fuse_events_with_onsets(
+                all_shot_events,
+                onsets,
+                tolerance_ms=self._cfg.strokes.audio_onset_tolerance_ms,
+                drop_without_onset=self._cfg.strokes.drop_events_without_onset,
+            )
+            logger.info(
+                "Shot events: %d raw → %d after consolidation + audio fusion.",
+                n_raw, len(all_shot_events),
+            )
         if all_shot_events:
             from padelpro_vision.strokes.shot_event import save_shot_events
             # Fill court positions if H is available
@@ -259,15 +314,65 @@ class Pipeline:
             save_shot_events(all_shot_events, shot_events_path)
             logger.info("Shot events: %d → %s", len(all_shot_events), shot_events_path)
 
+            # Keep the pose windows of surviving events — these are the
+            # training features the review page corrections attach to.
+            if pose_windows:
+                keys = {f"{ev.player_id}:{ev.frame_idx}" for ev in all_shot_events}
+                kept = {k: v for k, v in pose_windows.items() if k in keys}
+                with open(output_dir / f"{match_id}_pose_windows.json", "w") as f:
+                    json.dump(kept, f)
+                logger.info("Pose windows kept for %d events.", len(kept))
+
+        # ----------------------------------------------------------------
+        # Projection to court coordinates (when calibrated)
+        # ----------------------------------------------------------------
+        track_positions = self._project_positions(pixel_positions, H)
+
         # ----------------------------------------------------------------
         # Analytics (M3)
         # ----------------------------------------------------------------
         analytics_path: Path | None = None
         if analytics:
             analytics_path = self._run_analytics(
-                match_id, pixel_positions, all_shot_events,
-                H, team_map, output_dir, supabase, segs_for_supabase,
+                match_id, track_positions, all_shot_events,
+                team_map, output_dir, supabase, segs_for_supabase,
             )
+
+        # ----------------------------------------------------------------
+        # Quality telemetry + active-learning review queue
+        # ----------------------------------------------------------------
+        try:
+            from padelpro_vision.quality.report import build_quality_report, save_quality_report
+            report = build_quality_report(
+                match_id,
+                frame_results,
+                track_positions if H is not None else None,
+                all_shot_events,
+                expected_players=self._cfg.quality.expected_players,
+                max_plausible_speed_ms=self._cfg.quality.max_plausible_speed_ms,
+                teleport_jump_m=self._cfg.quality.teleport_jump_m,
+                homography_quality=homography_quality,
+                processing_elapsed_s=time.monotonic() - t_start,
+                video_duration_s=info["duration_ms"] / 1000.0,
+            )
+            save_quality_report(report, output_dir)
+        except Exception as exc:
+            logger.warning("Quality report failed: %s", exc)
+
+        if pose:
+            try:
+                from padelpro_vision.quality.active_learning import (
+                    build_review_queue, save_review_queue,
+                )
+                queue = build_review_queue(
+                    all_shot_events,
+                    frame_results,
+                    confidence_threshold=self._cfg.strokes.review_confidence_threshold,
+                    expected_players=self._cfg.quality.expected_players,
+                )
+                save_review_queue(queue, output_dir)
+            except Exception as exc:
+                logger.warning("Review queue failed: %s", exc)
 
         logger.info("Done. CSV: %s | Video: %s", csv_path, annotated_path)
         return PipelineResult(
@@ -284,32 +389,36 @@ class Pipeline:
 
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _project_positions(
+        pixel_positions: dict[int, list],
+        H: np.ndarray | None,
+    ) -> dict[int, list]:
+        """Project pixel foot positions to court metres (or pass through pixels)."""
+        if H is None:
+            return pixel_positions
+        from padelpro_vision.projection.projection import project_points
+        track_positions: dict[int, list] = {}
+        for tid, pts in pixel_positions.items():
+            arr = np.array([[p[1], p[2]] for p in pts], dtype=np.float64)
+            court = project_points(H, arr)
+            track_positions[tid] = [
+                (pts[i][0], float(court[i, 0]), float(court[i, 1]))
+                for i in range(len(pts))
+            ]
+        return track_positions
+
     def _run_analytics(
         self,
         match_id: str,
-        pixel_positions: dict[int, list],
+        track_positions: dict[int, list],
         shot_events: list,
-        H: np.ndarray | None,
         team_map: dict[int, int] | None,
         output_dir: Path,
         supabase: bool,
         segs: list,
     ) -> Path:
         from padelpro_vision.analytics.analytics import compute_match_analytics
-        from padelpro_vision.projection.projection import project_points
-
-        # Project positions to court coords (or keep pixel if no H)
-        track_positions: dict[int, list] = {}
-        for tid, pts in pixel_positions.items():
-            if H is not None:
-                arr = np.array([[p[1], p[2]] for p in pts], dtype=np.float64)
-                court = project_points(H, arr)
-                track_positions[tid] = [
-                    (pts[i][0], float(court[i, 0]), float(court[i, 1]))
-                    for i in range(len(pts))
-                ]
-            else:
-                track_positions[tid] = pts  # raw pixels
 
         # Auto team_map: sort track IDs, assign first half to team 0
         if team_map is None:

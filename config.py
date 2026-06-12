@@ -41,6 +41,25 @@ class SegmentationConfig:
     padding_before_s: float = 1.0
     padding_after_s: float = 0.6
     break_gap_threshold_s: float = 45.0
+    enter_confirm_s: float = 1.0    # consecutive high seconds to start a rally
+    exit_confirm_s: float = 2.5     # consecutive low seconds to end a rally
+
+
+@dataclass
+class StrokeConfig:
+    audio_onset_tolerance_ms: float = 200.0   # max gap between stroke and audio onset
+    event_min_gap_ms: float = 700.0           # merge stroke events closer than this
+    drop_events_without_onset: bool = False   # if True, discard strokes with no onset nearby
+    review_confidence_threshold: float = 0.6  # below this → active-learning review queue
+
+
+@dataclass
+class QualityConfig:
+    max_plausible_speed_ms: float = 8.0   # above this a speed sample is implausible
+    teleport_jump_m: float = 3.0          # position jump flagged as tracking error
+    court_margin_x_m: float = 1.5         # gating margin outside court width
+    court_margin_y_m: float = 2.0         # gating margin outside court length
+    expected_players: int = 4
 
 
 @dataclass
@@ -49,6 +68,8 @@ class AppConfig:
     video: VideoConfig = field(default_factory=VideoConfig)
     calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     segmentation: SegmentationConfig = field(default_factory=SegmentationConfig)
+    strokes: StrokeConfig = field(default_factory=StrokeConfig)
+    quality: QualityConfig = field(default_factory=QualityConfig)
 
 
 DEFAULT_CONFIG = AppConfig()

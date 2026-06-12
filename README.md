@@ -113,6 +113,27 @@ pytest tests/ -v
 
 ---
 
+## Avaliação e qualidade
+
+O sistema de medição vive em `padelpro_vision/evaluation/` e `padelpro_vision/quality/`
+— ver [docs/EVALUATION.md](docs/EVALUATION.md) para o guia completo.
+
+```bash
+# Avaliar contra clips anotados (golden set — ver data/golden/README.md)
+python scripts/evaluate.py --golden data/golden --out outputs/eval
+
+# Comparar duas configurações objetivamente
+python scripts/ab_compare.py --a video.input_skip_frames=1 --b video.input_skip_frames=2
+```
+
+Cada jogo processado escreve também `quality_report.json` (telemetria de
+deteção/tracking/física, sem anotações) e `review_queue.json` (momentos de
+baixa confiança para anotar — active learning).
+
+Datasets e modelos externos utilizáveis: [docs/RESOURCES.md](docs/RESOURCES.md).
+
+---
+
 ## Roadmap
 
 | Milestone | Estado | O que entrega |

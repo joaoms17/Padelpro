@@ -14,6 +14,60 @@ logger = logging.getLogger(__name__)
 
 _WINDOW = "Court Calibration — click 4 corners (TL, TR, BR, BL), press ENTER"
 
+# Quality thresholds for validate_homography
+_GOOD_REPROJ_PX = 8.0
+_OK_REPROJ_PX = 20.0
+
+
+def validate_homography(
+    H: np.ndarray,
+    image_pts: list[list[float]] | np.ndarray,
+    court_pts: list[tuple[float, float]] | np.ndarray,
+) -> dict:
+    """
+    Score a computed homography so bad calibrations are caught at source
+    instead of surfacing later as absurd speeds/positions.
+
+    Checks:
+      - reprojection error: court corners → image (px), vs the clicked points
+      - forward error: clicked points → court (m), vs canonical corners
+      - convexity + orientation of the clicked quad (crossed/reordered clicks
+        produce a valid-looking H that maps the court inside-out)
+
+    Returns {"reprojection_error_px", "forward_error_m", "convex", "rating"}.
+    """
+    src = np.array(image_pts, dtype=np.float64).reshape(-1, 1, 2)
+    dst = np.array(court_pts, dtype=np.float64).reshape(-1, 1, 2)
+
+    fwd = cv2.perspectiveTransform(src, H)
+    forward_err_m = float(np.linalg.norm(fwd - dst, axis=2).mean())
+
+    try:
+        H_inv = np.linalg.inv(H)
+        back = cv2.perspectiveTransform(dst, H_inv)
+        reproj_err_px = float(np.linalg.norm(back - src, axis=2).mean())
+    except np.linalg.LinAlgError:
+        reproj_err_px = float("inf")
+
+    pts = np.array(image_pts, dtype=np.float64)
+    convex = bool(
+        len(pts) >= 4 and cv2.isContourConvex(pts[:4].astype(np.float32).reshape(-1, 1, 2))
+    )
+
+    if not convex or not np.isfinite(reproj_err_px) or reproj_err_px > _OK_REPROJ_PX:
+        rating = "bad"
+    elif reproj_err_px > _GOOD_REPROJ_PX:
+        rating = "ok"
+    else:
+        rating = "good"
+
+    return {
+        "reprojection_error_px": round(reproj_err_px, 2) if np.isfinite(reproj_err_px) else None,
+        "forward_error_m": round(forward_err_m, 3),
+        "convex": convex,
+        "rating": rating,
+    }
+
 
 class CourtCalibrator:
     """Compute and cache the image→court homography for a specific court/camera pair."""
@@ -51,8 +105,11 @@ class CourtCalibrator:
             raise ValueError(f"Need at least 4 points, got {len(self._image_pts)}.")
         court_pts = list(COURT_CORNERS_M[: len(self._image_pts)])
         H = self._compute_homography(self._image_pts, court_pts)
-        self.save(H, court_id)
-        logger.info("Homography computed and saved for court '%s'.", court_id)
+        quality = validate_homography(H, self._image_pts, court_pts)
+        if quality["rating"] == "bad":
+            logger.warning("Calibration quality is BAD (%s) — re-click the corners.", quality)
+        self.save(H, court_id, quality=quality)
+        logger.info("Homography computed and saved for court '%s' (%s).", court_id, quality["rating"])
         return H
 
     def _compute_homography(
@@ -69,11 +126,23 @@ class CourtCalibrator:
         logger.debug("Homography inliers: %d / %d", inliers, len(src))
         return H
 
-    def save(self, H: np.ndarray, court_id: str) -> None:
+    def save(self, H: np.ndarray, court_id: str, quality: dict | None = None) -> None:
         path = self._cache_path(court_id)
+        data = {"court_id": court_id, "H": H.tolist()}
+        if quality is not None:
+            data["quality"] = quality
         with open(path, "w") as f:
-            json.dump({"court_id": court_id, "H": H.tolist()}, f, indent=2)
+            json.dump(data, f, indent=2)
         logger.info("Homography saved to %s", path)
+
+    def load_quality(self, court_id: str) -> dict | None:
+        """Return the stored calibration quality metrics, if any."""
+        path = self._cache_path(court_id)
+        if not path.exists():
+            return None
+        with open(path) as f:
+            data = json.load(f)
+        return data.get("quality")
 
     def load(self, court_id: str) -> np.ndarray | None:
         path = self._cache_path(court_id)
