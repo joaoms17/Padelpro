@@ -1,84 +1,126 @@
-﻿# Publica o backend COMPLETO (análise de jogadores) para a internet, para
-# alguém testar pelo site https://padelpro-dashboard.vercel.app:
-#   1. arranca a API do .venv na porta 8010 (se ainda não estiver up)
-#   2. abre um túnel Cloudflare gratuito para essa porta
-#   3. aponta o site do Vercel para o túnel e redeploya
+# Publica o backend (analise de jogadores) na internet via Cloudflare e
+# aponta o site Vercel para o tunel. Verifica cada passo e PARA com o erro
+# real se algo falhar (em vez de seguir com uma API morta -> "Failed to fetch").
 #
-# Mantém esta janela aberta enquanto durar o teste (o túnel vive aqui).
-# Quando acabares: CTRL+C e corre .\scripts\repor_api_render.ps1
+# ASCII-only de proposito: o Windows PowerShell parte ficheiros .ps1 com
+# acentos quando nao tem BOM.
 #
-# Nota: o túnel gratuito limita uploads a ~100 MB → API anuncia máx. 95 MB.
+# Mantem esta janela aberta enquanto durar o teste (o tunel vive aqui).
+# Terminar: CTRL+C e depois .\scripts\repor_api_render.ps1
 
-$root = Split-Path $PSScriptRoot -Parent
+$root   = Split-Path $PSScriptRoot -Parent
+$python = Join-Path $root ".venv\Scripts\python.exe"
+$EXPECTED_BUILD = 2
 
-# --- 1. API local ---------------------------------------------------------
-# Reinicia SEMPRE a API: um processo antigo fica com código/config velhos em
-# memória (os imports são lazy) e sem o código de acesso — reaproveitá-lo
-# depois de um git pull dá erros tipo "'ModelConfig' object has no attribute".
-$old = Get-NetTCPConnection -LocalPort 8010 -State Listen -ErrorAction SilentlyContinue |
-    Select-Object -First 1 -ExpandProperty OwningProcess
-if ($old) {
-    Write-Host "A parar API antiga (PID $old) para arrancar com o código atual..." -ForegroundColor Cyan
-    Stop-Process -Id $old -Force -ErrorAction SilentlyContinue
-    Start-Sleep -Seconds 1
-}
-if ($true) {
-    Write-Host "A arrancar API (porta 8010, com análise)..." -ForegroundColor Cyan
-    $env:API_MAX_UPLOAD_MB = "95"
-    if (-not $env:PADELPRO_ACCESS_CODE) {
-        $env:PADELPRO_ACCESS_CODE = -join ((48..57) + (97..122) | Get-Random -Count 8 | ForEach-Object {[char]$_})
-    }
-    Write-Host "Codigo de acesso (partilha com a equipa): $($env:PADELPRO_ACCESS_CODE)" -ForegroundColor Yellow
-    Start-Process -WindowStyle Minimized -FilePath "$root\.venv\Scripts\python.exe" `
-        -ArgumentList "-m", "uvicorn", "api.main:app", "--port", "8010" -WorkingDirectory $root
-    $tries = 0
-    while ($tries -lt 30) {
-        Start-Sleep -Seconds 2
-        try { Invoke-RestMethod "http://127.0.0.1:8010/health" -TimeoutSec 2 | Out-Null; break } catch { $tries++ }
-    }
+function Fail($msg) {
+    Write-Host ""
+    Write-Host "FALHOU: $msg" -ForegroundColor Red
+    exit 1
 }
 
-# --- 2. Túnel -------------------------------------------------------------
+if (-not (Test-Path $python)) { Fail "Nao encontrei $python (falta criar o .venv?)." }
+
+# --- 1. Parar API antiga na porta 8010 -----------------------------------
+$olds = Get-NetTCPConnection -LocalPort 8010 -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -ExpandProperty OwningProcess -Unique
+foreach ($procId in $olds) {
+    Write-Host "A parar API antiga (PID $procId)..." -ForegroundColor Cyan
+    try {
+        Stop-Process -Id $procId -Force -ErrorAction Stop
+    } catch {
+        Fail "Sem permissao para matar o PID $procId. Abre um PowerShell COMO ADMINISTRADOR e corre:  Stop-Process -Id $procId -Force"
+    }
+}
+Start-Sleep -Seconds 1
+
+# --- 2. Arrancar API nova ------------------------------------------------
+$env:API_MAX_UPLOAD_MB = "95"
+if (-not $env:PADELPRO_ACCESS_CODE) {
+    $env:PADELPRO_ACCESS_CODE = -join ((48..57) + (97..122) | Get-Random -Count 8 | ForEach-Object { [char]$_ })
+}
+$code   = $env:PADELPRO_ACCESS_CODE
+$apilog = Join-Path $env:TEMP "padelpro_api.log"
+$apierr = Join-Path $env:TEMP "padelpro_api.err.log"
+Remove-Item $apilog, $apierr -ErrorAction SilentlyContinue
+
+Write-Host "A arrancar API (porta 8010)..." -ForegroundColor Cyan
+$api = Start-Process -PassThru -WindowStyle Minimized -FilePath $python `
+    -ArgumentList "-m", "uvicorn", "api.main:app", "--port", "8010" `
+    -WorkingDirectory $root `
+    -RedirectStandardOutput $apilog -RedirectStandardError $apierr
+
+$h = $null
+for ($i = 0; $i -lt 30; $i++) {
+    Start-Sleep -Seconds 2
+    if ($api.HasExited) { break }
+    try {
+        $h = Invoke-RestMethod "http://127.0.0.1:8010/health" -TimeoutSec 2
+        if ($h.api_build) { break } else { $h = $null }
+    } catch { $h = $null }
+}
+if (-not $h) {
+    Write-Host "--- ultimas linhas do arranque da API ---" -ForegroundColor Yellow
+    if (Test-Path $apierr) { Get-Content $apierr -Tail 25 }
+    if (Test-Path $apilog) { Get-Content $apilog -Tail 25 }
+    Fail "A API nao arrancou (ver acima). Costuma ser uma dependencia em falta no .venv."
+}
+if ([int]$h.api_build -lt $EXPECTED_BUILD) {
+    Fail "API com codigo antigo (api_build=$($h.api_build), esperado >= $EXPECTED_BUILD). Fizeste 'git pull'?"
+}
+Write-Host "API OK (api_build=$($h.api_build))." -ForegroundColor Green
+
+# --- 3. Tunel Cloudflare -------------------------------------------------
 $cf = (Get-Command cloudflared -ErrorAction SilentlyContinue).Source
 if (-not $cf) {
     $cf = Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet\Packages\Cloudflare.cloudflared*" `
         -Recurse -Filter cloudflared.exe -ErrorAction SilentlyContinue |
         Select-Object -First 1 -ExpandProperty FullName
 }
-if (-not $cf) {
-    Write-Host "cloudflared não encontrado — instala com: winget install Cloudflare.cloudflared" -ForegroundColor Red
-    exit 1
-}
-$log = Join-Path $env:TEMP "padelpro_tunnel.log"
-Remove-Item $log -ErrorAction SilentlyContinue
-Write-Host "A abrir túnel Cloudflare..." -ForegroundColor Cyan
+if (-not $cf) { Fail "cloudflared nao encontrado. Instala:  winget install Cloudflare.cloudflared" }
+
+$tlog = Join-Path $env:TEMP "padelpro_tunnel.log"
+Remove-Item $tlog -ErrorAction SilentlyContinue
+Write-Host "A abrir tunel Cloudflare..." -ForegroundColor Cyan
 $tunnel = Start-Process -PassThru -WindowStyle Minimized $cf `
-    -ArgumentList "tunnel", "--url", "http://127.0.0.1:8010", "--logfile", $log
+    -ArgumentList "tunnel", "--url", "http://127.0.0.1:8010", "--logfile", $tlog
 
 $url = $null
-$tries = 0
-while (-not $url -and $tries -lt 30) {
+for ($i = 0; $i -lt 30 -and -not $url; $i++) {
     Start-Sleep -Seconds 2
-    if (Test-Path $log) {
-        $m = Select-String -Path $log -Pattern "https://[a-z0-9-]+\.trycloudflare\.com" | Select-Object -First 1
+    if (Test-Path $tlog) {
+        $m = Select-String -Path $tlog -Pattern "https://[a-z0-9-]+\.trycloudflare\.com" | Select-Object -First 1
         if ($m) { $url = $m.Matches[0].Value }
     }
-    $tries++
 }
-if (-not $url) {
-    Write-Host "Não consegui obter o URL do túnel (vê $log)." -ForegroundColor Red
-    exit 1
-}
-Write-Host "Túnel: $url" -ForegroundColor Green
+if (-not $url) { Fail "Nao consegui o URL do tunel (ver $tlog)." }
+Write-Host "Tunel: $url" -ForegroundColor Green
 
-# --- 3. Vercel ------------------------------------------------------------
-& "$PSScriptRoot\set_api_url.ps1" -Url $url
+# --- 4. Confirmar que o tunel chega mesmo a API --------------------------
+$pubOk = $false
+for ($i = 0; $i -lt 12 -and -not $pubOk; $i++) {
+    try {
+        $h2 = Invoke-RestMethod "$url/health" -TimeoutSec 5
+        if ($h2.api_build) { $pubOk = $true }
+    } catch {}
+    if (-not $pubOk) { Start-Sleep -Seconds 2 }
+}
+if (-not $pubOk) { Fail "O tunel abriu mas /health nao responde atraves dele." }
+Write-Host "Tunel chega a API OK." -ForegroundColor Green
+
+# --- 5. Apontar o Vercel para o tunel + redeploy -------------------------
+try {
+    & "$PSScriptRoot\set_api_url.ps1" -Url $url
+} catch {
+    Fail "O redeploy do Vercel falhou: $($_.Exception.Message)"
+}
 
 Write-Host ""
-Write-Host "=============================================================" -ForegroundColor Yellow
-Write-Host " Pronto! Manda ao teu amigo: https://padelpro-dashboard.vercel.app" -ForegroundColor Yellow
-Write-Host " (clips até ~95 MB; análise: marcar a checkbox e calibrar o campo dele em /calibrate)" -ForegroundColor Yellow
-Write-Host " Mantém este PC ligado. Para terminar: CTRL+C + repor_api_render.ps1" -ForegroundColor Yellow
-Write-Host "=============================================================" -ForegroundColor Yellow
+Write-Host "=============================================================" -ForegroundColor Green
+Write-Host " PRONTO. Partilha com a equipa:" -ForegroundColor Green
+Write-Host "   Site:   https://padelpro-dashboard.vercel.app" -ForegroundColor Green
+Write-Host "   Codigo: $code" -ForegroundColor Green
+Write-Host " O redeploy do Vercel demora ~1-2 min a ficar Ready." -ForegroundColor Green
+Write-Host " Mantem esta janela aberta. Terminar: CTRL+C" -ForegroundColor Green
+Write-Host "=============================================================" -ForegroundColor Green
 
 Wait-Process -Id $tunnel.Id
