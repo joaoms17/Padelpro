@@ -40,7 +40,12 @@ STROKE_CLASSES: list[StrokeType] = [
 
 WINDOW_SIZE = 16   # frames in the sliding window
 N_KEYPOINTS = 17
-FEATURE_DIM = N_KEYPOINTS * 2   # flattened (x, y) — normalised to bbox
+FEATURE_DIM = N_KEYPOINTS * 2       # flattened (x, y) — normalised to bbox
+FEATURE_DIM_VEL = N_KEYPOINTS * 4   # (x, y) + per-frame velocity (dx, dy)
+
+FeatureMode = Literal["pos", "posvel"]
+
+FEATURE_DIMS: dict[str, int] = {"pos": FEATURE_DIM, "posvel": FEATURE_DIM_VEL}
 
 
 # ---------------------------------------------------------------------------
@@ -60,6 +65,81 @@ def pose_to_features(pose: Pose) -> np.ndarray:
     kps[:, 0] = (kps[:, 0] - pose.bbox.x1) / bw
     kps[:, 1] = (kps[:, 1] - pose.bbox.y1) / bh
     return kps.flatten().astype(np.float32)
+
+
+def window_to_features(window: list[Pose], mode: FeatureMode = "pos") -> np.ndarray:
+    """
+    Build the (D, T) feature matrix for a pose window.
+
+    mode="pos"    : bbox-normalised keypoint positions (D=34).
+    mode="posvel" : positions + per-frame velocities (D=68). Velocity carries
+                    the dynamics that separate e.g. bandeja (slow, controlled)
+                    from víbora/smash (fast wrist) — positions alone can't.
+    """
+    pos = np.stack([pose_to_features(p) for p in window], axis=1)  # (34, T)
+    if mode == "pos":
+        return pos
+    vel = np.zeros_like(pos)
+    if pos.shape[1] > 1:
+        vel[:, 1:] = np.diff(pos, axis=1)
+    return np.concatenate([pos, vel], axis=0)  # (68, T)
+
+
+def add_velocity_features(seq_features: np.ndarray) -> np.ndarray:
+    """(34, T) position features → (68, T) position+velocity (training helper)."""
+    vel = np.zeros_like(seq_features)
+    if seq_features.shape[1] > 1:
+        vel[:, 1:] = np.diff(seq_features, axis=1)
+    return np.concatenate([seq_features, vel], axis=0)
+
+
+# ---------------------------------------------------------------------------
+# Impact-moment estimation from wrist dynamics
+# ---------------------------------------------------------------------------
+
+def _wrist_speeds(window: list[Pose]) -> np.ndarray:
+    """
+    Per-frame speed of the faster wrist, in bbox-heights/frame (scale
+    invariant: same threshold works for near and far players). Index i is
+    the speed between window[i] and window[i+1]; length = len(window) - 1.
+    """
+    if len(window) < 2:
+        return np.zeros(0, dtype=np.float32)
+    speeds = np.zeros(len(window) - 1, dtype=np.float32)
+    for i in range(len(window) - 1):
+        a, b = window[i], window[i + 1]
+        scale = 1.0
+        if b.bbox is not None:
+            scale = max(1.0, b.bbox.y2 - b.bbox.y1)
+        best = 0.0
+        for kp in (KP_LEFT_WRIST, KP_RIGHT_WRIST):
+            conf = min(float(a.scores[kp]), float(b.scores[kp]))
+            if conf <= 0.0:
+                continue
+            d = float(np.hypot(
+                b.keypoints[kp, 0] - a.keypoints[kp, 0],
+                b.keypoints[kp, 1] - a.keypoints[kp, 1],
+            )) / scale
+            best = max(best, d)
+        speeds[i] = best
+    return speeds
+
+
+def current_wrist_speed(window: list[Pose]) -> float:
+    """Wrist speed between the two most recent poses (impact proxy)."""
+    speeds = _wrist_speeds(window[-2:])
+    return float(speeds[-1]) if len(speeds) else 0.0
+
+
+def estimate_impact_index(window: list[Pose]) -> int:
+    """
+    Index (into the window) of the most likely impact frame: where the
+    dominant wrist moved fastest. Returns the last index when no signal.
+    """
+    speeds = _wrist_speeds(window)
+    if len(speeds) == 0 or speeds.max() <= 0.0:
+        return len(window) - 1
+    return int(np.argmax(speeds)) + 1   # speed[i] is motion arriving at frame i+1
 
 
 # ---------------------------------------------------------------------------
@@ -209,10 +289,12 @@ class StrokeClassifier:
         weights_path: Path | str | None = None,
         window_size: int = WINDOW_SIZE,
         device: str = "cpu",
+        feature_mode: FeatureMode = "pos",
     ) -> None:
         self.mode = mode
         self.window_size = window_size
         self.device = device
+        self.feature_mode: FeatureMode = feature_mode
         self._model = None
         self._windows: dict[int, deque[Pose]] = {}  # track_id → pose window
 
@@ -225,12 +307,25 @@ class StrokeClassifier:
 
     def _try_load_tcn(self, path: Path) -> None:
         try:
+            import json as _json
             import torch
-            model = _build_tcn_model(len(STROKE_CLASSES))
+            # Sidecar metadata (written by train_stroke_classifier.py) wins
+            # over the constructor arg so weights and features can't diverge.
+            meta_path = path.with_suffix(path.suffix + ".meta.json")
+            if meta_path.exists():
+                with open(meta_path) as f:
+                    meta = _json.load(f)
+                self.feature_mode = meta.get("feature_mode", self.feature_mode)
+            model = _build_tcn_model(
+                len(STROKE_CLASSES), FEATURE_DIMS[self.feature_mode]
+            )
             model.load_state_dict(torch.load(path, map_location=self.device))
             model.eval()
             self._model = model.to(self.device)
-            logger.info("TCN stroke classifier loaded from %s", path)
+            logger.info(
+                "TCN stroke classifier loaded from %s (features=%s)",
+                path, self.feature_mode,
+            )
         except Exception as exc:
             logger.warning("Could not load TCN weights: %s", exc)
 
@@ -252,13 +347,17 @@ class StrokeClassifier:
 
         # TCN mode
         import torch
-        feats = np.stack([pose_to_features(p) for p in window], axis=1)  # (34, T)
+        feats = window_to_features(window, self.feature_mode)  # (D, T)
         x = torch.tensor(feats[np.newaxis], dtype=torch.float32).to(self.device)
         with torch.no_grad():
             logits = self._model(x)[0]
             probs  = torch.softmax(logits, dim=-1).cpu().numpy()
         idx    = int(np.argmax(probs))
         return STROKE_CLASSES[idx], float(probs[idx])
+
+    def wrist_speed(self, track_id: int) -> float:
+        """Dominant-wrist speed at the latest frame of a track (impact proxy)."""
+        return current_wrist_speed(list(self._windows.get(track_id, [])))
 
     def reset(self, track_id: int | None = None) -> None:
         """Clear pose windows (call between points or at match start)."""
