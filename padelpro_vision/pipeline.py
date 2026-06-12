@@ -463,11 +463,21 @@ class Pipeline:
     ) -> Path:
         from padelpro_vision.analytics.analytics import compute_match_analytics
 
-        # Auto team_map: sort track IDs, assign first half to team 0
+        # Auto team_map by court side: players split at the median of their
+        # mean y — works in court metres (net at y=10) and in raw pixels.
         if team_map is None:
-            ids = sorted(track_positions.keys())
-            half = max(1, len(ids) // 2)
-            team_map = {tid: (0 if i < half else 1) for i, tid in enumerate(ids)}
+            mean_ys = {
+                tid: float(np.mean([p[2] for p in pts]))
+                for tid, pts in track_positions.items() if pts
+            }
+            if mean_ys:
+                cut = float(np.median(list(mean_ys.values())))
+                team_map = {
+                    tid: (0 if y < cut or len(mean_ys) == 1 else 1)
+                    for tid, y in mean_ys.items()
+                }
+            else:
+                team_map = {}
 
         result = compute_match_analytics(match_id, track_positions, shot_events, team_map)
 

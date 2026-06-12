@@ -447,6 +447,16 @@ export async function getFleetQuality(): Promise<FleetQuality> {
 
 // ---- Court calibration ----
 
+export async function autoDetectCorners(
+  image: Blob
+): Promise<{ points: number[][]; quality: { rating: string; reprojection_error_px: number | null } }> {
+  const fd = new FormData();
+  fd.append("file", image, "frame.jpg");
+  const r = await apiFetch(`${BASE}/calibrate/auto`, { method: "POST", body: fd });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
 export async function saveCalibration(
   court_id: string,
   points: number[][],
