@@ -20,29 +20,74 @@ export default function CalibratePage() {
   const [courtId, setCourtId] = useState("court1");
   const [points, setPoints] = useState<Pt[]>([]);
   const [ready, setReady] = useState(false);
+  const [loadingFrame, setLoadingFrame] = useState(false);
+  const [videoErr, setVideoErr] = useState("");
   const [status, setStatus] = useState("");
   const [saved, setSaved] = useState(false);
 
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadingRef = useRef(false);
+
   function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    if (!file || !videoRef.current) return;
-    setPoints([]); setReady(false); setSaved(false); setStatus("");
-    videoRef.current.src = URL.createObjectURL(file);
+    const v = videoRef.current;
+    if (!file || !v) return;
+    setPoints([]); setReady(false); setSaved(false); setStatus(""); setVideoErr("");
+    setLoadingFrame(true);
+    loadingRef.current = true;
+    v.src = URL.createObjectURL(file);
+    v.load();
+    // Browsers podem adiar o carregamento de <video> escondido; play() força o
+    // pipeline de decode a arrancar (permitido porque está muted).
+    v.play().catch(() => { /* autoplay bloqueado — o load() acima ainda serve */ });
+
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      if (loadingRef.current) {
+        loadingRef.current = false;
+        setLoadingFrame(false);
+        setVideoErr(
+          "O vídeo não carregou. Verifica que é um MP4 (H.264) — vídeos de " +
+          "telemóvel funcionam — e tenta de novo.",
+        );
+      }
+    }, 12000);
   }
 
-  function onLoaded() {
+  function onLoadedMeta() {
     const v = videoRef.current;
     if (!v) return;
-    v.currentTime = Math.min(10, (v.duration || 20) / 2);
+    try {
+      v.currentTime = Math.min(10, (v.duration || 20) / 2);
+    } catch {
+      loadingRef.current = false;
+      setLoadingFrame(false);
+      setVideoErr("Não consegui posicionar o vídeo — tenta outro ficheiro.");
+    }
   }
 
   function onSeeked() {
     const v = videoRef.current, c = canvasRef.current;
     if (!v || !c) return;
+    v.pause();
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    loadingRef.current = false;
     const w = Math.min(MAX_W, v.videoWidth);
     c.width = w;
     c.height = Math.round(w * (v.videoHeight / v.videoWidth));
+    setLoadingFrame(false);
+    setVideoErr("");
     setReady(true);
+  }
+
+  function onVideoError() {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    loadingRef.current = false;
+    setLoadingFrame(false);
+    setVideoErr(
+      "O browser não consegue ler este vídeo. Tenta um MP4 (H.264) — " +
+      "se vier do telemóvel deve funcionar diretamente.",
+    );
   }
 
   const redraw = useCallback(() => {
@@ -156,9 +201,25 @@ export default function CalibratePage() {
         </div>
       )}
 
+      {loadingFrame && (
+        <div className="flex items-center gap-2 text-sm text-blue-300">
+          <span className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+          A extrair uma imagem do vídeo…
+        </div>
+      )}
+      {videoErr && <p className="text-sm text-red-400">{videoErr}</p>}
       {status && <p className={`text-sm ${saved ? "text-green-400" : "text-gray-400"}`}>{status}</p>}
 
-      <video ref={videoRef} onLoadedData={onLoaded} onSeeked={onSeeked} className="hidden" muted playsInline />
+      <video
+        ref={videoRef}
+        onLoadedMetadata={onLoadedMeta}
+        onSeeked={onSeeked}
+        onError={onVideoError}
+        preload="auto"
+        className="hidden"
+        muted
+        playsInline
+      />
     </div>
   );
 }
