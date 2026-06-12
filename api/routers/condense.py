@@ -229,6 +229,43 @@ def _analyze_via_modal(url: str, video: Path, court_id: str, deep: bool) -> dict
     return r.json()
 
 
+def _persist_for_review(job_id: str, report: dict) -> None:
+    """
+    Copy the analysis artifacts to data/output/{job_id}/ so the review page
+    treats this clip like a full-pipeline match: shot events + pose windows
+    (when the deep pass produced them) — making corrections trainable.
+    Survives the upload-dir cleanup that runs right after analysis.
+    """
+    try:
+        import json
+        out_dir = Path("data/output") / job_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        shots = report.get("shots", [])
+        events = [
+            {
+                "match_id": job_id,
+                "player_id": s.get("player_id"),
+                "rally_id": s.get("rally", -1),
+                "ts_ms": float(s.get("t_s", 0.0)) * 1000.0,
+                "stroke_type": s.get("type", "other"),
+                "confidence": 1.0,
+                "frame_idx": s.get("frame_idx"),
+                "court_x": (s.get("pos") or [None, None])[0],
+                "court_y": (s.get("pos") or [None, None])[1],
+            }
+            for s in shots
+        ]
+        with open(out_dir / f"{job_id}_shot_events.json", "w") as f:
+            json.dump(events, f)
+
+        pw_src = _UPLOAD_DIR / job_id / "pose_windows.json"
+        if pw_src.exists():
+            shutil.copy(pw_src, out_dir / f"{job_id}_pose_windows.json")
+    except Exception:
+        logger.exception("Could not persist review artifacts for job %s", job_id)
+
+
 def _run_local_analysis(
     job_id: str, in_path: Path, court_id: str, deep: bool, segs: list
 ) -> None:
@@ -250,6 +287,7 @@ def _run_local_analysis(
                 progress_cb=_progress, phase_cb=_phase,
             )
             _jobs[job_id]["report"] = report
+            _persist_for_review(job_id, report)
         else:
             _jobs[job_id]["report_error"] = (
                 "Este servidor não tem o motor de análise (torch) instalado."
