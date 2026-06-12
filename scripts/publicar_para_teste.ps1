@@ -8,6 +8,10 @@
 # Mantem esta janela aberta enquanto durar o teste (o tunel vive aqui).
 # Terminar: CTRL+C e depois .\scripts\repor_api_render.ps1
 
+# Por defeito a API fica ABERTA (o URL do tunel e aleatorio e suficiente para
+# um teste curto). Para exigir codigo de acesso:  .\scripts\publicar_para_teste.ps1 -ComCodigo
+param([switch]$ComCodigo)
+
 $root   = Split-Path $PSScriptRoot -Parent
 $python = Join-Path $root ".venv\Scripts\python.exe"
 $EXPECTED_BUILD = 2
@@ -35,17 +39,22 @@ Start-Sleep -Seconds 1
 
 # --- 2. Arrancar API nova ------------------------------------------------
 $env:API_MAX_UPLOAD_MB = "95"
-# Codigo de acesso ESTAVEL: guardado num ficheiro local para nao mudar a cada
-# arranque (era o que confundia -- o site pedia um codigo diferente sempre).
-$codeFile = Join-Path $root ".padelpro_access_code"
-if (-not $env:PADELPRO_ACCESS_CODE -and (Test-Path $codeFile)) {
-    $env:PADELPRO_ACCESS_CODE = (Get-Content $codeFile -Raw).Trim()
+$code = $null
+if ($ComCodigo) {
+    # Codigo ESTAVEL guardado em ficheiro (nao muda a cada arranque).
+    $codeFile = Join-Path $root ".padelpro_access_code"
+    if (-not $env:PADELPRO_ACCESS_CODE -and (Test-Path $codeFile)) {
+        $env:PADELPRO_ACCESS_CODE = (Get-Content $codeFile -Raw).Trim()
+    }
+    if (-not $env:PADELPRO_ACCESS_CODE) {
+        $env:PADELPRO_ACCESS_CODE = -join ((48..57) + (97..122) | Get-Random -Count 8 | ForEach-Object { [char]$_ })
+        Set-Content -Path $codeFile -Value $env:PADELPRO_ACCESS_CODE -NoNewline
+    }
+    $code = $env:PADELPRO_ACCESS_CODE
+} else {
+    # API aberta: limpa qualquer codigo herdado para a API nao o exigir.
+    Remove-Item Env:\PADELPRO_ACCESS_CODE -ErrorAction SilentlyContinue
 }
-if (-not $env:PADELPRO_ACCESS_CODE) {
-    $env:PADELPRO_ACCESS_CODE = -join ((48..57) + (97..122) | Get-Random -Count 8 | ForEach-Object { [char]$_ })
-    Set-Content -Path $codeFile -Value $env:PADELPRO_ACCESS_CODE -NoNewline
-}
-$code   = $env:PADELPRO_ACCESS_CODE
 $apilog = Join-Path $env:TEMP "padelpro_api.log"
 $apierr = Join-Path $env:TEMP "padelpro_api.err.log"
 Remove-Item $apilog, $apierr -ErrorAction SilentlyContinue
@@ -128,8 +137,12 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host ""
 Write-Host "=============================================================" -ForegroundColor Green
 Write-Host " PRONTO. Partilha com a equipa:" -ForegroundColor Green
-Write-Host "   Site:   https://padelpro-dashboard.vercel.app" -ForegroundColor Green
-Write-Host "   Codigo: $code" -ForegroundColor Green
+Write-Host "   https://padelpro-dashboard.vercel.app" -ForegroundColor Green
+if ($code) {
+    Write-Host "   Codigo de acesso: $code" -ForegroundColor Green
+} else {
+    Write-Host "   (API aberta -- sem codigo. Para exigir codigo: -ComCodigo)" -ForegroundColor DarkGray
+}
 Write-Host " O redeploy do Vercel demora ~1-2 min a ficar Ready." -ForegroundColor Green
 Write-Host " Mantem esta janela aberta. Terminar: CTRL+C" -ForegroundColor Green
 Write-Host "=============================================================" -ForegroundColor Green
