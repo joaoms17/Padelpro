@@ -70,9 +70,43 @@ async def run_pipeline(
 
     court_id = job.get("court_id", "unknown")
     _jobs[match_id]["status"] = "processing"
+    _jobs[match_id]["last_request"] = body   # kept for /retry
+    _jobs[match_id].pop("error", None)
 
     background_tasks.add_task(
         _run_pipeline_bg, match_id, video_path, court_id, body
+    )
+    return MatchStatus(match_id=match_id, status="processing")
+
+
+@router.post("/{match_id}/retry", response_model=MatchStatus)
+async def retry_pipeline(match_id: str, background_tasks: BackgroundTasks):
+    """
+    Re-run the analysis with the same options as the last run (defaults with
+    everything on when there was none). Useful after a failed run — the
+    uploaded video is reused, no new upload needed.
+    """
+    if match_id not in _jobs:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    job = _jobs[match_id]
+    if job.get("status") == "processing":
+        raise HTTPException(status_code=409, detail="Análise ainda a decorrer.")
+    video_path = job.get("video_path")
+    if not video_path or not Path(video_path).exists():
+        raise HTTPException(
+            status_code=400,
+            detail="O vídeo já não está disponível — carrega-o de novo.",
+        )
+
+    req = job.get("last_request") or RunPipelineRequest(
+        match_id=match_id, segment=True, pose=True, analytics=True
+    )
+    job["status"] = "processing"
+    job.pop("error", None)
+    job["last_request"] = req
+
+    background_tasks.add_task(
+        _run_pipeline_bg, match_id, video_path, job.get("court_id", "unknown"), req
     )
     return MatchStatus(match_id=match_id, status="processing")
 

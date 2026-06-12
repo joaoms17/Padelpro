@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { getStatus, getPlayerStats, type MatchStatus, type PlayerStats } from "@/lib/api";
+import { getStatus, getPlayerStats, retryAnalysis, type MatchStatus, type PlayerStats } from "@/lib/api";
 import { PlayerCard } from "@/components/PlayerCard";
 import { StatusBadge } from "@/components/StatusBadge";
 
@@ -56,8 +56,14 @@ export default function MatchDetailPage({ params }: { params: { id: string } }) 
       )}
 
       {status?.error_message && (
-        <div className="bg-red-950/50 border border-red-800 rounded-xl px-5 py-4 text-red-300 text-sm">
-          {status.error_message}
+        <div className="bg-red-950/50 border border-red-800 rounded-xl px-5 py-4 flex items-center gap-4 flex-wrap">
+          <span className="text-red-300 text-sm flex-1 min-w-0">{status.error_message}</span>
+          <button
+            onClick={() => retryAnalysis(matchId).then(refresh).catch((e) => alert(String(e)))}
+            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-200 rounded-lg text-sm font-medium whitespace-nowrap"
+          >
+            🔁 Reiniciar análise
+          </button>
         </div>
       )}
 
