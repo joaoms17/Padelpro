@@ -49,6 +49,17 @@ async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
   return r;
 }
 
+// ---- API version handshake (ApiBanner) ----
+// Bump together with API_BUILD in api/main.py when the dashboard starts
+// depending on new endpoints.
+export const EXPECTED_API_BUILD = 2;
+
+export async function getApiHealth(): Promise<{ status: string; api_build?: number }> {
+  const r = await fetch(`${BASE}/health`);   // /health is unauthenticated
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
 export interface MatchStatus {
   match_id: string;
   status: string;
