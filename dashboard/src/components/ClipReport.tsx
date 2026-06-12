@@ -11,7 +11,7 @@ function CourtHeatmap({ p }: { p: PlayerReport }) {
   const sl1 = (6.95 / 20) * L;        // far service line
   const sl2 = L - sl1;                // near service line
   return (
-    <svg viewBox={`-4 -4 ${W + 8} ${L + 8}`} className="w-full max-w-[140px] mx-auto">
+    <svg viewBox={`-4 -4 ${W + 8} ${L + 8}`} className="w-full block">
       {p.heatmap.map((row, r) =>
         row.map((v, c) =>
           v > 0.02 ? (
@@ -60,28 +60,28 @@ function ZoneBar({ label, pct, color }: { label: string; pct: number; color: str
 
 function Num({ label, value, unit }: { label: string; value: string | number; unit?: string }) {
   return (
-    <div>
-      <div className="text-base font-bold text-white leading-tight">
+    <div className="min-w-0">
+      <div className="text-base font-bold text-white leading-tight whitespace-nowrap">
         {value}
         {unit && <span className="text-xs font-normal text-gray-500"> {unit}</span>}
       </div>
-      <div className="text-[11px] text-gray-500">{label}</div>
+      <div className="text-[11px] text-gray-500 whitespace-nowrap">{label}</div>
     </div>
   );
 }
 
 function PlayerCard({ p }: { p: PlayerReport }) {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="font-semibold text-white">{p.label}</div>
-        <div className="text-[11px] text-gray-500">
-          {p.team === "longe" ? "campo de cima" : "campo de baixo"} · {p.side === "esq" ? "esquerda" : "direita"}
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3 min-w-0">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <div className="font-semibold text-white whitespace-nowrap">{p.label}</div>
+        <div className="text-[11px] text-gray-500 whitespace-nowrap">
+          {p.team === "longe" ? "campo de cima" : "campo de baixo"} · {p.side === "esq" ? "esq." : "dir."}
         </div>
       </div>
-      <div className="flex gap-3">
-        <div className="flex-1 space-y-3">
-          <div className="grid grid-cols-2 gap-x-2 gap-y-2">
+      <div className="flex gap-4 min-w-0">
+        <div className="flex-1 min-w-0 space-y-3">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-2">
             <Num label="distância" value={p.distance_m} unit="m" />
             <Num label="pancadas*" value={p.hits} />
             <Num label="vel. média" value={p.avg_speed_ms} unit="m/s" />
@@ -93,7 +93,7 @@ function PlayerCard({ p }: { p: PlayerReport }) {
             <ZoneBar label="Fundo" pct={p.zones.fundo_pct} color="bg-violet-500" />
           </div>
         </div>
-        <div className="w-[110px] flex-shrink-0">
+        <div className="w-[88px] sm:w-[104px] flex-shrink-0 self-start">
           <CourtHeatmap p={p} />
         </div>
       </div>
@@ -118,7 +118,7 @@ export function ClipReportView({ report }: { report: ClipReport }) {
         </div>
       )}
 
-      <div className="grid grid-cols-4 gap-2 text-center">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
         {[
           ["Tempo útil", `${Math.round(report.clip.useful_s)}s`, `${report.clip.useful_pct}%`],
           ["Rallies", String(report.clip.rallies), ""],
