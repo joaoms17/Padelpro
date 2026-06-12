@@ -63,8 +63,8 @@ export default function HomePage() {
           <HomeCard href="/matches" icon="🎾" title="Jogos analisados">
             Histórico de análises completas, com clips e montagens por pancada.
           </HomeCard>
-          <HomeCard href="/players" icon="👤" title="Jogadores">
-            Progressão de cada jogador ao longo dos jogos.
+          <HomeCard href="/qualidade" icon="📈" title="Qualidade do modelo">
+            Saúde da deteção e tracking em todos os jogos processados.
           </HomeCard>
           <HomeCard href="/calibrate" icon="📐" title="Calibrar campo">
             Clica os 4 cantos do campo uma vez por câmara — ativa posições em metros.
