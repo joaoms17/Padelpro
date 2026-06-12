@@ -20,51 +20,81 @@ router = APIRouter(prefix="/calibrate", tags=["calibrate"])
 logger = logging.getLogger(__name__)
 
 
-@router.post("/extract-frame")
-async def extract_frame(file: UploadFile = File(...)):
+def _extract_frame_ffmpeg(raw: bytes, suffix: str) -> tuple[bytes, int, int]:
     """
-    Extract a single frame (mid-video) server-side with OpenCV/ffmpeg, which
-    decodes formats the browser can't (HEVC/H.265 from iPhone/WhatsApp). Returns
-    a JPEG; the real frame size travels in X-Frame-Width/Height so the page can
-    map clicks back to the original video pixels.
+    Pull one frame from a video with ffmpeg (decodes HEVC/H.265 from
+    iPhone/WhatsApp, which OpenCV's bundled codecs often can't). Runs as a
+    subprocess with a timeout so it can never hang the API. Returns
+    (jpeg_bytes, width, height).
     """
     import os
+    import shutil
+    import subprocess
     import tempfile
 
     import cv2
+    import numpy as np
+
+    from padelpro_vision.io.ffmpeg import ensure_ffmpeg
+
+    ensure_ffmpeg()
+    ff = shutil.which("ffmpeg") or "ffmpeg"
+
+    tmp_in = tmp_out = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as t:
+            t.write(raw)
+            tmp_in = t.name
+        tmp_out = tmp_in + ".jpg"
+
+        # Try a frame ~3 s in (avoids black intros); fall back to the first.
+        for ss in ("3", "0"):
+            cmd = [ff, "-y", "-ss", ss, "-i", tmp_in,
+                   "-frames:v", "1", "-q:v", "2", tmp_out]
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=120)
+            except subprocess.TimeoutExpired:
+                continue
+            if os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
+                break
+
+        if not (tmp_out and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0):
+            raise HTTPException(status_code=400, detail="Não consegui extrair um frame do vídeo.")
+
+        data = open(tmp_out, "rb").read()
+        img = cv2.imdecode(np.frombuffer(data, np.uint8), cv2.IMREAD_COLOR)
+        if img is None:
+            raise HTTPException(status_code=400, detail="Frame extraído mas ilegível.")
+        h, w = img.shape[:2]
+        return data, w, h
+    finally:
+        for p in (tmp_in, tmp_out):
+            if p and os.path.exists(p):
+                os.unlink(p)
+
+
+@router.post("/extract-frame")
+async def extract_frame(file: UploadFile = File(...)):
+    """
+    Extract a single frame server-side (ffmpeg → handles any codec the browser
+    can't). The heavy work runs in a thread so it never blocks the event loop.
+    Real frame size travels in X-Frame-Width/Height for click mapping.
+    """
+    import asyncio
+    from pathlib import Path
 
     raw = await file.read()
-    tmp_path = None
-    try:
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
-            tmp.write(raw)
-            tmp_path = tmp.name
-        cap = cv2.VideoCapture(tmp_path)
-        if not cap.isOpened():
-            raise HTTPException(status_code=400, detail="Não consegui abrir o vídeo.")
-        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
-        if total > 1:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, total // 2)
-        ok, frame = cap.read()
-        cap.release()
-        if not ok or frame is None:
-            raise HTTPException(status_code=400, detail="Não consegui ler um frame do vídeo.")
-        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
-        if not ok:
-            raise HTTPException(status_code=500, detail="Falha a codificar o frame.")
-        h, w = frame.shape[:2]
-        return Response(
-            content=buf.tobytes(),
-            media_type="image/jpeg",
-            headers={
-                "X-Frame-Width": str(w),
-                "X-Frame-Height": str(h),
-                "Access-Control-Expose-Headers": "X-Frame-Width, X-Frame-Height",
-            },
-        )
-    finally:
-        if tmp_path and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
+    suffix = Path(file.filename or "video.mp4").suffix or ".mp4"
+    data, w, h = await asyncio.to_thread(_extract_frame_ffmpeg, raw, suffix)
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={
+            "X-Frame-Width": str(w),
+            "X-Frame-Height": str(h),
+            "Access-Control-Expose-Headers": "X-Frame-Width, X-Frame-Height",
+        },
+    )
 
 
 @router.post("/auto")
