@@ -16,11 +16,17 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <span className="text-brand text-xl">●</span>
             PadelPro
           </Link>
-          <div className="flex gap-4 text-sm">
+          <div className="flex gap-4 text-sm items-center flex-wrap">
+            <Link
+              href="/"
+              className="px-3 py-1 bg-brand hover:bg-brand-dark text-white rounded-lg font-medium transition-colors"
+            >
+              ⚡ Analisar
+            </Link>
             <NavLink href="/matches">Jogos</NavLink>
             <NavLink href="/players">Jogadores</NavLink>
             <NavLink href="/label">Etiquetar</NavLink>
-            <NavLink href="/calibrate">Calibrar campo</NavLink>
+            <NavLink href="/calibrate">Calibrar</NavLink>
           </div>
         </nav>
         <main className="flex-1 px-6 py-8 max-w-6xl mx-auto w-full">

@@ -5,12 +5,10 @@ import Link from "next/link";
 import { listMatches, type MatchStatus } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { UploadForm } from "@/components/UploadForm";
-import { CondenseForm } from "@/components/CondenseForm";
 
 export default function MatchesPage() {
   const [matches, setMatches] = useState<MatchStatus[]>([]);
   const [showUpload, setShowUpload] = useState(false);
-  const [showCondense, setShowCondense] = useState(false);
 
   const refresh = useCallback(() => {
     listMatches().then(setMatches).catch(() => {});
@@ -24,37 +22,30 @@ export default function MatchesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">Jogos</h1>
-        <div className="flex gap-2">
-          <button
-            onClick={() => { setShowCondense(!showCondense); setShowUpload(false); }}
-            className="px-4 py-2 bg-brand hover:bg-brand-dark text-white rounded-lg text-sm font-medium transition-colors"
-          >
-            {showCondense ? "Fechar" : "⚡ Analisar jogo"}
-          </button>
-          <button
-            onClick={() => { setShowUpload(!showUpload); setShowCondense(false); }}
-            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 rounded-lg text-sm font-medium transition-colors"
-          >
-            {showUpload ? "Fechar" : "Pipeline completo (lento)"}
-          </button>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Jogos analisados</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Análises completas (frame a frame, com vídeo anotado e clips).{" "}
+            Para resultados em minutos usa{" "}
+            <Link href="/" className="text-brand hover:underline">⚡ Analisar jogo</Link>.
+          </p>
         </div>
+        <button
+          onClick={() => setShowUpload(!showUpload)}
+          className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 rounded-lg text-sm font-medium transition-colors"
+        >
+          {showUpload ? "Fechar" : "+ Nova análise completa"}
+        </button>
       </div>
-
-      {showCondense && (
-        <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-2xl">
-          <h2 className="text-lg font-semibold text-white mb-1">⚡ Analisar jogo</h2>
-          <CondenseForm />
-        </div>
-      )}
 
       {showUpload && (
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-md">
-          <h2 className="text-lg font-semibold text-white mb-1">Pipeline completo</h2>
+          <h2 className="text-lg font-semibold text-white mb-1">Análise completa</h2>
           <p className="text-xs text-yellow-400/80 mb-4">
-            ⚠️ Processa o vídeo inteiro frame a frame (vídeo anotado incluído) — demora
-            ~20 min para 4 min de vídeo. Para resultados rápidos usa “⚡ Analisar jogo”.
+            ⚠️ Processa o vídeo inteiro frame a frame — demora ~20 min para 4 min de
+            vídeo. É também o único modo que gera amostras de treino a partir da
+            revisão de pancadas.
           </p>
           <UploadForm />
         </div>
@@ -63,7 +54,11 @@ export default function MatchesPage() {
       {matches.length === 0 ? (
         <div className="text-center py-16 text-gray-500">
           <div className="text-4xl mb-3">🎾</div>
-          <p>Ainda não há jogos. Usa “⚡ Analisar jogo” para começar.</p>
+          <p>
+            Ainda não há análises completas.{" "}
+            <Link href="/" className="text-brand hover:underline">Analisa um jogo</Link>{" "}
+            ou inicia uma análise completa acima.
+          </p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -78,7 +73,9 @@ export default function MatchesPage() {
                 <StatusBadge status={m.status} />
               </div>
               {m.status === "done" && (
-                <span className="text-xs text-gray-500 group-hover:text-gray-300 transition-colors">Ver análise →</span>
+                <span className="text-xs text-gray-500 group-hover:text-gray-300 transition-colors">
+                  Ver análise →
+                </span>
               )}
               {m.error_message && (
                 <span className="text-xs text-red-400 truncate max-w-xs">{m.error_message}</span>
