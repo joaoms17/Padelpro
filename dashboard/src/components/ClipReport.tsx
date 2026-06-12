@@ -2,48 +2,11 @@
 
 import Link from "next/link";
 import type { ClipReport, PlayerReport } from "@/lib/api";
+import { HeatmapGrid } from "./HeatmapGrid";
 
 /** Vertical padel court (10m × 20m) with a player's occupancy heatmap. */
 function CourtHeatmap({ p }: { p: PlayerReport }) {
-  const rows = p.heatmap.length || 20;
-  const cols = p.heatmap[0]?.length || 10;
-  const W = 100, L = 200;
-  const sl1 = (6.95 / 20) * L;        // far service line
-  const sl2 = L - sl1;                // near service line
-  return (
-    <svg viewBox={`-4 -4 ${W + 8} ${L + 8}`} className="w-full block">
-      {p.heatmap.map((row, r) =>
-        row.map((v, c) =>
-          v > 0.02 ? (
-            <rect
-              key={`${r}-${c}`}
-              x={(c * W) / cols}
-              y={(r * L) / rows}
-              width={W / cols}
-              height={L / rows}
-              fill="#1D9E75"
-              opacity={0.15 + 0.85 * v}
-            />
-          ) : null,
-        ),
-      )}
-      <rect x={0} y={0} width={W} height={L} fill="none" stroke="#4b5563" strokeWidth={2} />
-      <line x1={0} y1={L / 2} x2={W} y2={L / 2} stroke="#9ca3af" strokeWidth={2.5} />
-      <line x1={0} y1={sl1} x2={W} y2={sl1} stroke="#4b5563" strokeWidth={1.2} />
-      <line x1={0} y1={sl2} x2={W} y2={sl2} stroke="#4b5563" strokeWidth={1.2} />
-      <line x1={W / 2} y1={sl1} x2={W / 2} y2={sl2} stroke="#4b5563" strokeWidth={1.2} />
-      {p.mean_pos && (
-        <circle
-          cx={(p.mean_pos[0] / 10) * W}
-          cy={(p.mean_pos[1] / 20) * L}
-          r={5}
-          fill="#fff"
-          stroke="#1D9E75"
-          strokeWidth={2.5}
-        />
-      )}
-    </svg>
-  );
+  return <HeatmapGrid grid={p.heatmap} marker={p.mean_pos} />;
 }
 
 function ZoneBar({ label, pct, color }: { label: string; pct: number; color: string }) {
