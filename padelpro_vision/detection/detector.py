@@ -182,10 +182,14 @@ class TorchvisionDetector(BaseDetector):
         score_thr: float = 0.5,
         device: str = "cpu",
         model_name: str = "fasterrcnn_mobilenet_v3_large_fpn",
+        min_size: int | None = None,
+        target_label: int = 1,
     ) -> None:
         self.score_thr = score_thr
         self.device = device
         self.model_name = model_name
+        self.min_size = min_size       # smaller → faster inference, lower accuracy
+        self.target_label = target_label  # COCO: 1=person, 37=sports ball
         self._model = None
         self._torch = None
         self._try_load()
@@ -204,7 +208,11 @@ class TorchvisionDetector(BaseDetector):
             return
 
         self._torch = torch
-        self._model = builder(weights="DEFAULT")
+        kwargs: dict = {"weights": "DEFAULT"}
+        if self.min_size:
+            kwargs["min_size"] = self.min_size
+            kwargs["max_size"] = int(self.min_size * 16 / 9) + 1
+        self._model = builder(**kwargs)
         self._model.eval().to(self.device)
         logger.info("Torchvision detector '%s' loaded on %s.", self.model_name, self.device)
 
@@ -223,7 +231,7 @@ class TorchvisionDetector(BaseDetector):
         labels = out["labels"].cpu().numpy()
         boxes: list[PlayerBox] = []
         for bbox, score, label in zip(bboxes, scores, labels):
-            if int(label) == 1 and score >= self.score_thr:  # COCO person
+            if int(label) == self.target_label and score >= self.score_thr:
                 boxes.append(PlayerBox(
                     float(bbox[0]), float(bbox[1]),
                     float(bbox[2]), float(bbox[3]),

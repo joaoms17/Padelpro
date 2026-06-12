@@ -1,12 +1,15 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import {
   uploadForCondense,
   getCondenseStatus,
+  getCondenseCapabilities,
   condenseDownloadUrl,
   type CondenseStatus,
 } from "@/lib/api";
+import { ClipReportView } from "@/components/ClipReport";
 
 const MAX_MB = 150; // free-tier backend ceiling — bigger videos crash it
 
@@ -29,7 +32,16 @@ export function CondenseForm() {
   const [uploading, setUploading] = useState(false);
   const [fileMB, setFileMB] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [canAnalyze, setCanAnalyze] = useState(false);
+  const [analyze, setAnalyze] = useState(false);
+  const [courtId, setCourtId] = useState("court1");
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    getCondenseCapabilities()
+      .then((c) => setCanAnalyze(!!c.analyze))
+      .catch(() => setCanAnalyze(false));
+  }, []);
 
   const poll = useCallback(async () => {
     if (!jobId) return;
@@ -42,12 +54,15 @@ export function CondenseForm() {
     }
   }, [jobId]);
 
+  const done = job?.status === "done";
+  const failed = job?.status === "error" || !!error;
+
   useEffect(() => {
-    if (!jobId) return;
+    if (!jobId || done || failed) return;
     poll();
     const iv = setInterval(poll, 3000);
     return () => clearInterval(iv);
-  }, [jobId, poll]);
+  }, [jobId, poll, done, failed]);
 
   function onPick(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -73,7 +88,7 @@ export function CondenseForm() {
     setJobId(null);
     setUploading(true);
     try {
-      const { job_id } = await uploadForCondense(file);
+      const { job_id } = await uploadForCondense(file, { analyze, courtId });
       setJobId(job_id);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -82,8 +97,6 @@ export function CondenseForm() {
     }
   }
 
-  const done = job?.status === "done";
-  const failed = job?.status === "error" || !!error;
   const analysing = !!jobId && !done && !failed;
   const busy = uploading || analysing;
 
@@ -91,7 +104,7 @@ export function CondenseForm() {
     <form onSubmit={handleSubmit} className="space-y-4">
       <p className="text-sm text-gray-400">
         Carrega um vídeo e recebes outro só com o <span className="text-gray-200">tempo útil de jogo</span> —
-        o tempo morto entre pontos é removido. Passagem rápida (sem deteção).
+        o tempo morto entre pontos é removido.
       </p>
 
       <div>
@@ -117,6 +130,37 @@ export function CondenseForm() {
         )}
       </div>
 
+      {canAnalyze && (
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 space-y-2">
+          <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={analyze}
+              disabled={busy}
+              onChange={(e) => setAnalyze(e.target.checked)}
+              className="accent-emerald-500 w-4 h-4"
+            />
+            <span>
+              📊 Analisar jogadores <span className="text-gray-500">(beta — distâncias, zonas, heatmap, pancadas)</span>
+            </span>
+          </label>
+          {analyze && (
+            <div className="flex items-center gap-2 text-xs text-gray-400 pl-6">
+              <span>Campo:</span>
+              <input
+                value={courtId}
+                disabled={busy}
+                onChange={(e) => setCourtId(e.target.value)}
+                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white w-28"
+              />
+              <Link href="/calibrate" className="underline text-gray-500 hover:text-gray-300">
+                calibrar primeiro
+              </Link>
+            </div>
+          )}
+        </div>
+      )}
+
       {!done && (
         <button
           type="submit"
@@ -124,7 +168,7 @@ export function CondenseForm() {
           className="w-full py-2.5 bg-brand hover:bg-brand-dark disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2"
         >
           {uploading && <><Spinner /> A enviar vídeo…</>}
-          {analysing && <><Spinner /> A analisar…</>}
+          {analysing && <><Spinner /> A processar…</>}
           {!busy && "✂️ Cortar tempo útil"}
         </button>
       )}
@@ -137,7 +181,12 @@ export function CondenseForm() {
 
       {analysing && (
         <div className="flex items-center gap-3 text-sm text-blue-300">
-          <Spinner /> A analisar e cortar — pode demorar alguns minutos (1º pedido acorda o servidor)…
+          <Spinner />
+          <span>
+            {job?.phase ? `Fase: ${job.phase}` : "A analisar"}
+            {job?.phase === "análise de jogadores" && job?.progress != null && ` (${job.progress}%)`}
+            {" — pode demorar alguns minutos…"}
+          </span>
         </div>
       )}
 
@@ -161,6 +210,11 @@ export function CondenseForm() {
           >
             Cortar outro vídeo
           </button>
+
+          {job.report_error && (
+            <p className="text-sm text-yellow-400">{job.report_error}</p>
+          )}
+          {job.report && <ClipReportView report={job.report} />}
         </div>
       )}
 

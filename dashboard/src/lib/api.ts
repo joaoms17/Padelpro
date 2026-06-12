@@ -172,20 +172,67 @@ export async function getProgression(player_id: number, metric: string): Promise
 
 // ---- Condense ("useful time") ----
 
+export interface PlayerReport {
+  id: number;
+  label: string;
+  team: "longe" | "perto";
+  side: "esq" | "dir";
+  samples: number;
+  coverage_pct: number;
+  distance_m: number;
+  avg_speed_ms: number;
+  max_speed_ms: number;
+  active_s: number;
+  zones: { rede_pct: number; meio_pct: number; fundo_pct: number; frente_linha_pct: number };
+  mean_pos: [number, number];
+  heatmap: number[][];
+  hits: number;
+  hit_share_pct?: number;
+}
+
+export interface ClipReport {
+  version: number;
+  calibrated: boolean;
+  court_id: string;
+  clip: { duration_s: number; useful_s: number; useful_pct: number; rallies: number; sampled_fps: number };
+  hits: { total: number; per_min_useful: number; avg_per_rally: number; attribution: string };
+  players: PlayerReport[];
+  rallies: { i: number; start_s: number; dur_s: number; hits: number }[];
+  shots: { t_s: number; rally: number; player_id: number; pos: [number, number] | null; type: string }[];
+  timings_s: Record<string, number>;
+}
+
 export interface CondenseStatus {
   job_id: string;
   status: string;            // processing | done | error
+  phase?: string;
+  progress?: number;
   filename?: string;
   total_s?: number;
   useful_s?: number;
   useful_pct?: number;
   rallies?: number;
   error?: string;
+  report?: ClipReport;
+  report_error?: string;
 }
 
-export async function uploadForCondense(file: File): Promise<{ job_id: string }> {
+export async function getCondenseCapabilities(): Promise<{ analyze: boolean }> {
+  const r = await fetch(`${BASE}/condense/capabilities`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function uploadForCondense(
+  file: File,
+  opts?: { analyze?: boolean; courtId?: string },
+): Promise<{ job_id: string }> {
   const fd = new FormData();
   fd.append("file", file);
+  if (opts?.analyze) {
+    fd.append("analyze", "true");
+    fd.append("court_id", opts.courtId || "court1");
+  }
   const r = await fetch(`${BASE}/condense/upload`, { method: "POST", body: fd });
   if (!r.ok) throw new Error(await r.text());
   return r.json();

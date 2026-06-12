@@ -18,7 +18,7 @@ import uuid
 from pathlib import Path
 
 import cv2
-from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
@@ -36,16 +36,8 @@ _UPLOAD_DIR = Path("data/uploads")
 def _ensure_ffmpeg() -> None:
     """Best-effort: make sure ffmpeg is on PATH (Windows winget installs it
     outside the default PATH of an already-running process)."""
-    if shutil.which("ffmpeg"):
-        return
-    local = os.environ.get("LOCALAPPDATA", "")
-    if local:
-        matches = glob.glob(os.path.join(local, "Microsoft", "WinGet", "Packages", "Gyan.FFmpeg*", "**", "bin"), recursive=True)
-        for bin_dir in matches:
-            if Path(bin_dir, "ffmpeg.exe").exists():
-                os.environ["PATH"] = bin_dir + os.pathsep + os.environ["PATH"]
-                logger.info("ffmpeg located at %s and added to PATH.", bin_dir)
-                return
+    from padelpro_vision.io.ffmpeg import ensure_ffmpeg
+    ensure_ffmpeg()
 
 
 def _rm(path: Path) -> None:
@@ -73,13 +65,27 @@ def _sweep_old() -> None:
             pass
 
 
+@router.get("/capabilities")
+async def capabilities():
+    """What this backend can do. `analyze` requires torch/torchvision."""
+    try:
+        from padelpro_vision.analysis import analysis_available
+        analyze = analysis_available()
+    except Exception:
+        analyze = False
+    return {"analyze": analyze}
+
+
 @router.post("/upload")
 async def upload_and_condense(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
+    analyze: bool = Form(False),
+    court_id: str = Form("court1"),
 ):
     """Upload a video; returns a job_id to poll. The condensed video is produced
-    in the background."""
+    in the background. With analyze=true (and torch installed) a player report
+    is also computed."""
     job_id = str(uuid.uuid4())
     _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     _sweep_old()
@@ -94,12 +100,13 @@ async def upload_and_condense(
     _jobs[job_id] = {
         "job_id": job_id,
         "status": "processing",
+        "phase": "segmentação",
         "filename": file.filename,
         "output": str(out_path),
     }
-    logger.info("Condense job %s: uploaded %s", job_id, file.filename)
+    logger.info("Condense job %s: uploaded %s (analyze=%s)", job_id, file.filename, analyze)
 
-    background_tasks.add_task(_condense_bg, job_id, in_path, out_path)
+    background_tasks.add_task(_condense_bg, job_id, in_path, out_path, analyze, court_id)
     return {"job_id": job_id}
 
 
@@ -133,7 +140,10 @@ async def download_condensed(job_id: str):
     )
 
 
-def _condense_sync(job_id: str, in_path: Path, out_path: Path) -> None:
+def _condense_sync(
+    job_id: str, in_path: Path, out_path: Path,
+    analyze: bool = False, court_id: str = "court1",
+) -> None:
     from padelpro_vision.segmentation.segmentation import get_active_segments
     from padelpro_vision.io.condense import condense_video
 
@@ -163,6 +173,31 @@ def _condense_sync(job_id: str, in_path: Path, out_path: Path) -> None:
             "Pode ser preciso afinar os limiares de segmentação."
         )
 
+    # Player analysis runs on the ORIGINAL video (needs the source frames),
+    # so it must happen before cleanup.
+    if analyze:
+        try:
+            from padelpro_vision.analysis import analyze_clip, analysis_available
+            if analysis_available():
+                _jobs[job_id]["phase"] = "análise de jogadores"
+
+                def _progress(p: float) -> None:
+                    _jobs[job_id]["progress"] = round(p * 100)
+
+                report = analyze_clip(
+                    in_path, _UPLOAD_DIR / job_id, court_id=court_id,
+                    segments=segs, progress_cb=_progress,
+                )
+                _jobs[job_id]["report"] = report
+            else:
+                _jobs[job_id]["report_error"] = (
+                    "Este servidor não tem o motor de análise (torch) instalado."
+                )
+        except Exception as exc:
+            logger.exception("Analysis failed for job %s", job_id)
+            _jobs[job_id]["report_error"] = f"Análise falhou: {exc}"
+
+    _jobs[job_id]["phase"] = "corte do vídeo"
     condense_video(in_path, segs, out_path)
 
     # Source video + segmentation side-outputs are no longer needed.
@@ -170,10 +205,13 @@ def _condense_sync(job_id: str, in_path: Path, out_path: Path) -> None:
     _rm(_UPLOAD_DIR / job_id)
 
 
-async def _condense_bg(job_id: str, in_path: Path, out_path: Path) -> None:
+async def _condense_bg(
+    job_id: str, in_path: Path, out_path: Path,
+    analyze: bool = False, court_id: str = "court1",
+) -> None:
     try:
         await asyncio.get_event_loop().run_in_executor(
-            None, lambda: _condense_sync(job_id, in_path, out_path)
+            None, lambda: _condense_sync(job_id, in_path, out_path, analyze, court_id)
         )
         _jobs[job_id]["status"] = "done"
         logger.info("Condense job %s done.", job_id)

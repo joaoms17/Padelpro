@@ -116,28 +116,28 @@ def _compute_heatmap(
 
 def _compute_zones(
     positions: list[tuple[float, float, float]],
-    team_side: int = 0,   # 0 = bottom half (y > COURT_LENGTH_M/2), 1 = top half
+    team_side: int = 0,   # kept for API compatibility; zones are net-relative
 ) -> tuple[float, float, float]:
     """
     Return (attack_pct, defense_pct, transition_pct).
 
-    For team_side=0 (player starts at bottom, y near COURT_LENGTH_M):
-      - attack zone:    y < ZONE_NET_DEPTH_M          (near the net)
-      - defense zone:   y > COURT_LENGTH_M - ZONE_NET_DEPTH_M  (near own baseline)
-      - transition:     everything in between
+    The net sits at y = COURT_LENGTH_M / 2 (court spans y ∈ [0, 20] with one
+    team on each half). Zones are defined by distance to the net, so they are
+    symmetric and team_side is irrelevant:
+      - attack:     within ZONE_NET_DEPTH_M of the net
+      - defense:    within 3 m of the back glass
+      - transition: everything in between
     """
     if not positions:
         return 0.0, 0.0, 1.0
 
     ys = np.array([p[2] for p in positions], dtype=np.float64)
+    net_y = COURT_LENGTH_M / 2.0
+    d_net = np.abs(ys - net_y)
+    half = COURT_LENGTH_M / 2.0
 
-    if team_side == 0:
-        attack    = (ys < ZONE_NET_DEPTH_M)
-        defense   = (ys > COURT_LENGTH_M - ZONE_NET_DEPTH_M)
-    else:
-        attack    = (ys > COURT_LENGTH_M - ZONE_NET_DEPTH_M)
-        defense   = (ys < ZONE_NET_DEPTH_M)
-
+    attack  = d_net <= ZONE_NET_DEPTH_M
+    defense = d_net >= (half - 3.0)
     transition = ~attack & ~defense
     n = len(ys)
     return (

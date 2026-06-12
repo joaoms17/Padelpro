@@ -20,16 +20,86 @@ class Track:
     timestamp_ms: float
 
 
-class _StubByteTrack:
-    """Minimal stub that assigns stable IDs when ByteTrack is not installed."""
+class GreedyTracker:
+    """
+    Lightweight multi-object tracker for padel (≤6 targets, low frame rate).
+
+    Greedy nearest-centroid matching with an IoU bonus and a track memory so a
+    player occluded for up to `max_missed_s` keeps the same ID. Distances are
+    normalised by box size, which makes the same threshold work for near (big)
+    and far (small) players.
+    """
+
+    def __init__(self, max_missed_s: float = 2.5, max_dist_boxes: float = 2.2) -> None:
+        # max_dist_boxes: max centroid jump between matches, in units of box height.
+        self.max_missed_s = max_missed_s
+        self.max_dist_boxes = max_dist_boxes
+        self._tracks: dict[int, dict] = {}   # id → {box, ts_ms}
+        self._next_id = 1
+
+    @staticmethod
+    def _iou(a: PlayerBox, b: PlayerBox) -> float:
+        ix1, iy1 = max(a.x1, b.x1), max(a.y1, b.y1)
+        ix2, iy2 = min(a.x2, b.x2), min(a.y2, b.y2)
+        iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+        inter = iw * ih
+        if inter <= 0:
+            return 0.0
+        union = a.width * a.height + b.width * b.height - inter
+        return inter / union if union > 0 else 0.0
 
     def update(
         self, detections: list[PlayerBox], frame_idx: int, timestamp_ms: float
     ) -> list[Track]:
-        return [
-            Track(track_id=i + 1, box=det, frame_idx=frame_idx, timestamp_ms=timestamp_ms)
-            for i, det in enumerate(detections)
+        # Drop tracks not seen for too long
+        stale = [
+            tid for tid, t in self._tracks.items()
+            if timestamp_ms - t["ts_ms"] > self.max_missed_s * 1000.0
         ]
+        for tid in stale:
+            del self._tracks[tid]
+
+        # Build all candidate (cost, track_id, det_idx) pairs
+        candidates: list[tuple[float, int, int]] = []
+        for tid, t in self._tracks.items():
+            tb: PlayerBox = t["box"]
+            tcx, tcy = tb.center
+            scale = max(tb.height, 1.0)
+            for di, d in enumerate(detections):
+                dcx, dcy = d.center
+                dist = float(np.hypot(dcx - tcx, dcy - tcy)) / scale
+                if dist > self.max_dist_boxes:
+                    continue
+                cost = dist - 0.5 * self._iou(tb, d)
+                candidates.append((cost, tid, di))
+
+        candidates.sort(key=lambda c: c[0])
+        assigned_tracks: set[int] = set()
+        assigned_dets: set[int] = set()
+        matches: list[tuple[int, int]] = []
+        for cost, tid, di in candidates:
+            if tid in assigned_tracks or di in assigned_dets:
+                continue
+            assigned_tracks.add(tid)
+            assigned_dets.add(di)
+            matches.append((tid, di))
+
+        out: list[Track] = []
+        for tid, di in matches:
+            d = detections[di]
+            self._tracks[tid] = {"box": d, "ts_ms": timestamp_ms}
+            out.append(Track(track_id=tid, box=d, frame_idx=frame_idx, timestamp_ms=timestamp_ms))
+
+        # New tracks for unmatched detections
+        for di, d in enumerate(detections):
+            if di in assigned_dets:
+                continue
+            tid = self._next_id
+            self._next_id += 1
+            self._tracks[tid] = {"box": d, "ts_ms": timestamp_ms}
+            out.append(Track(track_id=tid, box=d, frame_idx=frame_idx, timestamp_ms=timestamp_ms))
+
+        return out
 
 
 class ByteTrackTracker:
@@ -52,7 +122,7 @@ class ByteTrackTracker:
         self.track_buffer = track_buffer
         self.match_thresh = match_thresh
         self._impl = None
-        self._stub = _StubByteTrack()
+        self._stub = GreedyTracker()
         self._try_load()
 
     def _try_load(self) -> None:
@@ -68,10 +138,7 @@ class ByteTrackTracker:
             self._impl = BYTETracker(_Args())
             logger.info("ByteTrack loaded successfully.")
         except ImportError:
-            logger.warning(
-                "bytetracker not installed — running stub tracker. "
-                "Install: pip install git+https://github.com/ifzhang/ByteTrack.git"
-            )
+            logger.info("bytetracker not installed — using built-in GreedyTracker.")
 
     def update(
         self, detections: list[PlayerBox], frame_idx: int, timestamp_ms: float
