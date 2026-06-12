@@ -58,6 +58,7 @@ class QualityConfig:
     court_margin_x_m: float = 1.5         # gating margin outside court width
     court_margin_y_m: float = 2.0         # gating margin outside court length
     expected_players: int = 4
+    reid_enabled: bool = True             # merge fragmented tracks by shirt colour
 
 
 @dataclass
