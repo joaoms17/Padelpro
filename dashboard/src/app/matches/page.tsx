@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { listMatches, type MatchStatus } from "@/lib/api";
+import { listMatches, retryAnalysis, type MatchStatus } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { UploadForm } from "@/components/UploadForm";
 
@@ -78,7 +78,18 @@ export default function MatchesPage() {
                 </span>
               )}
               {m.error_message && (
-                <span className="text-xs text-red-400 truncate max-w-xs">{m.error_message}</span>
+                <span className="flex items-center gap-3 min-w-0">
+                  <span className="text-xs text-red-400 truncate max-w-xs">{m.error_message}</span>
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      retryAnalysis(m.match_id).then(refresh).catch((err) => alert(String(err)));
+                    }}
+                    className="px-3 py-1 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-200 rounded-lg text-xs font-medium whitespace-nowrap"
+                  >
+                    🔁 Reiniciar análise
+                  </button>
+                </span>
               )}
             </Link>
           ))}
