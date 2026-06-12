@@ -1,8 +1,18 @@
 # Deploy — como pôr o PadelPro no ar
 
 Três topologias, da mais usada à mais simples. O frontend está sempre no
-Vercel (`padelpro-dashboard.vercel.app`, redeploya sozinho a cada push ao
-`main`); o que muda é onde corre a API.
+Vercel (`padelpro-dashboard.vercel.app`); o que muda é onde corre a API.
+
+## 0. Frontend (Vercel) — como é que ele atualiza
+
+O projeto Vercel **não está ligado ao Git** (deploys são via CLI). Há duas vias:
+
+- **Manual (hoje):** `cd dashboard; npx vercel --prod --yes` — também corre
+  automaticamente no fim do `publicar_para_teste.ps1`, mas só se a API e o
+  túnel tiverem arrancado primeiro.
+- **Recomendado (uma vez):** no dashboard do Vercel → **Connect Git** →
+  repo `joaoms17/Padelpro` → **Root Directory = `dashboard`** → branch
+  `main`. A partir daí cada push ao `main` deploya sozinho.
 
 ## 1. API local + tunnel Cloudflare (testes com a equipa — o habitual)
 
