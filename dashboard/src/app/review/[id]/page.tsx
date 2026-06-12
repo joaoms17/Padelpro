@@ -1,0 +1,373 @@
+"use client";
+
+import { useState, useEffect, useRef, useCallback } from "react";
+import Link from "next/link";
+import {
+  getReviewData,
+  submitReview,
+  triggerRetrain,
+  getRetrainStatus,
+  reviewVideoUrl,
+  type ReviewData,
+  type ReviewItem,
+  type Correction,
+  type RetrainStatus,
+} from "@/lib/api";
+
+const STROKE_LABELS: Record<string, string> = {
+  forehand_volley: "Vólei de direita",
+  backhand_volley: "Vólei de esquerda",
+  bandeja: "Bandeja",
+  vibora: "Víbora",
+  smash: "Smash",
+  serve: "Serviço",
+  other: "Outro",
+};
+
+function fmtTime(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+type Verdict = Correction["verdict"];
+
+interface RowState {
+  verdict: Verdict | null;
+  correctedType: string;
+}
+
+export default function ReviewPage({ params }: { params: { id: string } }) {
+  const rid = params.id;
+  const [data, setData] = useState<ReviewData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [rows, setRows] = useState<RowState[]>([]);
+  const [missed, setMissed] = useState<Correction[]>([]);
+  const [missedPlayer, setMissedPlayer] = useState(1);
+  const [missedType, setMissedType] = useState("smash");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState<{ saved: number; training_samples: number } | null>(null);
+  const [retrain, setRetrain] = useState<RetrainStatus | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    getReviewData(rid)
+      .then((d) => {
+        setData(d);
+        setRows(d.items.map((item) => ({
+          verdict: null,
+          correctedType: d.stroke_classes.find((c) => c !== item.stroke_type) ?? "smash",
+        })));
+      })
+      .catch((e) => setError(String(e)));
+  }, [rid]);
+
+  // Poll retrain status while running
+  useEffect(() => {
+    if (retrain?.status !== "running") return;
+    const iv = setInterval(async () => {
+      try {
+        const s = await getRetrainStatus();
+        setRetrain(s);
+        if (s.status !== "running") clearInterval(iv);
+      } catch { /* ignore */ }
+    }, 3000);
+    return () => clearInterval(iv);
+  }, [retrain?.status]);
+
+  const seekTo = useCallback((ms: number) => {
+    const v = videoRef.current;
+    if (!v) return;
+    v.currentTime = Math.max(0, ms / 1000 - 1.2);
+    v.play().catch(() => {});
+    // play ~2.5s around the stroke, then pause
+    const stopAt = ms / 1000 + 1.3;
+    const onTime = () => {
+      if (v.currentTime >= stopAt) {
+        v.pause();
+        v.removeEventListener("timeupdate", onTime);
+      }
+    };
+    v.addEventListener("timeupdate", onTime);
+  }, []);
+
+  const setVerdict = (i: number, verdict: Verdict) =>
+    setRows((r) => r.map((row, j) => (j === i ? { ...row, verdict: row.verdict === verdict ? null : verdict } : row)));
+
+  const setCorrectedType = (i: number, t: string) =>
+    setRows((r) => r.map((row, j) => (j === i ? { ...row, correctedType: t } : row)));
+
+  const addMissed = () => {
+    const v = videoRef.current;
+    if (!v) return;
+    setMissed((m) => [
+      ...m,
+      {
+        ts_ms: v.currentTime * 1000,
+        player_id: missedPlayer,
+        verdict: "missed",
+        corrected_type: missedType,
+      },
+    ]);
+  };
+
+  const reviewed = rows.filter((r) => r.verdict !== null).length;
+
+  const handleSubmit = async () => {
+    if (!data) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const corrections: Correction[] = data.items
+        .map((item, i) => ({ item, row: rows[i] }))
+        .filter(({ row }) => row.verdict !== null)
+        .map(({ item, row }) => ({
+          ts_ms: item.ts_ms,
+          player_id: item.player_id,
+          verdict: row.verdict as Verdict,
+          predicted_type: item.stroke_type,
+          corrected_type: row.verdict === "wrong_class" ? row.correctedType : null,
+          frame_idx: item.frame_idx,
+        }));
+      const res = await submitReview(rid, [...corrections, ...missed]);
+      setSubmitted({ saved: res.saved, training_samples: res.training_samples });
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleRetrain = async () => {
+    setError(null);
+    try {
+      await triggerRetrain(rid);
+      setRetrain({ status: "running" });
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  if (error && !data) {
+    return (
+      <div className="py-16 text-center space-y-3">
+        <p className="text-red-400">Sem análise para rever neste ID.</p>
+        <Link href="/" className="text-sm text-gray-500 hover:text-gray-300">← Voltar</Link>
+      </div>
+    );
+  }
+  if (!data) return <div className="text-gray-400 py-16 text-center">A carregar…</div>;
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <Link href={`/matches/${rid}`} className="text-gray-500 hover:text-gray-300 text-sm">← Análise</Link>
+        <span className="text-gray-700">/</span>
+        <h1 className="text-lg font-bold text-white">Rever batidas</h1>
+        <span className="text-xs text-gray-500">
+          {reviewed + missed.length}/{data.items.length} revistas
+          {data.items.some((i) => i.trainable) ? " · alimenta o treino do modelo" : " · só avaliação (sem pose guardada)"}
+        </span>
+      </div>
+
+      <p className="text-sm text-gray-400">
+        Clica numa batida para a ver no vídeo. Marca <span className="text-green-400">✓ certa</span>,{" "}
+        <span className="text-yellow-400">✎ tipo errado</span> (e escolhe o tipo certo) ou{" "}
+        <span className="text-red-400">✗ não foi batida</span>. Cada resposta é uma label de treino.
+      </p>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Video */}
+        <div className="space-y-3">
+          {data.video_available ? (
+            <video
+              ref={videoRef}
+              src={reviewVideoUrl(rid)}
+              controls
+              className="w-full rounded-xl border border-gray-700 bg-black sticky top-4"
+            />
+          ) : (
+            <div className="rounded-xl border border-gray-700 bg-gray-900 p-8 text-center text-sm text-gray-500">
+              Vídeo já não está disponível — revisão às cegas pelos timestamps.
+            </div>
+          )}
+
+          {/* Missed-stroke capture */}
+          {data.video_available && (
+            <div className="bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 space-y-2">
+              <div className="text-sm font-medium text-gray-300">Batida que o modelo não viu?</div>
+              <div className="flex items-center gap-2 flex-wrap text-sm">
+                <span className="text-gray-500">Pausa o vídeo no impacto, depois:</span>
+                <select
+                  value={missedPlayer}
+                  onChange={(e) => setMissedPlayer(Number(e.target.value))}
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-gray-200"
+                >
+                  {[1, 2, 3, 4].map((p) => <option key={p} value={p}>Jogador {p}</option>)}
+                </select>
+                <select
+                  value={missedType}
+                  onChange={(e) => setMissedType(e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-gray-200"
+                >
+                  {data.stroke_classes.map((c) => (
+                    <option key={c} value={c}>{STROKE_LABELS[c] ?? c}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={addMissed}
+                  className="px-3 py-1 bg-blue-700 hover:bg-blue-600 text-white rounded-lg text-sm"
+                >
+                  + Adicionar aqui
+                </button>
+              </div>
+              {missed.length > 0 && (
+                <ul className="text-xs text-gray-400 space-y-1">
+                  {missed.map((m, i) => (
+                    <li key={i} className="flex items-center gap-2">
+                      <span>
+                        {fmtTime(m.ts_ms)} — Jogador {m.player_id} — {STROKE_LABELS[m.corrected_type ?? ""] ?? m.corrected_type}
+                      </span>
+                      <button
+                        onClick={() => setMissed((mm) => mm.filter((_, j) => j !== i))}
+                        className="text-red-400 hover:text-red-300"
+                      >
+                        remover
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Stroke list */}
+        <div className="space-y-2 max-h-[75vh] overflow-y-auto pr-1">
+          {data.items.length === 0 && (
+            <p className="text-gray-500 text-sm">Nenhuma batida detetada nesta análise.</p>
+          )}
+          {data.items.map((item, i) => (
+            <StrokeRow
+              key={`${item.player_id}-${item.ts_ms}`}
+              item={item}
+              row={rows[i]}
+              strokeClasses={data.stroke_classes}
+              onSeek={() => seekTo(item.ts_ms)}
+              onVerdict={(v) => setVerdict(i, v)}
+              onType={(t) => setCorrectedType(i, t)}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Submit + retrain */}
+      <div className="bg-gray-900 border border-gray-700 rounded-xl px-5 py-4 flex items-center gap-4 flex-wrap">
+        <button
+          onClick={handleSubmit}
+          disabled={submitting || (reviewed === 0 && missed.length === 0)}
+          className="px-5 py-2 bg-green-700 hover:bg-green-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg font-medium"
+        >
+          {submitting ? "A submeter…" : `Submeter ${reviewed + missed.length} correções`}
+        </button>
+
+        {submitted && (
+          <span className="text-sm text-green-400">
+            ✓ {submitted.saved} guardadas · {submitted.training_samples} amostras de treino
+          </span>
+        )}
+
+        {submitted && (
+          <button
+            onClick={handleRetrain}
+            disabled={retrain?.status === "running"}
+            className="px-5 py-2 bg-blue-700 hover:bg-blue-600 disabled:opacity-40 text-white rounded-lg font-medium ml-auto"
+          >
+            {retrain?.status === "running" ? "A treinar…" : "🔁 Retreinar modelo"}
+          </button>
+        )}
+
+        {retrain && retrain.status !== "running" && retrain.status !== "idle" && (
+          <span
+            className={`text-sm ${retrain.status === "ok" ? "text-green-400" : retrain.status === "skipped" ? "text-yellow-400" : "text-red-400"}`}
+          >
+            {retrain.status === "ok" ? "✓ " : ""}{retrain.detail}
+          </span>
+        )}
+
+        {error && <span className="text-sm text-red-400">{error}</span>}
+      </div>
+    </div>
+  );
+}
+
+function StrokeRow({
+  item,
+  row,
+  strokeClasses,
+  onSeek,
+  onVerdict,
+  onType,
+}: {
+  item: ReviewItem;
+  row: RowState;
+  strokeClasses: string[];
+  onSeek: () => void;
+  onVerdict: (v: Verdict) => void;
+  onType: (t: string) => void;
+}) {
+  const verdictBtn = (v: Verdict, label: string, active: string, idle: string) => (
+    <button
+      onClick={() => onVerdict(v)}
+      className={`px-2.5 py-1 rounded-lg text-sm font-medium transition-colors ${row.verdict === v ? active : idle}`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div
+      className={`bg-gray-900 border rounded-xl px-4 py-3 ${row.verdict ? "border-gray-500" : "border-gray-700"}`}
+    >
+      <div className="flex items-center gap-3 flex-wrap">
+        <button onClick={onSeek} className="font-mono text-sm text-blue-400 hover:text-blue-300">
+          ▶ {fmtTime(item.ts_ms)}
+        </button>
+        <span className="text-sm text-gray-300">Jogador {item.player_id}</span>
+        <span className="text-sm font-medium text-white">
+          {STROKE_LABELS[item.stroke_type] ?? item.stroke_type}
+        </span>
+        {item.confidence != null && (
+          <span className={`text-xs ${item.confidence < 0.6 ? "text-yellow-400" : "text-gray-500"}`}>
+            {(item.confidence * 100).toFixed(0)}%
+          </span>
+        )}
+        {item.audio_onset === true && <span title="Confirmada por áudio" className="text-xs">🔊</span>}
+        {item.audio_onset === false && <span title="Sem som de impacto" className="text-xs opacity-40">🔇</span>}
+
+        <div className="ml-auto flex items-center gap-1.5">
+          {verdictBtn("correct", "✓", "bg-green-700 text-white", "bg-gray-800 text-green-400 hover:bg-gray-700")}
+          {verdictBtn("wrong_class", "✎", "bg-yellow-600 text-white", "bg-gray-800 text-yellow-400 hover:bg-gray-700")}
+          {verdictBtn("not_a_shot", "✗", "bg-red-700 text-white", "bg-gray-800 text-red-400 hover:bg-gray-700")}
+        </div>
+      </div>
+
+      {row.verdict === "wrong_class" && (
+        <div className="mt-2 flex items-center gap-2">
+          <span className="text-xs text-gray-500">Tipo certo:</span>
+          <select
+            value={row.correctedType}
+            onChange={(e) => onType(e.target.value)}
+            className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-1 text-sm text-gray-200"
+          >
+            {strokeClasses
+              .filter((c) => c !== item.stroke_type)
+              .map((c) => (
+                <option key={c} value={c}>{STROKE_LABELS[c] ?? c}</option>
+              ))}
+          </select>
+        </div>
+      )}
+    </div>
+  );
+}

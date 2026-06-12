@@ -248,6 +248,76 @@ export function condenseDownloadUrl(job_id: string): string {
   return `${BASE}/condense/${job_id}/download`;
 }
 
+// ---- Review & feedback (human-in-the-loop training) ----
+
+export interface ReviewItem {
+  ts_ms: number;
+  player_id: number;
+  stroke_type: string;
+  confidence: number | null;
+  audio_onset: boolean | null;
+  frame_idx: number | null;
+  trainable: boolean;
+}
+
+export interface ReviewData {
+  rid: string;
+  items: ReviewItem[];
+  previous_corrections: Correction[];
+  video_available: boolean;
+  stroke_classes: string[];
+}
+
+export interface Correction {
+  ts_ms: number;
+  player_id: number;
+  verdict: "correct" | "wrong_class" | "not_a_shot" | "missed";
+  predicted_type?: string | null;
+  corrected_type?: string | null;
+  frame_idx?: number | null;
+}
+
+export interface RetrainStatus {
+  status: "idle" | "running" | "ok" | "skipped" | "error";
+  detail?: string;
+  n_samples?: number;
+}
+
+export async function getReviewData(rid: string): Promise<ReviewData> {
+  const r = await fetch(`${BASE}/review/${rid}`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function submitReview(
+  rid: string,
+  corrections: Correction[]
+): Promise<{ saved: number; training_samples: number; golden_hits: number }> {
+  const r = await fetch(`${BASE}/review/${rid}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ corrections }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function triggerRetrain(rid: string): Promise<{ status: string }> {
+  const r = await fetch(`${BASE}/review/${rid}/retrain`, { method: "POST" });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function getRetrainStatus(): Promise<RetrainStatus> {
+  const r = await fetch(`${BASE}/review/retrain/status`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export function reviewVideoUrl(rid: string): string {
+  return `${BASE}/review/${rid}/video`;
+}
+
 // ---- Court calibration ----
 
 export async function saveCalibration(

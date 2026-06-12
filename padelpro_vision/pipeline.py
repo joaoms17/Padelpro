@@ -173,7 +173,14 @@ class Pipeline:
                 weights_path=self._cfg.model.pose_weights,
                 device=self._cfg.model.device,
             )
-            stroke_clf = StrokeClassifier(mode="rules")
+            # Use the trained TCN when available (feedback loop retrains it);
+            # StrokeClassifier falls back to rules if loading fails.
+            tcn_weights = self._cfg.model.detector_weights.parent / "stroke_tcn.pth"
+            if tcn_weights.exists():
+                stroke_clf = StrokeClassifier(mode="tcn", weights_path=tcn_weights,
+                                              device=self._cfg.model.device)
+            else:
+                stroke_clf = StrokeClassifier(mode="rules")
 
         # ----------------------------------------------------------------
         # Detection + tracking loop
@@ -184,6 +191,9 @@ class Pipeline:
         all_shot_events: list = []
         # {track_id: [(ts_ms, px, py)]}  — pixel foot positions
         pixel_positions: dict[int, list] = {}
+        # {"player:frame": normalised 17x2 keypoint window} — training features
+        # for the feedback loop (saved only for events that survive fusion)
+        pose_windows: dict[str, list] = {}
 
         try:
             from tqdm import tqdm
@@ -216,12 +226,18 @@ class Pipeline:
 
                 # M2: pose + strokes
                 if pose_estimator is not None and stroke_clf is not None:
+                    from padelpro_vision.strokes.classifier import pose_to_features
                     from padelpro_vision.strokes.shot_event import ShotEvent
                     for t in tracks:
                         p = pose_estimator.estimate(frame, t.box)
                         stroke_clf.update(t.track_id, p)
                         stroke_type, conf = stroke_clf.classify(t.track_id)
                         if stroke_type != "other":
+                            window = list(stroke_clf._windows.get(t.track_id, []))
+                            pose_windows[f"{t.track_id}:{frame_idx}"] = [
+                                pose_to_features(pw).reshape(17, 2).tolist()
+                                for pw in window
+                            ]
                             rally_id = next(
                                 (i for i, (s, e) in enumerate(rally_index) if s <= ts_ms <= e), -1
                             )
@@ -297,6 +313,15 @@ class Pipeline:
             shot_events_path = output_dir / f"{match_id}_shot_events.json"
             save_shot_events(all_shot_events, shot_events_path)
             logger.info("Shot events: %d → %s", len(all_shot_events), shot_events_path)
+
+            # Keep the pose windows of surviving events — these are the
+            # training features the review page corrections attach to.
+            if pose_windows:
+                keys = {f"{ev.player_id}:{ev.frame_idx}" for ev in all_shot_events}
+                kept = {k: v for k, v in pose_windows.items() if k in keys}
+                with open(output_dir / f"{match_id}_pose_windows.json", "w") as f:
+                    json.dump(kept, f)
+                logger.info("Pose windows kept for %d events.", len(kept))
 
         # ----------------------------------------------------------------
         # Projection to court coordinates (when calibrated)
