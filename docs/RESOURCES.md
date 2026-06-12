@@ -164,6 +164,161 @@ Referências: YOLOX-m ≈ **46,9 AP** COCO (Apache 2.0); RTMPose-m ≈ **75 AP**
 
 ---
 
+## 7. Recursos cross-desporto (futebol, ténis, outros)
+
+> Recursos de outros desportos transferíveis para o pipeline de padel (câmara única fixa atrás do campo, 4 jogadores, campo 10×20 m). URLs verificados por fetch em 2026-06-12. Não repete WASB/TrackNet/THETIS/TenniSet/ShuttleSet/TennisCourtDetector/TVCalib (já cobertos acima).
+
+### 7.1 Futebol — tracking e posicionamento de jogadores
+
+#### SoccerNet-GSR / sn-gamestate ✅ **O "blueprint" arquitetural do pipeline de padel**
+- **URL:** https://github.com/SoccerNet/sn-gamestate
+- **Conteúdo:** *Game State Reconstruction* (CVPRW 2024): reconstrói um minimapa estilo videojogo com a **posição de cada jogador no plano do campo em coordenadas reais**, a partir de uma só câmara — exatamente o objetivo do nosso minimapa de padel. Baseline completa: deteção (YOLO) → ReID (PRTreid/BPBreID) → tracking → calibração de câmara (TVCalib) → leitura de dorsais (MMOCR). Dataset: 200 clips anotados (v1.3), download automático na primeira execução ou via pip `SoccerNet` (task `gamestate-2024`).
+- **Licença:** ⚠️ Código **GPL-3.0** (copyleft — não linkar diretamente em produto fechado; usar como referência de arquitetura/avaliação). Dados SoccerNet: uso de investigação.
+- **Integração:** Copiar a *estrutura* (não o código): a métrica GS-HOTA e o formato de saída (id, equipa, x/y em metros por frame) servem de especificação para o nosso módulo de posicionamento. Em padel a tarefa é mais fácil: câmara fixa, 4 jogadores, sem dorsais.
+
+#### TrackLab ✅
+- **URL:** https://github.com/TrackingLaboratory/tracklab
+- **Conteúdo:** Framework modular PyTorch de *multi-object tracking* (base do sn-gamestate, mas com licença permissiva): detetores (YOLO, YOLOX, RTMDet, RT-DETR), pose (RTMPose, RTMO, VITPose), ReID (KPReID, BPBReID), trackers (DeepSORT, StrongSORT, OC-SORT). Suporta treino supervisionado do ReID no próprio dataset de tracking. Ativo (updates 2025).
+- **Licença:** **MIT** ✅.
+- **Integração:** Candidato a esqueleto do módulo de tracking de jogadores — trocar componentes (ex.: RTMDet + OC-SORT) sem reescrever pipeline; ou usar só como referência de design se quisermos código próprio mais leve.
+
+#### SoccerNet-Tracking ✅
+- **URL:** https://github.com/SoccerNet/sn-tracking
+- **Conteúdo:** Dataset MOT de futebol: 200 clips de 30 s anotados (formato MOT) + 12 jogos completos da câmara principal. Download via pip `SoccerNet` (vídeos requerem password/NDA gratuita).
+- **Licença:** ⚠️ Código sem ficheiro LICENSE; dados para investigação (NDA). Não treinar modelos de produto diretamente nestes dados sem confirmar termos.
+- **Integração:** Benchmark para validar o tracker escolhido em condições desportivas (motion blur, oclusões); menos prioritário que o GSR.
+
+#### SoccerNet-ReID ✅ / torchreid + OSNet ✅
+- **URLs:** https://github.com/SoccerNet/sn-reid · https://github.com/KaiyangZhou/deep-person-reid
+- **Conteúdo:** sn-reid: 340.993 thumbnails de jogadores de 400 jogos, fork do torchreid — **MIT**. torchreid: biblioteca PyTorch de ReID com **OSNet/OSNet-AIN** (~2,2 M parâmetros) e pesos pré-treinados (model zoo + https://huggingface.co/kaiyangzhou/osnet) — **MIT**.
+- **Licença:** **MIT** (ambos) ✅; dados sn-reid: investigação.
+- **Integração:** OSNet é o ReID leve ideal para re-associar 4 jogadores após oclusões (parceiros cruzam-se constantemente em padel); *fine-tuning* opcional com crops dos nossos vídeos via torchreid.
+
+#### Roboflow sports ✅
+- **URL:** https://github.com/roboflow/sports
+- **Conteúdo:** Toolkit open source de analytics desportiva: deteção de jogadores/bola, **homografia campo→minimapa via keypoints do relvado** (classe `ViewTransformer`), e **classificação de equipas por cor de camisola** (`TeamClassifier`: embeddings SigLIP + UMAP + KMeans, sem treino supervisionado). Datasets associados no Roboflow Universe (jogadores, bola, keypoints de campo). Instalação: `pip install git+https://github.com/roboflow/sports.git`.
+- **Licença:** **MIT** ✅ (datasets Universe: verificar individualmente).
+- **Integração:** O `TeamClassifier` transfere quase sem alterações para separar as **duas duplas de padel** por cor de roupa; o padrão keypoints→homografia→minimapa é o mesmo do nosso campo 10×20 m.
+
+#### Trackers: BoT-SORT / OC-SORT / Deep OC-SORT ✅ (todos MIT)
+- **URLs:** https://github.com/NirAharon/BoT-SORT · https://github.com/noahcao/OC_SORT · https://github.com/GerardMaggiolino/Deep-OC-SORT
+- **Conteúdo/Licença:** Todos **MIT** ✅, código + modelos descarregáveis. BoT-SORT = ByteTrack + compensação de movimento de câmara + ReID. OC-SORT (CVPR 2023) = associação por movimento robusta a oclusão/movimento não-linear. Deep OC-SORT = OC-SORT + ReID adaptativo (~+6 HOTA sobre OC-SORT no DanceTrack).
+- **Nota vs ByteTrack:** em desporto (movimento errático, aparências semelhantes) os benchmarks SportsMOT/DanceTrack favorecem OC-SORT/Deep OC-SORT e associação com aparência (MixSort) sobre ByteTrack puro. Com **câmara fixa e só 4 jogadores**, ByteTrack já é forte (e a compensação de câmara do BoT-SORT torna-se irrelevante); a escolha pragmática é **ByteTrack ou OC-SORT + ReID OSNet** para eliminar trocas de ID quando os parceiros se cruzam.
+
+### 7.2 Ténis — posição em campo e analytics
+
+#### tennis_analysis (abdullahtarek) ✅
+- **URL:** https://github.com/abdullahtarek/tennis_analysis
+- **Conteúdo:** Pipeline didático completo: YOLOv8 (jogadores) + YOLO afinado (bola) + CNN de keypoints do campo → **mini-court com posições, velocidade dos jogadores, velocidade da pancada e contagem de pancadas**. Pesos no Google Drive.
+- **Licença:** ⚠️ **Sem licença** — usar apenas como referência/tutorial, não copiar código para o produto.
+- **Integração:** O cálculo de métricas (distância percorrida, velocidade média, velocidade de pancada via deslocamento da bola entre batimentos) é diretamente replicável no nosso minimapa de padel.
+
+#### tennis-tracking (ArtLabss) ✅
+- **URL:** https://github.com/ArtLabss/tennis-tracking
+- **Conteúdo:** "HawkEye monocular" open source: TrackNet (bola) + ResNet50 (jogadores) + deteção de linhas do campo + **minimapa bird's-eye com jogadores e bola projetados** + previsão de ressaltos (TimeSeriesForestClassifier).
+- **Licença:** **Unlicense (domínio público)** ✅ — reutilização livre, incluindo comercial.
+- **Integração:** Melhor fonte *legalmente limpa* de código de projeção campo→minimapa e deteção de ressalto por séries temporais; adaptar o template de campo ao retângulo 10×20 m do padel.
+
+#### TennisProject (yastrebksv) ✅
+- **URL:** https://github.com/yastrebksv/TennisProject
+- **Conteúdo:** Pipeline do mesmo autor do TennisCourtDetector (§6): TrackNet (bola) + 14 keypoints do campo + deteção de pessoas + **deteção de ressalto com CatBoostRegressor sobre a trajetória** + minimapa. Pesos no Google Drive.
+- **Licença:** ⚠️ **Não especificada** — contactar autor antes de uso comercial.
+- **Integração:** O detetor de ressalto por features de trajetória (sem rede pesada) transfere-se bem para detetar ressaltos no vidro/chão em padel; complementa o TennisCourtDetector já listado.
+
+#### Datasets amador/court-side ⚠️
+- A pesquisa não encontrou nenhum dataset consolidado de ténis amador com câmara fixa atrás do campo (o equivalente mais próximo continua a ser o PadelTracker100, §2). Há vários projetos YOLO de fim de curso (ex.: https://github.com/BimsaraS99/tennis-analyzer-YOLOv8) mas sem dados próprios relevantes. **Conclusão: para a nossa perspetiva de câmara, os dados de padel próprios + Roboflow padel valem mais do que qualquer dataset de ténis broadcast.**
+
+### 7.3 Voleibol / basquetebol / badminton / multi-desporto
+
+#### SportsMOT ✅ + MixSort ✅
+- **URLs:** https://github.com/MCG-NJU/SportsMOT · https://github.com/MCG-NJU/MixSort
+- **Conteúdo:** Dataset MOT (ICCV 2023) com 240 clips 720p/25fps de **basquetebol, voleibol e futebol** (download via plataforma CodaLab após registo). MixSort: tracker baseline (associação por aparência aplicável sobre ByteTrack/OC-SORT), pesos no Google Drive.
+- **Licença:** dataset **CC BY-NC 4.0** ⚠️ (não comercial — só para avaliação interna/benchmark); código MixSort **MIT** ✅.
+- **Integração:** O subconjunto de voleibol (12 jogadores, campo pequeno, câmara quase fixa) é o melhor proxy público para validar o tracker de padel antes de termos dados anotados próprios.
+
+#### TeamTrack (AtomScott) ✅
+- **URL:** https://github.com/AtomScott/TeamTrack
+- **Conteúdo:** Dataset MOT multi-desporto (futebol, basquetebol, andebol) com vídeos 4K–8K de **câmara fixa lateral (fisheye) e drone**, ~280 k frames / 4,37 M bounding boxes; inclui formato `teamtrack-trajectory` com **trajetórias já projetadas em coordenadas do campo**. Download via Google Drive/Kaggle.
+- **Licença:** **MIT** ✅ (confirmar no Kaggle a licença dos dados ao descarregar).
+- **Integração:** Único dataset grande de **câmara fixa** com trajetórias no plano do campo — útil para treinar/validar suavização e métricas de movimento (distância, velocidade, heatmaps) idênticas às do padel.
+
+#### DeepSportradar (basquetebol) ✅
+- **URLs:** https://github.com/DeepSportradar/player-reidentification-challenge · https://github.com/DeepSportradar/camera-calibration-challenge
+- **Conteúdo:** Desafios ACM MMSports. ReID: dataset SynergyReID (8.569 imagens de treino, 436 identidades) incluído no próprio repo — **Apache-2.0** ✅. Calibração: 728 pares imagem↔parâmetros de câmara de **câmaras fixas Keemotion** em pavilhões FIBA (Basketball Instants Dataset, download via Kaggle: `kaggle datasets download deepsportradar/basketball-instants-dataset`); licença do repo não explícita ⚠️.
+- **Integração:** Cenário indoor com câmara fixa e iluminação artificial — muito mais próximo de um clube de padel do que broadcast de futebol; o baseline de calibração por segmentação de linhas + interseções 2D↔3D replica-se com as linhas do campo de padel.
+
+#### VolleyVision (shukkkur) ⚠️
+- **URL:** https://github.com/shukkkur/VolleyVision
+- **Conteúdo:** Bola (YOLOv7-tiny + modelo Roboflow, 25 k imagens), jogadores (YOLOv8m), 5 ações de voleibol, segmentação do campo; datasets públicos no Roboflow.
+- **Licença:** ⚠️ **CC BY-NC-ND** — não comercial e sem derivados. **Só como referência.**
+- **Integração:** Referência de organização de um pipeline indoor de bola pequena + multi-jogador; não reutilizar pesos/código no produto.
+
+#### CoachAI MovementForecasting 📄/✅
+- **URL:** https://github.com/wywyWang/CoachAI-Projects (módulo Movement Forecasting; ShuttleSet já coberto em §3)
+- **Conteúdo/Licença:** Previsão de movimento de jogadores de badminton com grafos dinâmicos — **MIT** ✅.
+- **Integração:** Interesse futuro (sugestão de posicionamento tático das duplas), não é prioridade do MVP.
+
+### 7.4 Action spotting / deteção de eventos (rally e batimentos)
+
+#### E2E-Spot (jhong93/spot) ✅ **Recomendado para deteção de batimento**
+- **URL:** https://github.com/jhong93/spot (modelos: https://github.com/jhong93/e2e-spot-models)
+- **Conteúdo:** Baseline end-to-end (ECCV 2022) para *precise temporal spotting* — eventos à **precisão de 1 frame** — com configs prontas para **ténis (batimentos)**, patinagem artística, FineDiving, FineGym e futebol. Código + modelos treinados descarregáveis.
+- **Licença:** **BSD-3-Clause** ✅ — utilizável comercialmente.
+- **Integração:** Arquitetura ideal para o detetor de **momento de pancada e início/fim de ponto** em padel: *fine-tuning* do modelo de ténis com clips anotados de padel; saída por frame alimenta a segmentação de rallies e a contagem de pancadas.
+
+#### SoccerNet Action Spotting (sn-spotting) ✅
+- **URL:** https://github.com/SoccerNet/sn-spotting
+- **Conteúdo:** 500 jogos com 17 classes de ação + dataset *Ball Action Spotting* (12 classes ao nível da bola: passe, remate…); features pré-computadas (ResNet-152, Baidu) e múltiplas baselines (NetVLAD++, E2E). Anotações livres via pip; vídeos sob NDA.
+- **Licença:** Código **MIT** ✅; dados para investigação ⚠️.
+- **Integração:** As baselines e a métrica (mAP@tolerância temporal) definem como avaliar o nosso detetor de eventos de rally; o *Ball Action Spotting* (eventos densos e curtos) é o análogo mais próximo da sequência de pancadas num ponto de padel.
+
+### 7.5 Calibração de câmara a partir de vídeo desportivo
+
+#### PnLCalib ✅ (SOTA SoccerNet-Calibration)
+- **URL:** https://github.com/mguti97/PnLCalib
+- **Conteúdo:** Calibração por **pontos + linhas** (keypoints do campo + extremidades de linhas, refinamento por otimização não linear); supera os métodos anteriores no SoccerNet-Calibration em single-view e multi-view. 6 variantes de pesos nas releases (incl. WorldCup, TS-WorldCup).
+- **Licença:** ⚠️ **GPL-2.0** — copyleft; usar como referência ou isolar num serviço separado.
+- **Integração:** O esquema pontos+linhas é ideal para o padel: poucas linhas mas paredes de vidro com arestas verticais bem definidas → definir template 3D do campo 10×20 m e retreinar as duas redes.
+
+#### No-Bells-Just-Whistles (mguti97) ✅
+- **URL:** https://github.com/mguti97/No-Bells-Just-Whistles
+- **Conteúdo:** Antecessor do PnLCalib (MMSports/MM4SPA): heatmaps de keypoints + extremidades de linhas → DLT clássico, sem refinamento. Pesos single/multi-view nas releases.
+- **Licença:** ⚠️ **GPL-2.0**.
+- **Integração:** Versão mais simples do mesmo conceito; em câmara fixa a calibração corre **uma vez por vídeo**, pelo que até um método lento serve.
+
+#### SoccerNet-Calibration (sn-calibration) ✅
+- **URL:** https://github.com/SoccerNet/sn-calibration
+- **Conteúdo:** Desafio + baseline (DeepLabv3 para segmentação de linhas → decomposição de homografia) + dataset de imagens anotadas com as marcações do campo (pip `SoccerNet`, task `calibration-2023`); pesos no Google Drive.
+- **Licença:** ⚠️ Código sem LICENSE explícita; dados para investigação.
+- **Integração:** Útil sobretudo pelo protocolo de avaliação (AC@5/JaC) para medir a qualidade da nossa homografia de padel; com câmara fixa, o TVCalib (§6, MIT) continua a ser a via recomendada.
+
+### Quadro-resumo da secção 7
+
+| Recurso | Licença | Comercial? | Descarregável hoje |
+|---|---|---|---|
+| sn-gamestate (GSR) | GPL-3.0 (código); dados investigação | ⚠️ só como referência | ✅ |
+| TrackLab | MIT | ✅ | ✅ |
+| SoccerNet-Tracking | s/ licença; dados NDA | ❓ | ✅ |
+| SoccerNet-ReID | MIT (código) | ✅ código | ✅ |
+| torchreid / OSNet | MIT | ✅ | ✅ |
+| Roboflow sports | MIT | ✅ | ✅ |
+| BoT-SORT / OC-SORT / Deep OC-SORT / ByteTrack | MIT | ✅ | ✅ |
+| tennis_analysis (abdullahtarek) | não especificada | ❓ | ✅ |
+| tennis-tracking (ArtLabss) | Unlicense | ✅ | ✅ |
+| TennisProject (yastrebksv) | não especificada | ❓ | ✅ |
+| SportsMOT | CC BY-NC 4.0 | ❌ (benchmark interno) | ✅ (registo CodaLab) |
+| MixSort | MIT | ✅ | ✅ |
+| TeamTrack | MIT | ✅ | ✅ |
+| DeepSportradar ReID | Apache-2.0 | ✅ | ✅ |
+| DeepSportradar Calibração + Basketball Instants | não especificada | ❓ | ✅ (Kaggle) |
+| VolleyVision | CC BY-NC-ND | ❌ | ✅ |
+| E2E-Spot | BSD-3-Clause | ✅ | ✅ |
+| sn-spotting | MIT (código); vídeos NDA | ✅ código | ✅ |
+| PnLCalib / No-Bells-Just-Whistles | GPL-2.0 | ⚠️ copyleft | ✅ |
+| sn-calibration | s/ licença; dados investigação | ❓ | ✅ |
+
+---
+
 ## Quadro-resumo de licenças
 
 | Recurso | Licença | Comercial? | Descarregável hoje |
