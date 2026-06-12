@@ -20,7 +20,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routers import matches, analytics, clips, condense, calibrate, review, label
+from api.routers import matches, analytics, clips, condense, calibrate, review, label, quality
 
 app = FastAPI(
     title="PadelPro Vision API",
@@ -68,6 +68,7 @@ app.include_router(condense.router)
 app.include_router(calibrate.router)
 app.include_router(review.router)
 app.include_router(label.router)
+app.include_router(quality.router)
 
 
 @app.get("/health")
