@@ -1,4 +1,4 @@
-# Define o NEXT_PUBLIC_API_URL de produção no Vercel (via API REST, porque o
+﻿# Define o NEXT_PUBLIC_API_URL de produção no Vercel (via API REST, porque o
 # prompt interativo do CLI é pouco fiável) e redeploya o dashboard.
 # Uso: .\scripts\set_api_url.ps1 https://xxxx.trycloudflare.com
 param([Parameter(Mandatory = $true)][string]$Url)

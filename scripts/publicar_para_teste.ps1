@@ -1,4 +1,4 @@
-# Publica o backend COMPLETO (análise de jogadores) para a internet, para
+﻿# Publica o backend COMPLETO (análise de jogadores) para a internet, para
 # alguém testar pelo site https://padelpro-dashboard.vercel.app:
 #   1. arranca a API do .venv na porta 8010 (se ainda não estiver up)
 #   2. abre um túnel Cloudflare gratuito para essa porta
