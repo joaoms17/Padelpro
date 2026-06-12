@@ -318,6 +318,36 @@ export function reviewVideoUrl(rid: string): string {
   return `${BASE}/review/${rid}/video`;
 }
 
+// ---- Clip labelling (dataset building) ----
+
+export interface LabelQueue {
+  root: string;
+  labels: string[];
+  clips: { name: string; label: string | null }[];
+  counts: Record<string, number>;
+  n_unlabelled: number;
+}
+
+export async function getLabelQueue(): Promise<LabelQueue> {
+  const r = await fetch(`${BASE}/label/queue`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function labelClip(name: string, label: string): Promise<{ moved: boolean }> {
+  const r = await fetch(`${BASE}/label/clip/${encodeURIComponent(name)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export function labelClipUrl(name: string): string {
+  return `${BASE}/label/clip/${encodeURIComponent(name)}`;
+}
+
 // ---- Court calibration ----
 
 export async function saveCalibration(

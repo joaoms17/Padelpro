@@ -47,6 +47,7 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState<{ saved: number; training_samples: number } | null>(null);
   const [retrain, setRetrain] = useState<RetrainStatus | null>(null);
+  const [selected, setSelected] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -92,6 +93,39 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
 
   const setVerdict = (i: number, verdict: Verdict) =>
     setRows((r) => r.map((row, j) => (j === i ? { ...row, verdict: row.verdict === verdict ? null : verdict } : row)));
+
+  // Keyboard-first validation: navigate with j/k or arrows, judge with 1/2/3,
+  // replay with space. Verdicts auto-advance to keep the reviewer in flow.
+  useEffect(() => {
+    if (!data) return;
+    const items = data.items;
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "SELECT" || tag === "INPUT" || tag === "TEXTAREA") return;
+      if (items.length === 0) return;
+
+      const select = (i: number) => {
+        const clamped = Math.max(0, Math.min(items.length - 1, i));
+        setSelected(clamped);
+        seekTo(items[clamped].ts_ms);
+      };
+      const judge = (v: Verdict) => {
+        setVerdict(selected, v);
+        if (v !== "wrong_class" && selected < items.length - 1) select(selected + 1);
+      };
+
+      switch (e.key) {
+        case "j": case "ArrowDown": e.preventDefault(); select(selected + 1); break;
+        case "k": case "ArrowUp":   e.preventDefault(); select(selected - 1); break;
+        case " ": case "Enter":     e.preventDefault(); seekTo(items[selected].ts_ms); break;
+        case "1": case "c": judge("correct"); break;
+        case "2": case "w": judge("wrong_class"); break;
+        case "3": case "x": judge("not_a_shot"); break;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [data, selected, seekTo]);
 
   const setCorrectedType = (i: number, t: string) =>
     setRows((r) => r.map((row, j) => (j === i ? { ...row, correctedType: t } : row)));
@@ -175,6 +209,13 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
         <span className="text-yellow-400">✎ tipo errado</span> (e escolhe o tipo certo) ou{" "}
         <span className="text-red-400">✗ não foi batida</span>. Cada resposta é uma label de treino.
       </p>
+      <p className="text-xs text-gray-600">
+        Teclado: <kbd className="px-1 bg-gray-800 rounded">j</kbd>/<kbd className="px-1 bg-gray-800 rounded">k</kbd> navegar ·{" "}
+        <kbd className="px-1 bg-gray-800 rounded">espaço</kbd> repetir ·{" "}
+        <kbd className="px-1 bg-gray-800 rounded">1</kbd> certa ·{" "}
+        <kbd className="px-1 bg-gray-800 rounded">2</kbd> tipo errado ·{" "}
+        <kbd className="px-1 bg-gray-800 rounded">3</kbd> não foi batida — avança sozinho.
+      </p>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Video */}
@@ -252,8 +293,9 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
               key={`${item.player_id}-${item.ts_ms}`}
               item={item}
               row={rows[i]}
+              isSelected={i === selected}
               strokeClasses={data.stroke_classes}
-              onSeek={() => seekTo(item.ts_ms)}
+              onSeek={() => { setSelected(i); seekTo(item.ts_ms); }}
               onVerdict={(v) => setVerdict(i, v)}
               onType={(t) => setCorrectedType(i, t)}
             />
@@ -304,6 +346,7 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
 function StrokeRow({
   item,
   row,
+  isSelected,
   strokeClasses,
   onSeek,
   onVerdict,
@@ -311,14 +354,19 @@ function StrokeRow({
 }: {
   item: ReviewItem;
   row: RowState;
+  isSelected: boolean;
   strokeClasses: string[];
   onSeek: () => void;
   onVerdict: (v: Verdict) => void;
   onType: (t: string) => void;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (isSelected) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [isSelected]);
   const verdictBtn = (v: Verdict, label: string, active: string, idle: string) => (
     <button
-      onClick={() => onVerdict(v)}
+      onClick={(e) => { e.stopPropagation(); onVerdict(v); }}
       className={`px-2.5 py-1 rounded-lg text-sm font-medium transition-colors ${row.verdict === v ? active : idle}`}
     >
       {label}
@@ -327,7 +375,11 @@ function StrokeRow({
 
   return (
     <div
-      className={`bg-gray-900 border rounded-xl px-4 py-3 ${row.verdict ? "border-gray-500" : "border-gray-700"}`}
+      ref={ref}
+      onClick={onSeek}
+      className={`bg-gray-900 border rounded-xl px-4 py-3 cursor-pointer ${
+        isSelected ? "border-blue-500" : row.verdict ? "border-gray-500" : "border-gray-700"
+      }`}
     >
       <div className="flex items-center gap-3 flex-wrap">
         <button onClick={onSeek} className="font-mono text-sm text-blue-400 hover:text-blue-300">
@@ -353,7 +405,7 @@ function StrokeRow({
       </div>
 
       {row.verdict === "wrong_class" && (
-        <div className="mt-2 flex items-center gap-2">
+        <div className="mt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
           <span className="text-xs text-gray-500">Tipo certo:</span>
           <select
             value={row.correctedType}

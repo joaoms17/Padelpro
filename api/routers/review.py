@@ -18,11 +18,9 @@ picks the new weights up automatically on the next run.
 from __future__ import annotations
 import logging
 import json
-import os
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
-from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/review", tags=["review"])
@@ -208,51 +206,11 @@ def _retrain_bg() -> None:
 # Video streaming with Range support (the review page seeks constantly)
 # ---------------------------------------------------------------------------
 
-_CHUNK = 1024 * 1024
-
 
 @router.get("/{rid}/video")
 async def stream_video(rid: str, request: Request):
     path = _video_path(rid)
     if path is None:
         raise HTTPException(status_code=404, detail="Vídeo já não está disponível.")
-
-    file_size = os.path.getsize(path)
-    range_header = request.headers.get("range")
-
-    start, end = 0, file_size - 1
-    status_code = 200
-    if range_header and range_header.startswith("bytes="):
-        spec = range_header[len("bytes="):].split("-")
-        try:
-            if spec[0]:
-                start = int(spec[0])
-            if len(spec) > 1 and spec[1]:
-                end = min(int(spec[1]), file_size - 1)
-            status_code = 206
-        except ValueError:
-            raise HTTPException(status_code=416, detail="Range inválido.")
-        if start > end or start >= file_size:
-            raise HTTPException(status_code=416, detail="Range fora do ficheiro.")
-
-    length = end - start + 1
-
-    def reader():
-        with open(path, "rb") as f:
-            f.seek(start)
-            remaining = length
-            while remaining > 0:
-                chunk = f.read(min(_CHUNK, remaining))
-                if not chunk:
-                    break
-                remaining -= len(chunk)
-                yield chunk
-
-    headers = {
-        "Accept-Ranges": "bytes",
-        "Content-Length": str(length),
-    }
-    if status_code == 206:
-        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
-    return StreamingResponse(reader(), status_code=status_code,
-                             media_type="video/mp4", headers=headers)
+    from api.streaming import range_stream_response
+    return range_stream_response(path, request)
