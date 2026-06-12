@@ -67,13 +67,18 @@ def _sweep_old() -> None:
 
 @router.get("/capabilities")
 async def capabilities():
-    """What this backend can do. `analyze` requires torch/torchvision."""
+    """What this backend can do. `analyze` requires torch/torchvision;
+    `max_upload_mb` lets the deployment cap uploads (tunnels/free tiers)."""
     try:
         from padelpro_vision.analysis import analysis_available
         analyze = analysis_available()
     except Exception:
         analyze = False
-    return {"analyze": analyze}
+    try:
+        max_mb = int(os.environ.get("API_MAX_UPLOAD_MB", "150"))
+    except ValueError:
+        max_mb = 150
+    return {"analyze": analyze, "max_upload_mb": max_mb}
 
 
 @router.post("/upload")

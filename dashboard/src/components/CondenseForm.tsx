@@ -11,7 +11,7 @@ import {
 } from "@/lib/api";
 import { ClipReportView } from "@/components/ClipReport";
 
-const MAX_MB = 150; // free-tier backend ceiling — bigger videos crash it
+const DEFAULT_MAX_MB = 150; // overridden by the backend's capabilities
 
 function fmtMin(s?: number): string {
   if (s == null) return "—";
@@ -35,11 +35,15 @@ export function CondenseForm() {
   const [canAnalyze, setCanAnalyze] = useState(false);
   const [analyze, setAnalyze] = useState(false);
   const [courtId, setCourtId] = useState("court1");
+  const [maxMB, setMaxMB] = useState(DEFAULT_MAX_MB);
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     getCondenseCapabilities()
-      .then((c) => setCanAnalyze(!!c.analyze))
+      .then((c) => {
+        setCanAnalyze(!!c.analyze);
+        if (c.max_upload_mb && c.max_upload_mb > 0) setMaxMB(c.max_upload_mb);
+      })
       .catch(() => setCanAnalyze(false));
   }, []);
 
@@ -70,16 +74,16 @@ export function CondenseForm() {
     setFileMB(f ? f.size / (1024 * 1024) : null);
   }
 
-  const oversize = fileMB != null && fileMB > MAX_MB;
+  const oversize = fileMB != null && fileMB > maxMB;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const file = fileRef.current?.files?.[0];
     if (!file) return;
-    if (file.size > MAX_MB * 1024 * 1024) {
+    if (file.size > maxMB * 1024 * 1024) {
       setError(
-        `Vídeo demasiado grande (${Math.round(fileMB!)} MB). O servidor gratuito aguenta até ~${MAX_MB} MB ` +
-        `(~4 min de 1080p). Usa um clip mais curto, ou processa jogos completos localmente.`,
+        `Vídeo demasiado grande (${Math.round(fileMB!)} MB). Este servidor aguenta até ~${maxMB} MB. ` +
+        `Usa um clip mais curto (ou exporta em 720p).`,
       );
       return;
     }
@@ -111,7 +115,7 @@ export function CondenseForm() {
         <div className="flex items-baseline justify-between mb-1">
           <label className="block text-sm font-medium text-gray-300">Vídeo do jogo</label>
           <span className={`text-xs ${oversize ? "text-red-400" : "text-gray-500"}`}>
-            máx. {MAX_MB} MB (~4 min)
+            máx. {maxMB} MB
           </span>
         </div>
         <input

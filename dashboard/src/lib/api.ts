@@ -217,7 +217,7 @@ export interface CondenseStatus {
   report_error?: string;
 }
 
-export async function getCondenseCapabilities(): Promise<{ analyze: boolean }> {
+export async function getCondenseCapabilities(): Promise<{ analyze: boolean; max_upload_mb?: number }> {
   const r = await fetch(`${BASE}/condense/capabilities`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
