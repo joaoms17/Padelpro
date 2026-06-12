@@ -97,6 +97,14 @@ pytest tests/ -v
 
 ---
 
+## Deploy
+
+Ver [docs/DEPLOY.md](docs/DEPLOY.md) — frontend no Vercel (auto a cada push ao
+`main`) + API local com tunnel (sessões de equipa) ou no Render (sempre no ar),
+com código de acesso opcional via `PADELPRO_ACCESS_CODE`.
+
+---
+
 ## Avaliação e qualidade
 
 O sistema de medição vive em `padelpro_vision/evaluation/` e `padelpro_vision/quality/`
