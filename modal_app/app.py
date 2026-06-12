@@ -33,9 +33,13 @@ image = (
         "opencv-python-headless",
         "numpy",
         "supervision",
+        "rtmlib",          # real RTMPose (ONNX) — stroke classification on GPU box
+        "onnxruntime",
         "fastapi[standard]",
     )
-    .run_commands(f"git clone --depth 1 {REPO} /repo")
+    # CACHE_BUST changes here force a fresh clone so a deploy picks up the
+    # latest main (bump the date when you want the newest code).
+    .run_commands(f"echo 2026-06-12 && git clone --depth 1 {REPO} /repo")
 )
 
 app = modal.App("padelpro-analyze", image=image)
