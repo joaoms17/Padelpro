@@ -7,6 +7,7 @@ just on a single test clip.
 from __future__ import annotations
 import json
 import logging
+import time
 from pathlib import Path
 
 import numpy as np
@@ -76,6 +77,7 @@ def build_quality_report(
 
     report = {
         "match_id": match_id,
+        "generated_at": time.time(),
         "detection": detection,
         "tracking": tracking,
         "physics": physics,

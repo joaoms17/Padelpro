@@ -397,6 +397,54 @@ export function labelClipUrl(name: string): string {
   return withCode(`${BASE}/label/clip/${encodeURIComponent(name)}`);
 }
 
+// ---- Fleet quality ----
+
+export interface QualityReport {
+  match_id: string;
+  generated_at: number;
+  detection?: {
+    frames_processed: number;
+    mean_detection_confidence: number;
+    mean_players_per_frame: number;
+    pct_frames_with_expected_players: number;
+    pct_frames_with_zero_players: number;
+  };
+  tracking?: {
+    n_tracks: number;
+    tracks_per_minute: number;
+    avg_track_duration_s: number;
+    pct_time_with_expected_players: number;
+  };
+  physics?: {
+    pct_implausible_speed: number;
+    max_observed_speed_ms: number;
+    teleport_count: number;
+    pct_out_of_court: number;
+  } | null;
+  strokes?: {
+    n_events: number;
+    mean_confidence: number;
+    pct_with_audio_onset: number;
+  };
+  performance?: {
+    elapsed_s: number;
+    realtime_factor: number;
+  };
+  homography_quality?: { rating: string; reprojection_error_px: number | null } | null;
+}
+
+export interface FleetQuality {
+  n_matches: number;
+  summary: Record<string, number>;
+  reports: QualityReport[];
+}
+
+export async function getFleetQuality(): Promise<FleetQuality> {
+  const r = await apiFetch(`${BASE}/quality/`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
 // ---- Court calibration ----
 
 export async function saveCalibration(
