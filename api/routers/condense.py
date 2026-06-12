@@ -10,6 +10,7 @@ backend without a GPU.
 from __future__ import annotations
 import asyncio
 import glob
+import json
 import logging
 import os
 import shutil
@@ -69,11 +70,14 @@ def _sweep_old() -> None:
 async def capabilities():
     """What this backend can do. `analyze` requires torch/torchvision;
     `max_upload_mb` lets the deployment cap uploads (tunnels/free tiers)."""
-    try:
-        from padelpro_vision.analysis import analysis_available
-        analyze = analysis_available()
-    except Exception:
-        analyze = False
+    if os.environ.get("MODAL_ANALYZE_URL", "").strip():
+        analyze = True          # análise delegada na GPU cloud
+    else:
+        try:
+            from padelpro_vision.analysis import analysis_available
+            analyze = analysis_available()
+        except Exception:
+            analyze = False
     try:
         max_mb = int(os.environ.get("API_MAX_UPLOAD_MB", "150"))
     except ValueError:
@@ -87,6 +91,7 @@ async def upload_and_condense(
     file: UploadFile = File(...),
     analyze: bool = Form(False),
     court_id: str = Form("court1"),
+    deep: bool = Form(False),
 ):
     """Upload a video; returns a job_id to poll. The condensed video is produced
     in the background. With analyze=true (and torch installed) a player report
@@ -109,9 +114,12 @@ async def upload_and_condense(
         "filename": file.filename,
         "output": str(out_path),
     }
-    logger.info("Condense job %s: uploaded %s (analyze=%s)", job_id, file.filename, analyze)
+    logger.info(
+        "Condense job %s: uploaded %s (analyze=%s, deep=%s)",
+        job_id, file.filename, analyze, deep,
+    )
 
-    background_tasks.add_task(_condense_bg, job_id, in_path, out_path, analyze, court_id)
+    background_tasks.add_task(_condense_bg, job_id, in_path, out_path, analyze, court_id, deep)
     return {"job_id": job_id}
 
 
@@ -147,7 +155,7 @@ async def download_condensed(job_id: str):
 
 def _condense_sync(
     job_id: str, in_path: Path, out_path: Path,
-    analyze: bool = False, court_id: str = "court1",
+    analyze: bool = False, court_id: str = "court1", deep: bool = False,
 ) -> None:
     from padelpro_vision.segmentation.segmentation import get_active_segments
     from padelpro_vision.io.condense import condense_video
@@ -181,26 +189,18 @@ def _condense_sync(
     # Player analysis runs on the ORIGINAL video (needs the source frames),
     # so it must happen before cleanup.
     if analyze:
-        try:
-            from padelpro_vision.analysis import analyze_clip, analysis_available
-            if analysis_available():
-                _jobs[job_id]["phase"] = "análise de jogadores"
-
-                def _progress(p: float) -> None:
-                    _jobs[job_id]["progress"] = round(p * 100)
-
-                report = analyze_clip(
-                    in_path, _UPLOAD_DIR / job_id, court_id=court_id,
-                    segments=segs, progress_cb=_progress,
+        modal_url = os.environ.get("MODAL_ANALYZE_URL", "").strip()
+        if modal_url:
+            try:
+                _jobs[job_id]["phase"] = "análise na GPU (cloud)"
+                _jobs[job_id]["report"] = _analyze_via_modal(
+                    modal_url, in_path, court_id, deep
                 )
-                _jobs[job_id]["report"] = report
-            else:
-                _jobs[job_id]["report_error"] = (
-                    "Este servidor não tem o motor de análise (torch) instalado."
-                )
-        except Exception as exc:
-            logger.exception("Analysis failed for job %s", job_id)
-            _jobs[job_id]["report_error"] = f"Análise falhou: {exc}"
+            except Exception as exc:
+                logger.exception("Modal analysis failed for job %s", job_id)
+                _jobs[job_id]["report_error"] = f"Análise GPU falhou: {exc}"
+        else:
+            _run_local_analysis(job_id, in_path, court_id, deep, segs)
 
     _jobs[job_id]["phase"] = "corte do vídeo"
     condense_video(in_path, segs, out_path)
@@ -210,13 +210,62 @@ def _condense_sync(
     _rm(_UPLOAD_DIR / job_id)
 
 
+def _analyze_via_modal(url: str, video: Path, court_id: str, deep: bool) -> dict:
+    """Send the clip to the Modal GPU endpoint; returns the report dict."""
+    import requests
+    from config import DEFAULT_CONFIG
+    from padelpro_vision.calibration.calibration import CourtCalibrator
+
+    H = CourtCalibrator(DEFAULT_CONFIG.calibration.homography_cache_dir).load(court_id)
+    court_h = H.tolist() if H is not None else None
+    with open(video, "rb") as f:
+        r = requests.post(
+            url.rstrip("/"),
+            files={"file": (video.name, f, "video/mp4")},
+            data={"court_h": json.dumps(court_h), "deep": "true" if deep else "false"},
+            timeout=1800,
+        )
+    r.raise_for_status()
+    return r.json()
+
+
+def _run_local_analysis(
+    job_id: str, in_path: Path, court_id: str, deep: bool, segs: list
+) -> None:
+    try:
+        from padelpro_vision.analysis import analyze_clip, analysis_available
+        if analysis_available():
+            _jobs[job_id]["phase"] = "análise de jogadores"
+
+            def _progress(p: float) -> None:
+                _jobs[job_id]["progress"] = round(p * 100)
+
+            def _phase(name: str) -> None:
+                _jobs[job_id]["phase"] = name
+                _jobs[job_id]["progress"] = 0
+
+            report = analyze_clip(
+                in_path, _UPLOAD_DIR / job_id, court_id=court_id,
+                segments=segs, deep=deep,
+                progress_cb=_progress, phase_cb=_phase,
+            )
+            _jobs[job_id]["report"] = report
+        else:
+            _jobs[job_id]["report_error"] = (
+                "Este servidor não tem o motor de análise (torch) instalado."
+            )
+    except Exception as exc:
+        logger.exception("Analysis failed for job %s", job_id)
+        _jobs[job_id]["report_error"] = f"Análise falhou: {exc}"
+
+
 async def _condense_bg(
     job_id: str, in_path: Path, out_path: Path,
-    analyze: bool = False, court_id: str = "court1",
+    analyze: bool = False, court_id: str = "court1", deep: bool = False,
 ) -> None:
     try:
         await asyncio.get_event_loop().run_in_executor(
-            None, lambda: _condense_sync(job_id, in_path, out_path, analyze, court_id)
+            None, lambda: _condense_sync(job_id, in_path, out_path, analyze, court_id, deep)
         )
         _jobs[job_id]["status"] = "done"
         logger.info("Condense job %s done.", job_id)

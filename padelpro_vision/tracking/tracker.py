@@ -20,6 +20,51 @@ class Track:
     timestamp_ms: float
 
 
+class SupervisionByteTrack:
+    """
+    ByteTrack via the `supervision` package (MIT). Kalman-based association —
+    noticeably fewer ID switches than GreedyTracker when players cross.
+    Falls back is handled by the caller (import may fail).
+    """
+
+    def __init__(self, frame_rate: float = 4.0, lost_track_s: float = 4.0) -> None:
+        import supervision as sv
+        self._sv = sv
+        self._impl = sv.ByteTrack(
+            frame_rate=max(1, int(round(frame_rate))),
+            lost_track_buffer=max(2, int(lost_track_s * frame_rate)),
+            track_activation_threshold=0.30,
+            minimum_matching_threshold=0.85,
+        )
+
+    def update(
+        self, detections: list[PlayerBox], frame_idx: int, timestamp_ms: float
+    ) -> list[Track]:
+        if not detections:
+            return []
+        sv = self._sv
+        dets = sv.Detections(
+            xyxy=np.array([[d.x1, d.y1, d.x2, d.y2] for d in detections], dtype=np.float32),
+            confidence=np.array([d.confidence for d in detections], dtype=np.float32),
+            class_id=np.zeros(len(detections), dtype=int),
+        )
+        out = self._impl.update_with_detections(dets)
+        tracks: list[Track] = []
+        for i in range(len(out)):
+            tid = out.tracker_id[i] if out.tracker_id is not None else None
+            if tid is None:
+                continue
+            x1, y1, x2, y2 = (float(v) for v in out.xyxy[i])
+            conf = float(out.confidence[i]) if out.confidence is not None else 0.5
+            tracks.append(Track(
+                track_id=int(tid),
+                box=PlayerBox(x1, y1, x2, y2, conf),
+                frame_idx=frame_idx,
+                timestamp_ms=timestamp_ms,
+            ))
+        return tracks
+
+
 class GreedyTracker:
     """
     Lightweight multi-object tracker for padel (≤6 targets, low frame rate).

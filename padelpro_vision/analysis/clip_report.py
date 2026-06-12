@@ -257,7 +257,8 @@ def _zone_metrics(pts: list[tuple[float, float, float, int]]) -> dict:
 
 def _heatmap(pts: list[tuple[float, float, float, int]]) -> list[list[float]]:
     grid = np.zeros((HEATMAP_ROWS, HEATMAP_COLS), dtype=np.float32)
-    for _, x, y, _ in pts:
+    for p in pts:
+        x, y = p[1], p[2]
         r = int(np.clip(y / COURT_LENGTH_M * HEATMAP_ROWS, 0, HEATMAP_ROWS - 1))
         c = int(np.clip(x / COURT_WIDTH_M * HEATMAP_COLS, 0, HEATMAP_COLS - 1))
         grid[r, c] += 1
@@ -304,6 +305,63 @@ def _hit_zone(y: float) -> str:
     return "meio"
 
 
+def _pixel_at(
+    pts: list[tuple], t_s: float, max_gap_ms: float = 450.0
+) -> tuple[float, float, float] | None:
+    """Player's pixel (centre_x, centre_y, box_top_y) nearest in time to t."""
+    if not pts or len(pts[0]) < 7:
+        return None
+    t_ms = t_s * 1000.0
+    p = min(pts, key=lambda p: abs(p[0] - t_ms))
+    if abs(p[0] - t_ms) > max_gap_ms:
+        return None
+    return p[4], p[5], p[6]
+
+
+def detect_ball_at_hits(
+    video_path: Path,
+    hit_times: list[float],
+    progress_cb=None,
+) -> dict[int, tuple[float, float, float]]:
+    """
+    Run a heavy-but-accurate ball detector ONLY around each hit instant.
+    Returns {hit_index: (ball_px_x, ball_px_y, score)} for hits where the ball
+    was found. CPU cost ≈ 3-4 s per probed frame, so 2 frames per hit.
+    """
+    import cv2
+    from padelpro_vision.detection.detector import TorchvisionDetector
+
+    det = TorchvisionDetector(
+        score_thr=0.25,
+        device="cpu",
+        model_name="retinanet_resnet50_fpn_v2",
+        target_label=37,           # COCO "sports ball"
+    )
+    cap = cv2.VideoCapture(str(video_path))
+    found: dict[int, tuple[float, float, float]] = {}
+    offsets = (0.0, -0.12)        # the hit frame, then just before contact
+    for i, t in enumerate(hit_times):
+        best: tuple[float, float, float] | None = None
+        for off in offsets:
+            cap.set(cv2.CAP_PROP_POS_MSEC, max(0.0, (t + off) * 1000.0))
+            ok, frame = cap.read()
+            if not ok:
+                continue
+            balls = det.detect(frame)
+            for b in balls:
+                if best is None or b.confidence > best[2]:
+                    bx, by = b.center
+                    best = (bx, by, b.confidence)
+            if best is not None:
+                break             # found on the contact frame — good enough
+        if best is not None:
+            found[i] = best
+        if progress_cb:
+            progress_cb((i + 1) / max(1, len(hit_times)))
+    cap.release()
+    return found
+
+
 # ---------------------------------------------------------------------------
 # Main entry
 # ---------------------------------------------------------------------------
@@ -314,7 +372,9 @@ def analyze_clip(
     court_id: str = "court1",
     homography: np.ndarray | None = None,
     segments: list | None = None,
+    deep: bool = False,
     progress_cb=None,
+    phase_cb=None,
 ) -> dict:
     """
     Analyse a short clip and return the report dict (also saved to
@@ -389,8 +449,15 @@ def analyze_clip(
     detector = TorchvisionDetector(
         score_thr=0.35, device="cpu", min_size=DETECT_MIN_SIZE,
     )
-    tracker = GreedyTracker(max_missed_s=4.0)
     skip = max(1, round(fps / TARGET_FPS))
+    sampled_fps = fps / skip
+    try:
+        from padelpro_vision.tracking.tracker import SupervisionByteTrack
+        tracker = SupervisionByteTrack(frame_rate=sampled_fps, lost_track_s=4.0)
+        logger.info("Tracker: ByteTrack (supervision).")
+    except Exception:
+        tracker = GreedyTracker(max_missed_s=4.0)
+        logger.info("Tracker: GreedyTracker (supervision indisponível).")
 
     # {tid: [(ts_ms, x_m, y_m, rally_idx)]}
     raw_tracks: dict[int, list[tuple[float, float, float, int]]] = {}
@@ -419,13 +486,14 @@ def analyze_clip(
                 in_court = in_court[:6]
 
                 tracks = tracker.update([t[0] for t in in_court], frame_idx, ts_ms)
-                pos_by_box = {id(t[0]): (t[1], t[2]) for t in in_court}
                 for tr in tracks:
-                    cpos = pos_by_box.get(id(tr.box))
-                    if cpos is None:
-                        continue
+                    fx, fy = foot_point(tr.box)
+                    cx, cy = project_point(H, fx, fy)
+                    # Trailing fields are the PIXEL box (centre x/y, top y) so the
+                    # deep pass can match players to the detected ball on-screen.
+                    bcx, bcy = tr.box.center
                     raw_tracks.setdefault(tr.track_id, []).append(
-                        (ts_ms, cpos[0], cpos[1], rally_idx)
+                        (ts_ms, cx, cy, rally_idx, bcx, bcy, tr.box.y1)
                     )
 
                 n_processed += 1
@@ -473,7 +541,21 @@ def analyze_clip(
                 "hits": 0,
             })
 
-    # ---- hit attribution (experimental) ------------------------------------
+    # ---- deep pass: ball detection at hit instants --------------------------
+    ball_at_hit: dict[int, tuple[float, float, float]] = {}
+    t_ball = 0.0
+    if deep and players and hit_times:
+        t3 = time.time()
+        if phase_cb:
+            phase_cb("bola nas pancadas")
+        ball_at_hit = detect_ball_at_hits(video_path, hit_times, progress_cb=progress_cb)
+        t_ball = time.time() - t3
+        logger.info(
+            "Ball pass: found at %d/%d hits (%.1fs).",
+            len(ball_at_hit), len(hit_times), t_ball,
+        )
+
+    # ---- hit attribution -----------------------------------------------------
     hit_records: list[dict] = []
     if players:
         team_of = {p["id"]: p["team"] for p in players}
@@ -483,36 +565,77 @@ def analyze_clip(
             for t in hit_times
         ]
         prev_rally, expected_team = -1, None
-        for t, r in zip(hit_times, rally_of_hit):
+        for hi, (t, r) in enumerate(zip(hit_times, rally_of_hit)):
             if r < 0:
                 continue
             if r != prev_rally:
                 expected_team = None     # new rally — no expectation yet
                 prev_rally = r
-            spikes = {
-                pid: _speed_at(pts, t, ONSET_WINDOW_S)
-                for pid, pts in player_tracks.items()
-            }
-            cands = (
-                {pid: v for pid, v in spikes.items() if team_of[pid] == expected_team}
-                if expected_team else spikes
-            )
-            if not cands or max(cands.values()) <= 0.0:
-                cands = spikes
-            hitter = max(cands, key=cands.get)
+
+            hitter = None
+            via_ball = False
+            overhead = False
+            ball = ball_at_hit.get(hi)
+            if ball is not None:
+                # Nearest player to the ball on screen, normalised by box size
+                # so far (small) and near (big) players compete fairly.
+                best_d = None
+                for pid, pts in player_tracks.items():
+                    pp = _pixel_at(pts, t)
+                    if pp is None:
+                        continue
+                    px, py, ptop = pp
+                    scale = max(20.0, (py - ptop) * 2.0)   # ≈ box height
+                    d = float(np.hypot(ball[0] - px, ball[1] - py)) / scale
+                    if best_d is None or d < best_d:
+                        best_d, hitter = d, pid
+                if hitter is not None and best_d is not None and best_d <= 2.5:
+                    via_ball = True
+                    pp = _pixel_at(player_tracks[hitter], t)
+                    if pp is not None and ball[1] < pp[2]:
+                        overhead = True                     # ball above head
+                else:
+                    hitter = None
+
+            if hitter is None:
+                # Fallback: movement spike + team alternation (experimental)
+                spikes = {
+                    pid: _speed_at(pts, t, ONSET_WINDOW_S)
+                    for pid, pts in player_tracks.items()
+                }
+                cands = (
+                    {pid: v for pid, v in spikes.items() if team_of[pid] == expected_team}
+                    if expected_team else spikes
+                )
+                if not cands or max(cands.values()) <= 0.0:
+                    cands = spikes
+                hitter = max(cands, key=cands.get)
+
             expected_team = "perto" if team_of[hitter] == "longe" else "longe"
 
             pos = _pos_at(player_tracks[hitter], t)
             is_first = not any(h["rally"] == r for h in hit_records)
+            if is_first:
+                shot_type = "serviço"
+            elif overhead:
+                shot_type = "smash"
+            else:
+                shot_type = _hit_zone(pos[1]) if pos else "?"
             hit_records.append({
                 "t_s": round(t, 2),
                 "rally": r,
                 "player_id": hitter,
                 "pos": [round(pos[0], 2), round(pos[1], 2)] if pos else None,
-                "type": "serviço" if is_first else (_hit_zone(pos[1]) if pos else "?"),
+                "type": shot_type,
+                "via_ball": via_ball,
             })
         for p in players:
             p["hits"] = sum(1 for h in hit_records if h["player_id"] == p["id"])
+            types: dict[str, int] = {}
+            for h in hit_records:
+                if h["player_id"] == p["id"]:
+                    types[h["type"]] = types.get(h["type"], 0) + 1
+            p["shot_types"] = types
         total_attr = max(1, len(hit_records))
         for p in players:
             p["hit_share_pct"] = round(100.0 * p["hits"] / total_attr, 1)
@@ -544,7 +667,16 @@ def analyze_clip(
             "total": len(hit_times),
             "per_min_useful": round(len(hit_times) / (useful_s / 60.0), 1) if useful_s else 0.0,
             "avg_per_rally": round(len(hit_times) / len(rallies), 1) if rallies else 0.0,
-            "attribution": "experimental",
+            "attribution": "bola" if ball_at_hit else "experimental",
+            "ball_found_pct": (
+                round(100.0 * len(ball_at_hit) / len(hit_times), 1)
+                if deep and hit_times else None
+            ),
+            "via_ball_pct": (
+                round(100.0 * sum(1 for h in hit_records if h.get("via_ball")) /
+                      max(1, len(hit_records)), 1)
+                if deep and hit_records else None
+            ),
         },
         "players": players,
         "rallies": rally_rows,
@@ -553,6 +685,7 @@ def analyze_clip(
             "segmentation": round(t_seg, 1),
             "audio": round(t_audio, 1),
             "detection": round(t_det, 1),
+            "ball": round(t_ball, 1),
             "total": round(time.time() - t0, 1),
         },
     }

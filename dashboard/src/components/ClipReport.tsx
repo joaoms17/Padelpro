@@ -97,6 +97,22 @@ function PlayerCard({ p }: { p: PlayerReport }) {
           <CourtHeatmap p={p} />
         </div>
       </div>
+      {p.shot_types && Object.keys(p.shot_types).length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {Object.entries(p.shot_types).map(([t, n]) => (
+            <span
+              key={t}
+              className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
+                t === "smash"
+                  ? "border-amber-600 text-amber-300"
+                  : "border-gray-700 text-gray-400"
+              }`}
+            >
+              {t} ×{n}
+            </span>
+          ))}
+        </div>
+      )}
       <div className="text-[11px] text-gray-600">
         cobertura do tracking: {p.coverage_pct}%
       </div>
@@ -157,9 +173,18 @@ export function ClipReportView({ report }: { report: ClipReport }) {
       )}
 
       <p className="text-[11px] text-gray-600">
-        * Pancadas detetadas pelo som e atribuídas ao jogador com o pico de movimento
-        mais forte nesse instante — método experimental, trata os números por jogador
-        como aproximações.
+        {report.hits.attribution === "bola" ? (
+          <>
+            * Pancadas detetadas pelo som; {report.hits.via_ball_pct ?? report.hits.ball_found_pct}%
+            atribuídas pela posição da bola no contacto (resto por pico de movimento).
+          </>
+        ) : (
+          <>
+            * Pancadas detetadas pelo som e atribuídas ao jogador com o pico de movimento
+            mais forte nesse instante — método experimental, trata os números por jogador
+            como aproximações.
+          </>
+        )}
       </p>
     </div>
   );

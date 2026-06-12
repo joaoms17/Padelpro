@@ -188,6 +188,7 @@ export interface PlayerReport {
   heatmap: number[][];
   hits: number;
   hit_share_pct?: number;
+  shot_types?: Record<string, number>;
 }
 
 export interface ClipReport {
@@ -195,7 +196,14 @@ export interface ClipReport {
   calibrated: boolean;
   court_id: string;
   clip: { duration_s: number; useful_s: number; useful_pct: number; rallies: number; sampled_fps: number };
-  hits: { total: number; per_min_useful: number; avg_per_rally: number; attribution: string };
+  hits: {
+    total: number;
+    per_min_useful: number;
+    avg_per_rally: number;
+    attribution: string;
+    ball_found_pct?: number | null;
+    via_ball_pct?: number | null;
+  };
   players: PlayerReport[];
   rallies: { i: number; start_s: number; dur_s: number; hits: number }[];
   shots: { t_s: number; rally: number; player_id: number; pos: [number, number] | null; type: string }[];
@@ -225,13 +233,14 @@ export async function getCondenseCapabilities(): Promise<{ analyze: boolean; max
 
 export async function uploadForCondense(
   file: File,
-  opts?: { analyze?: boolean; courtId?: string },
+  opts?: { analyze?: boolean; courtId?: string; deep?: boolean },
 ): Promise<{ job_id: string }> {
   const fd = new FormData();
   fd.append("file", file);
   if (opts?.analyze) {
     fd.append("analyze", "true");
     fd.append("court_id", opts.courtId || "court1");
+    if (opts.deep) fd.append("deep", "true");
   }
   const r = await fetch(`${BASE}/condense/upload`, { method: "POST", body: fd });
   if (!r.ok) throw new Error(await r.text());

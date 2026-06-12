@@ -34,6 +34,7 @@ export function CondenseForm() {
   const [error, setError] = useState("");
   const [canAnalyze, setCanAnalyze] = useState(false);
   const [analyze, setAnalyze] = useState(false);
+  const [deep, setDeep] = useState(false);
   const [courtId, setCourtId] = useState("court1");
   const [maxMB, setMaxMB] = useState(DEFAULT_MAX_MB);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -92,7 +93,7 @@ export function CondenseForm() {
     setJobId(null);
     setUploading(true);
     try {
-      const { job_id } = await uploadForCondense(file, { analyze, courtId });
+      const { job_id } = await uploadForCondense(file, { analyze, courtId, deep });
       setJobId(job_id);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -149,18 +150,33 @@ export function CondenseForm() {
             </span>
           </label>
           {analyze && (
-            <div className="flex items-center gap-2 text-xs text-gray-400 pl-6">
-              <span>Campo:</span>
-              <input
-                value={courtId}
-                disabled={busy}
-                onChange={(e) => setCourtId(e.target.value)}
-                className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white w-28"
-              />
-              <Link href="/calibrate" className="underline text-gray-500 hover:text-gray-300">
-                calibrar primeiro
-              </Link>
-            </div>
+            <>
+              <div className="flex items-center gap-2 text-xs text-gray-400 pl-6">
+                <span>Campo:</span>
+                <input
+                  value={courtId}
+                  disabled={busy}
+                  onChange={(e) => setCourtId(e.target.value)}
+                  className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white w-28"
+                />
+                <Link href="/calibrate" className="underline text-gray-500 hover:text-gray-300">
+                  calibrar primeiro
+                </Link>
+              </div>
+              <label className="flex items-center gap-2 text-xs text-gray-400 pl-6 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={deep}
+                  disabled={busy}
+                  onChange={(e) => setDeep(e.target.checked)}
+                  className="accent-emerald-500 w-3.5 h-3.5"
+                />
+                <span>
+                  🎯 Deteção da bola nas pancadas — atribuição mais fiável e smashes
+                  <span className="text-gray-600"> (+5-10 min)</span>
+                </span>
+              </label>
+            </>
           )}
         </div>
       )}
