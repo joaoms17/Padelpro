@@ -74,7 +74,7 @@ def main() -> None:
     print(f"  Deteções totais   : {total_tracks}")
 
     if total_tracks == 0:
-        print("\n  ⚠ Nenhuma deteção — instala os pesos YOLOX/RTMDet (ver README.md).")
+        print("\n  ⚠ Nenhuma deteção — instala torch/torchvision (ver README.md).")
     if args.analytics and not hom_path.exists():
         print(f"\n  ⚠ Homografia não encontrada para '{args.court_id}'.")
         print( "    Corre: python scripts/calibrate_court.py --video <video> --court-id", args.court_id)

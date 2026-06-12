@@ -174,69 +174,18 @@ class GreedyTracker:
 _StubByteTrack = GreedyTracker
 
 
-class ByteTrackTracker:
+def build_player_tracker(frame_rate: float = 25.0):
     """
-    ByteTrack multi-object tracker.
-
-    TODO: install ByteTrack (MIT):
-        pip install git+https://github.com/ifzhang/ByteTrack.git
-    or:
-        pip install bytetracker
+    The project's tracker: supervision ByteTrack (MIT, Kalman-based) when the
+    package is installed, GreedyTracker otherwise. Both expose update().
     """
-
-    def __init__(
-        self,
-        track_thresh: float = 0.5,
-        track_buffer: int = 30,
-        match_thresh: float = 0.8,
-    ) -> None:
-        self.track_thresh = track_thresh
-        self.track_buffer = track_buffer
-        self.match_thresh = match_thresh
-        self._impl = None
-        self._stub = GreedyTracker()
-        self._try_load()
-
-    def _try_load(self) -> None:
-        try:
-            from bytetracker import BYTETracker
-
-            class _Args:
-                track_thresh = self.track_thresh
-                track_buffer = self.track_buffer
-                match_thresh = self.match_thresh
-                mot20 = False
-
-            self._impl = BYTETracker(_Args())
-            logger.info("ByteTrack loaded successfully.")
-        except ImportError:
-            logger.info("bytetracker not installed — using built-in GreedyTracker.")
-
-    def update(
-        self, detections: list[PlayerBox], frame_idx: int, timestamp_ms: float
-    ) -> list[Track]:
-        if self._impl is None:
-            return self._stub.update(detections, frame_idx, timestamp_ms)
-        if not detections:
-            return []
-        dets_np = np.array(
-            [[d.x1, d.y1, d.x2, d.y2, d.confidence] for d in detections],
-            dtype=np.float32,
-        )
-        online_targets = self._impl.update(dets_np, [1080, 1920], [1080, 1920])
-        tracks: list[Track] = []
-        for t in online_targets:
-            tlbr = t.tlbr
-            box = PlayerBox(
-                x1=float(tlbr[0]), y1=float(tlbr[1]),
-                x2=float(tlbr[2]), y2=float(tlbr[3]),
-                confidence=float(t.score),
-            )
-            tracks.append(Track(
-                track_id=int(t.track_id), box=box,
-                frame_idx=frame_idx, timestamp_ms=timestamp_ms,
-            ))
-        return tracks
+    try:
+        tracker = SupervisionByteTrack(frame_rate=frame_rate)
+        logger.info("Tracking with supervision ByteTrack (frame_rate=%.1f).", frame_rate)
+        return tracker
+    except ImportError:
+        logger.info("supervision not installed — using built-in GreedyTracker.")
+        return GreedyTracker()
 
 
 def make_court_gate(H: np.ndarray, margin_x_m: float = 1.5, margin_y_m: float = 2.0):
@@ -261,14 +210,14 @@ def make_court_gate(H: np.ndarray, margin_x_m: float = 1.5, margin_y_m: float = 
 
 
 class Tracker:
-    """High-level tracker: detector → [court gate] → ByteTrackTracker."""
+    """High-level tracker: detector → [court gate] → ByteTrack/Greedy."""
 
-    def __init__(self, cfg=None, detection_filter=None) -> None:
+    def __init__(self, cfg=None, detection_filter=None, frame_rate: float = 25.0) -> None:
         from config import DEFAULT_CONFIG
         self._cfg = cfg or DEFAULT_CONFIG
         from padelpro_vision.detection.detector import build_detector
         self._detector = build_detector(self._cfg)
-        self._bt = ByteTrackTracker(track_thresh=self._cfg.model.score_threshold)
+        self._bt = build_player_tracker(frame_rate=frame_rate)
         self._filter = detection_filter
 
     @property

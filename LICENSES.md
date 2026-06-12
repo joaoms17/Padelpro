@@ -7,9 +7,8 @@ All dependencies must be permissive (Apache 2.0 / MIT / BSD). No AGPL, GPL, or N
 |-----------|-----------------|---------|-------|
 | Deep learning framework | PyTorch | BSD-3-Clause | ✅ |
 | Computer vision | OpenCV | Apache 2.0 | ✅ |
-| Detection (code) | MMDetection (RTMDet) | Apache 2.0 | ✅ Verify weights at download |
-| Detection (code) | YOLOX | Apache 2.0 | ✅ Verify weights at download |
-| Tracking | ByteTrack | MIT | ✅ |
+| Detection | torchvision (Faster R-CNN, COCO weights) | BSD-3-Clause | ✅ |
+| Tracking | supervision (ByteTrack) | MIT | ✅ |
 | Pose estimation (code) | MMPose (RTMPose / ViTPose) | Apache 2.0 | ✅ Verify weights at download |
 | Video I/O | ffmpeg | LGPL 2.1+ / GPL | Used as subprocess only — not linked. Commercial OK. |
 | Numerical | NumPy | BSD-3-Clause | ✅ |
@@ -22,10 +21,9 @@ All dependencies must be permissive (Apache 2.0 / MIT / BSD). No AGPL, GPL, or N
 ## ⚠️ Before Production
 
 Before shipping any model weights, confirm their specific license at the source:
-- MMDetection model zoo: https://github.com/open-mmlab/mmdetection/blob/main/docs/en/model_zoo.md
-- YOLOX releases: https://github.com/Megvii-BaseDetection/YOLOX/releases
+- torchvision models: https://pytorch.org/vision/stable/models.html
 - MMPose model zoo: https://github.com/open-mmlab/mmpose/blob/main/docs/en/model_zoo/body_2d_keypoint.md
-- ByteTrack: https://github.com/ifzhang/ByteTrack
+- supervision: https://github.com/roboflow/supervision
 
 ## Prohibited
 
