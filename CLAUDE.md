@@ -12,7 +12,7 @@ exemplo de treino.
 |---|---|---|
 | Deteção de jogadores | torchvision Faster R-CNN (BSD) | pesos COCO automáticos |
 | Tracking | ByteTrack via `supervision` (MIT) + GreedyTracker fallback | re-ID por cor da camisola em `tracking/reid.py` |
-| Pose | RTMPose-m / MMPose (Apache 2.0) | stub geométrico sem MMPose |
+| Pose | RTMPose-m via rtmlib/ONNX (Apache 2.0) | `pip install rtmlib onnxruntime`; stub geométrico se faltar |
 | Pancadas | TCN próprio (`strokes/classifier.py`) | regras geométricas até existir `checkpoints/stroke_tcn.pth` |
 | Calibração | homografia 4 pontos + deteção automática (`calibration/auto.py`) | qualidade validada e guardada |
 | Backend | FastAPI (`api/`) | jobs em memória — reiniciar perde a lista |
