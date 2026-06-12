@@ -111,6 +111,11 @@ export async function runPipeline(
   return r.json();
 }
 
+export async function deleteMatch(match_id: string): Promise<void> {
+  const r = await apiFetch(`${BASE}/matches/${match_id}`, { method: "DELETE" });
+  if (!r.ok) throw new Error(await r.text());
+}
+
 export async function retryAnalysis(match_id: string): Promise<MatchStatus> {
   const r = await apiFetch(`${BASE}/matches/${match_id}/retry`, { method: "POST" });
   if (!r.ok) throw new Error(await r.text());
