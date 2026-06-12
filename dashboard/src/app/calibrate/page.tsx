@@ -19,6 +19,8 @@ export default function CalibratePage() {
   const imgRef = useRef<HTMLImageElement | null>(null);
   // Real frame size (original video pixels) — clicks are scaled back to this.
   const frameSize = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
+  // Desired canvas display size — set before ready=true so useEffect can apply it.
+  const canvasDims = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
 
   const [courtId, setCourtId] = useState("court1");
   const [points, setPoints] = useState<Pt[]>([]);
@@ -41,11 +43,9 @@ export default function CalibratePage() {
 
       const img = new Image();
       img.onload = () => {
-        const c = canvasRef.current;
-        if (!c) return;
         const w = Math.min(MAX_W, width || img.naturalWidth);
-        c.width = w;
-        c.height = Math.round(w * ((height || img.naturalHeight) / (width || img.naturalWidth)));
+        const h = Math.round(w * ((height || img.naturalHeight) / (width || img.naturalWidth)));
+        canvasDims.current = { w, h };
         imgRef.current = img;
         setLoadingFrame(false);
         setReady(true);
@@ -89,7 +89,15 @@ export default function CalibratePage() {
     }
   }, [points]);
 
-  useEffect(() => { if (ready) redraw(); }, [ready, redraw]);
+  useEffect(() => {
+    if (!ready) return;
+    const c = canvasRef.current;
+    if (c && canvasDims.current.w) {
+      c.width = canvasDims.current.w;
+      c.height = canvasDims.current.h;
+    }
+    redraw();
+  }, [ready, redraw]);
 
   function onClickCanvas(e: React.MouseEvent<HTMLCanvasElement>) {
     if (!ready || points.length >= 4) return;
