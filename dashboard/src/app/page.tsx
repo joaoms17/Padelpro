@@ -19,8 +19,11 @@ export default function HomePage() {
       {/* Hero + main flow */}
       <section className="grid grid-cols-1 lg:grid-cols-5 gap-8 items-start">
         <div className="lg:col-span-2 space-y-4 pt-2">
-          <h1 className="text-3xl font-bold text-white leading-tight">
-            Analisa o teu jogo de padel
+          <h1 className="text-4xl font-bold text-white leading-tight">
+            Analisa o teu jogo de{" "}
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand to-emerald-300">
+              padel
+            </span>
           </h1>
           <p className="text-gray-400">
             Carrega o vídeo e recebe o <span className="text-gray-200">tempo útil</span> do
@@ -32,9 +35,12 @@ export default function HomePage() {
             <li className="flex gap-2"><span className="text-brand font-bold">2.</span> Carrega o vídeo aqui ao lado</li>
             <li className="flex gap-2"><span className="text-brand font-bold">3.</span> Vê o relatório e ajuda a treinar o modelo a rever as pancadas</li>
           </ol>
+          <Link href="/ajuda" className="inline-block text-sm text-brand hover:underline">
+            Guia completo para quem nunca usou →
+          </Link>
         </div>
 
-        <div className="lg:col-span-3 bg-gray-900 border border-gray-700 rounded-2xl p-6">
+        <div className="lg:col-span-3 card p-6">
           <h2 className="text-lg font-semibold text-white mb-3">⚡ Analisar jogo</h2>
           <CondenseForm />
         </div>
@@ -85,7 +91,7 @@ function HomeCard({
   return (
     <Link
       href={href}
-      className="block bg-gray-900 border border-gray-700 hover:border-brand rounded-2xl p-5 transition-colors group"
+      className="block card card-hover p-5 group"
     >
       <div className="flex items-center gap-2 mb-2">
         <span className="text-2xl">{icon}</span>
