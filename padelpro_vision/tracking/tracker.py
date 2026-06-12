@@ -79,8 +79,13 @@ class GreedyTracker:
         # max_dist_boxes: max centroid jump between matches, in units of box height.
         self.max_missed_s = max_missed_s
         self.max_dist_boxes = max_dist_boxes
-        self._tracks: dict[int, dict] = {}   # id → {box, ts_ms}
+        self._tracks: dict[int, dict] = {}   # id → {box, ts_ms, vx, vy}
         self._next_id = 1
+        # Velocity EMA factor and max horizon for coasting a lost track. A
+        # player occluded behind a partner keeps moving; predicting the
+        # centroid forward keeps the ID instead of spawning a new one.
+        self._vel_alpha = 0.5
+        self._max_predict_ms = 1000.0
 
     @staticmethod
     def _iou(a: PlayerBox, b: PlayerBox) -> float:
@@ -109,6 +114,13 @@ class GreedyTracker:
         for tid, t in self._tracks.items():
             tb: PlayerBox = t["box"]
             tcx, tcy = tb.center
+            # Constant-velocity prediction: coast the centroid forward for up
+            # to _max_predict_ms so a briefly occluded player is matched where
+            # he is now, not where he was last seen.
+            dt_ms = min(timestamp_ms - t["ts_ms"], self._max_predict_ms)
+            if dt_ms > 0:
+                tcx += t.get("vx", 0.0) * dt_ms
+                tcy += t.get("vy", 0.0) * dt_ms
             scale = max(tb.height, 1.0)
             for di, d in enumerate(detections):
                 dcx, dcy = d.center
@@ -132,7 +144,18 @@ class GreedyTracker:
         out: list[Track] = []
         for tid, di in matches:
             d = detections[di]
-            self._tracks[tid] = {"box": d, "ts_ms": timestamp_ms}
+            prev = self._tracks[tid]
+            dt_ms = timestamp_ms - prev["ts_ms"]
+            vx = prev.get("vx", 0.0)
+            vy = prev.get("vy", 0.0)
+            if dt_ms > 0:
+                pcx, pcy = prev["box"].center
+                dcx, dcy = d.center
+                inst_vx = (dcx - pcx) / dt_ms
+                inst_vy = (dcy - pcy) / dt_ms
+                vx = self._vel_alpha * inst_vx + (1 - self._vel_alpha) * vx
+                vy = self._vel_alpha * inst_vy + (1 - self._vel_alpha) * vy
+            self._tracks[tid] = {"box": d, "ts_ms": timestamp_ms, "vx": vx, "vy": vy}
             out.append(Track(track_id=tid, box=d, frame_idx=frame_idx, timestamp_ms=timestamp_ms))
 
         # New tracks for unmatched detections
@@ -141,87 +164,72 @@ class GreedyTracker:
                 continue
             tid = self._next_id
             self._next_id += 1
-            self._tracks[tid] = {"box": d, "ts_ms": timestamp_ms}
+            self._tracks[tid] = {"box": d, "ts_ms": timestamp_ms, "vx": 0.0, "vy": 0.0}
             out.append(Track(track_id=tid, box=d, frame_idx=frame_idx, timestamp_ms=timestamp_ms))
 
         return out
 
 
-class ByteTrackTracker:
+# Backwards-compatible alias (older code/tests import the stub by this name)
+_StubByteTrack = GreedyTracker
+
+
+def build_player_tracker(frame_rate: float = 25.0):
     """
-    ByteTrack multi-object tracker.
-
-    TODO: install ByteTrack (MIT):
-        pip install git+https://github.com/ifzhang/ByteTrack.git
-    or:
-        pip install bytetracker
+    The project's tracker: supervision ByteTrack (MIT, Kalman-based) when the
+    package is installed, GreedyTracker otherwise. Both expose update().
     """
+    try:
+        tracker = SupervisionByteTrack(frame_rate=frame_rate)
+        logger.info("Tracking with supervision ByteTrack (frame_rate=%.1f).", frame_rate)
+        return tracker
+    except ImportError:
+        logger.info("supervision not installed — using built-in GreedyTracker.")
+        return GreedyTracker()
 
-    def __init__(
-        self,
-        track_thresh: float = 0.5,
-        track_buffer: int = 30,
-        match_thresh: float = 0.8,
-    ) -> None:
-        self.track_thresh = track_thresh
-        self.track_buffer = track_buffer
-        self.match_thresh = match_thresh
-        self._impl = None
-        self._stub = GreedyTracker()
-        self._try_load()
 
-    def _try_load(self) -> None:
-        try:
-            from bytetracker import BYTETracker
+def make_court_gate(H: np.ndarray, margin_x_m: float = 1.5, margin_y_m: float = 2.0):
+    """
+    Build a detection filter that keeps only people whose foot point projects
+    onto (or near) the court — removes spectators and players on other courts.
+    """
+    from padelpro_vision.constants.court import COURT_LENGTH_M, COURT_WIDTH_M
+    from padelpro_vision.projection.projection import foot_point, project_point
 
-            class _Args:
-                track_thresh = self.track_thresh
-                track_buffer = self.track_buffer
-                match_thresh = self.match_thresh
-                mot20 = False
+    def gate(detections: list[PlayerBox]) -> list[PlayerBox]:
+        kept: list[PlayerBox] = []
+        for d in detections:
+            px, py = foot_point(d)
+            cx, cy = project_point(H, px, py)
+            if (-margin_x_m <= cx <= COURT_WIDTH_M + margin_x_m
+                    and -margin_y_m <= cy <= COURT_LENGTH_M + margin_y_m):
+                kept.append(d)
+        return kept
 
-            self._impl = BYTETracker(_Args())
-            logger.info("ByteTrack loaded successfully.")
-        except ImportError:
-            logger.info("bytetracker not installed — using built-in GreedyTracker.")
-
-    def update(
-        self, detections: list[PlayerBox], frame_idx: int, timestamp_ms: float
-    ) -> list[Track]:
-        if self._impl is None:
-            return self._stub.update(detections, frame_idx, timestamp_ms)
-        if not detections:
-            return []
-        dets_np = np.array(
-            [[d.x1, d.y1, d.x2, d.y2, d.confidence] for d in detections],
-            dtype=np.float32,
-        )
-        online_targets = self._impl.update(dets_np, [1080, 1920], [1080, 1920])
-        tracks: list[Track] = []
-        for t in online_targets:
-            tlbr = t.tlbr
-            box = PlayerBox(
-                x1=float(tlbr[0]), y1=float(tlbr[1]),
-                x2=float(tlbr[2]), y2=float(tlbr[3]),
-                confidence=float(t.score),
-            )
-            tracks.append(Track(
-                track_id=int(t.track_id), box=box,
-                frame_idx=frame_idx, timestamp_ms=timestamp_ms,
-            ))
-        return tracks
+    return gate
 
 
 class Tracker:
-    """High-level tracker: detector → ByteTrackTracker."""
+    """High-level tracker: detector → [court gate] → ByteTrack/Greedy."""
 
-    def __init__(self, cfg=None) -> None:
+    def __init__(self, cfg=None, detection_filter=None, frame_rate: float = 25.0) -> None:
         from config import DEFAULT_CONFIG
         self._cfg = cfg or DEFAULT_CONFIG
         from padelpro_vision.detection.detector import build_detector
         self._detector = build_detector(self._cfg)
-        self._bt = ByteTrackTracker(track_thresh=self._cfg.model.score_threshold)
+        self._bt = build_player_tracker(frame_rate=frame_rate)
+        self._filter = detection_filter
+
+    @property
+    def detection_filter(self):
+        return self._filter
+
+    @detection_filter.setter
+    def detection_filter(self, fn) -> None:
+        self._filter = fn
 
     def track(self, frame: np.ndarray, frame_idx: int, timestamp_ms: float) -> list[Track]:
         detections = self._detector.detect(frame)
+        if self._filter is not None:
+            detections = self._filter(detections)
         return self._bt.update(detections, frame_idx, timestamp_ms)

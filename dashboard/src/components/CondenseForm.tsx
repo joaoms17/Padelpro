@@ -235,6 +235,14 @@ export function CondenseForm() {
             <p className="text-sm text-yellow-400">{job.report_error}</p>
           )}
           {job.report && <ClipReportView report={job.report} />}
+          {job.report && (
+            <a
+              href={`/review/${job.job_id}`}
+              className="block w-full text-center py-2.5 bg-green-800 hover:bg-green-700 text-white rounded-lg font-medium text-sm transition-colors"
+            >
+              ✓ Rever batidas (ajuda a treinar o modelo)
+            </a>
+          )}
         </div>
       )}
 

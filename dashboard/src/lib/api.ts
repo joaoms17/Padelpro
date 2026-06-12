@@ -9,6 +9,46 @@ const BASE = process.env.NEXT_PUBLIC_API_URL?.trim()
   ? process.env.NEXT_PUBLIC_API_URL.trim().replace(/\/$/, "")
   : "/api/pipeline";
 
+// ---- Shared access code (set on the API via PADELPRO_ACCESS_CODE) ----
+// Stored in localStorage after the first prompt; sent as a header on fetches
+// and as ?code= on media URLs (<video src> can't send headers).
+
+const CODE_KEY = "padelpro_access_code";
+
+function getAccessCode(): string {
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem(CODE_KEY) ?? "";
+}
+
+export function setAccessCode(code: string): void {
+  localStorage.setItem(CODE_KEY, code);
+}
+
+export function withCode(url: string): string {
+  const code = getAccessCode();
+  if (!code) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}code=${encodeURIComponent(code)}`;
+}
+
+async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  const doFetch = () => {
+    const headers = new Headers(init?.headers);
+    const code = getAccessCode();
+    if (code) headers.set("X-Access-Code", code);
+    return fetch(url, { ...init, headers });
+  };
+
+  let r = await doFetch();
+  if (r.status === 401 && typeof window !== "undefined") {
+    const code = window.prompt("Código de acesso do PadelPro:");
+    if (code) {
+      setAccessCode(code.trim());
+      r = await doFetch();
+    }
+  }
+  return r;
+}
+
 export interface MatchStatus {
   match_id: string;
   status: string;
@@ -63,7 +103,7 @@ export interface ProgressionData {
 }
 
 export async function createMatch(court_id: string): Promise<MatchStatus> {
-  const r = await fetch(`${BASE}/matches/`, {
+  const r = await apiFetch(`${BASE}/matches/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ court_id }),
@@ -75,7 +115,7 @@ export async function createMatch(court_id: string): Promise<MatchStatus> {
 export async function uploadVideo(match_id: string, file: File): Promise<void> {
   const fd = new FormData();
   fd.append("file", file);
-  const r = await fetch(`${BASE}/matches/${match_id}/upload`, {
+  const r = await apiFetch(`${BASE}/matches/${match_id}/upload`, {
     method: "POST",
     body: fd,
   });
@@ -86,7 +126,7 @@ export async function runPipeline(
   match_id: string,
   opts: { segment?: boolean; condense?: boolean; pose?: boolean; analytics?: boolean; supabase?: boolean }
 ): Promise<MatchStatus> {
-  const r = await fetch(`${BASE}/matches/${match_id}/run`, {
+  const r = await apiFetch(`${BASE}/matches/${match_id}/run`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ match_id, ...opts }),
@@ -96,25 +136,25 @@ export async function runPipeline(
 }
 
 export async function getStatus(match_id: string): Promise<MatchStatus> {
-  const r = await fetch(`${BASE}/matches/${match_id}/status`);
+  const r = await apiFetch(`${BASE}/matches/${match_id}/status`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
 
 export async function listMatches(): Promise<MatchStatus[]> {
-  const r = await fetch(`${BASE}/matches/`);
+  const r = await apiFetch(`${BASE}/matches/`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
 
 export async function getPlayerStats(match_id: string): Promise<PlayerStats[]> {
-  const r = await fetch(`${BASE}/analytics/matches/${match_id}/stats`);
+  const r = await apiFetch(`${BASE}/analytics/matches/${match_id}/stats`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
 
 export async function getHeatmap(match_id: string, player_id: number): Promise<number[][]> {
-  const r = await fetch(`${BASE}/analytics/matches/${match_id}/heatmap/${player_id}`);
+  const r = await apiFetch(`${BASE}/analytics/matches/${match_id}/heatmap/${player_id}`);
   if (!r.ok) throw new Error(await r.text());
   const data = await r.json();
   return data.heatmap;
@@ -129,7 +169,7 @@ export async function queryClips(
   if (filters.stroke)      params.set("stroke",    filters.stroke);
   if (filters.zone)        params.set("zone",       filters.zone);
   if (filters.rally_phase) params.set("rally_phase", filters.rally_phase);
-  const r = await fetch(`${BASE}/clips/matches/${match_id}?${params}`);
+  const r = await apiFetch(`${BASE}/clips/matches/${match_id}?${params}`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
@@ -139,7 +179,7 @@ export async function requestMontage(
   filters: { player_id?: number; stroke?: string; zone?: string; rally_phase?: string },
   output_name = "montage.mp4"
 ): Promise<{ job_id: string; clips: number }> {
-  const r = await fetch(`${BASE}/clips/matches/${match_id}/montage`, {
+  const r = await apiFetch(`${BASE}/clips/matches/${match_id}/montage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ match_id, ...filters, output_name }),
@@ -149,23 +189,23 @@ export async function requestMontage(
 }
 
 export async function getMontageStatus(job_id: string): Promise<{ status: string; output?: string; error?: string }> {
-  const r = await fetch(`${BASE}/clips/montage/${job_id}/status`);
+  const r = await apiFetch(`${BASE}/clips/montage/${job_id}/status`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
 
 export function montageDownloadUrl(job_id: string): string {
-  return `${BASE}/clips/montage/${job_id}/download`;
+  return withCode(`${BASE}/clips/montage/${job_id}/download`);
 }
 
 export async function listPlayers(): Promise<PlayerSummary[]> {
-  const r = await fetch(`${BASE}/analytics/players`);
+  const r = await apiFetch(`${BASE}/analytics/players`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
 
 export async function getProgression(player_id: number, metric: string): Promise<ProgressionData> {
-  const r = await fetch(`${BASE}/analytics/progression/${player_id}/${metric}`);
+  const r = await apiFetch(`${BASE}/analytics/progression/${player_id}/${metric}`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
@@ -226,7 +266,7 @@ export interface CondenseStatus {
 }
 
 export async function getCondenseCapabilities(): Promise<{ analyze: boolean; max_upload_mb?: number }> {
-  const r = await fetch(`${BASE}/condense/capabilities`);
+  const r = await apiFetch(`${BASE}/condense/capabilities`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
@@ -242,22 +282,180 @@ export async function uploadForCondense(
     fd.append("court_id", opts.courtId || "court1");
     if (opts.deep) fd.append("deep", "true");
   }
-  const r = await fetch(`${BASE}/condense/upload`, { method: "POST", body: fd });
+  const r = await apiFetch(`${BASE}/condense/upload`, { method: "POST", body: fd });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
 
 export async function getCondenseStatus(job_id: string): Promise<CondenseStatus> {
-  const r = await fetch(`${BASE}/condense/${job_id}/status`);
+  const r = await apiFetch(`${BASE}/condense/${job_id}/status`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
 
 export function condenseDownloadUrl(job_id: string): string {
-  return `${BASE}/condense/${job_id}/download`;
+  return withCode(`${BASE}/condense/${job_id}/download`);
+}
+
+// ---- Review & feedback (human-in-the-loop training) ----
+
+export interface ReviewItem {
+  ts_ms: number;
+  player_id: number;
+  stroke_type: string;
+  confidence: number | null;
+  audio_onset: boolean | null;
+  frame_idx: number | null;
+  trainable: boolean;
+}
+
+export interface ReviewData {
+  rid: string;
+  items: ReviewItem[];
+  previous_corrections: Correction[];
+  video_available: boolean;
+  stroke_classes: string[];
+}
+
+export interface Correction {
+  ts_ms: number;
+  player_id: number;
+  verdict: "correct" | "wrong_class" | "not_a_shot" | "missed";
+  predicted_type?: string | null;
+  corrected_type?: string | null;
+  frame_idx?: number | null;
+}
+
+export interface RetrainStatus {
+  status: "idle" | "running" | "ok" | "skipped" | "error";
+  detail?: string;
+  n_samples?: number;
+}
+
+export async function getReviewData(rid: string): Promise<ReviewData> {
+  const r = await apiFetch(`${BASE}/review/${rid}`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function submitReview(
+  rid: string,
+  corrections: Correction[]
+): Promise<{ saved: number; training_samples: number; golden_hits: number }> {
+  const r = await apiFetch(`${BASE}/review/${rid}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ corrections }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function triggerRetrain(rid: string): Promise<{ status: string }> {
+  const r = await apiFetch(`${BASE}/review/${rid}/retrain`, { method: "POST" });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function getRetrainStatus(): Promise<RetrainStatus> {
+  const r = await apiFetch(`${BASE}/review/retrain/status`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export function reviewVideoUrl(rid: string): string {
+  return withCode(`${BASE}/review/${rid}/video`);
+}
+
+// ---- Clip labelling (dataset building) ----
+
+export interface LabelQueue {
+  root: string;
+  labels: string[];
+  clips: { name: string; label: string | null }[];
+  counts: Record<string, number>;
+  n_unlabelled: number;
+}
+
+export async function getLabelQueue(): Promise<LabelQueue> {
+  const r = await apiFetch(`${BASE}/label/queue`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function labelClip(name: string, label: string): Promise<{ moved: boolean }> {
+  const r = await apiFetch(`${BASE}/label/clip/${encodeURIComponent(name)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ label }),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export function labelClipUrl(name: string): string {
+  return withCode(`${BASE}/label/clip/${encodeURIComponent(name)}`);
+}
+
+// ---- Fleet quality ----
+
+export interface QualityReport {
+  match_id: string;
+  generated_at: number;
+  detection?: {
+    frames_processed: number;
+    mean_detection_confidence: number;
+    mean_players_per_frame: number;
+    pct_frames_with_expected_players: number;
+    pct_frames_with_zero_players: number;
+  };
+  tracking?: {
+    n_tracks: number;
+    tracks_per_minute: number;
+    avg_track_duration_s: number;
+    pct_time_with_expected_players: number;
+  };
+  physics?: {
+    pct_implausible_speed: number;
+    max_observed_speed_ms: number;
+    teleport_count: number;
+    pct_out_of_court: number;
+  } | null;
+  strokes?: {
+    n_events: number;
+    mean_confidence: number;
+    pct_with_audio_onset: number;
+  };
+  performance?: {
+    elapsed_s: number;
+    realtime_factor: number;
+  };
+  homography_quality?: { rating: string; reprojection_error_px: number | null } | null;
+}
+
+export interface FleetQuality {
+  n_matches: number;
+  summary: Record<string, number>;
+  reports: QualityReport[];
+}
+
+export async function getFleetQuality(): Promise<FleetQuality> {
+  const r = await apiFetch(`${BASE}/quality/`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
 }
 
 // ---- Court calibration ----
+
+export async function autoDetectCorners(
+  image: Blob
+): Promise<{ points: number[][]; quality: { rating: string; reprojection_error_px: number | null } }> {
+  const fd = new FormData();
+  fd.append("file", image, "frame.jpg");
+  const r = await apiFetch(`${BASE}/calibrate/auto`, { method: "POST", body: fd });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
 
 export async function saveCalibration(
   court_id: string,
@@ -265,7 +463,7 @@ export async function saveCalibration(
   frame_width: number,
   frame_height: number,
 ): Promise<{ court_id: string; saved: boolean }> {
-  const r = await fetch(`${BASE}/calibrate/save`, {
+  const r = await apiFetch(`${BASE}/calibrate/save`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ court_id, points, frame_width, frame_height }),

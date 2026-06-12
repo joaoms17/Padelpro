@@ -315,8 +315,8 @@ def test_compute_heatmap():
 
 def test_compute_zones():
     from padelpro_vision.analytics.analytics import _compute_zones
-    # All positions deep in attack zone (y < 4m, team_side=0)
-    positions = [(float(i) * 100, 5.0, 1.0) for i in range(20)]
+    # All positions deep in attack zone (within 4 m of the net at y=10)
+    positions = [(float(i) * 100, 5.0, 9.0) for i in range(20)]
     atk, dfn, trn = _compute_zones(positions, team_side=0)
     assert atk == pytest.approx(100.0)
     assert dfn == pytest.approx(0.0)

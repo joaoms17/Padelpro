@@ -99,6 +99,84 @@ def _audio_energy_per_second(wav_path: Path) -> np.ndarray:
     return energy
 
 
+def _read_wav_mono(wav_path: Path) -> tuple[np.ndarray, int]:
+    """Read a WAV file as normalised mono float32 samples + sample rate."""
+    with wave.open(str(wav_path), "rb") as wf:
+        n_channels = wf.getnchannels()
+        sampwidth = wf.getsampwidth()
+        framerate = wf.getframerate()
+        n_frames = wf.getnframes()
+        raw = wf.readframes(n_frames)
+
+    fmt = {1: "B", 2: "h", 4: "i"}.get(sampwidth, "h")
+    samples = np.array(struct.unpack(f"{n_frames * n_channels}{fmt}", raw), dtype=np.float32)
+    if n_channels > 1:
+        samples = samples.reshape(-1, n_channels).mean(axis=1)
+    if sampwidth == 1:
+        samples = samples - 128.0
+    peak = np.abs(samples).max()
+    if peak > 0:
+        samples /= peak
+    return samples, framerate
+
+
+def _onsets_from_energy(
+    energy: np.ndarray,
+    hop_s: float,
+    k_std: float = 3.0,
+    min_gap_s: float = 0.25,
+) -> list[float]:
+    """
+    Detect percussive onsets (ball impacts) from a short-hop energy envelope.
+    Half-wave-rectified energy flux peaks above mean + k·std → onset times (ms).
+    """
+    if len(energy) < 3:
+        return []
+    flux = np.maximum(0.0, np.diff(energy))
+    thresh = flux.mean() + k_std * flux.std()
+    if thresh <= 0:
+        return []
+
+    onsets_ms: list[float] = []
+    min_gap_hops = max(1, int(min_gap_s / hop_s))
+    last_idx = -min_gap_hops
+    for i in range(1, len(flux)):
+        # local peak above threshold
+        if flux[i] >= thresh and flux[i] >= flux[i - 1] and (i - last_idx) >= min_gap_hops:
+            onsets_ms.append((i + 1) * hop_s * 1000.0)
+            last_idx = i
+    return onsets_ms
+
+
+def get_audio_onsets(
+    video_path: Path | str,
+    hop_s: float = 0.02,
+    k_std: float = 3.0,
+    min_gap_s: float = 0.25,
+) -> list[float]:
+    """
+    Extract ball-impact audio onsets from a video. Returns timestamps in ms.
+    Empty list when the video has no usable audio (silent camera, no ffmpeg).
+    """
+    video_path = Path(video_path)
+    with tempfile.TemporaryDirectory() as tmp:
+        wav = Path(tmp) / "audio.wav"
+        if not _extract_audio_wav(video_path, wav) or not wav.exists():
+            return []
+        samples, rate = _read_wav_mono(wav)
+
+    hop = max(1, int(rate * hop_s))
+    n_hops = len(samples) // hop
+    if n_hops < 3:
+        return []
+    env = np.sqrt(
+        np.mean(samples[: n_hops * hop].reshape(n_hops, hop) ** 2, axis=1)
+    )
+    onsets = _onsets_from_energy(env, hop_s, k_std=k_std, min_gap_s=min_gap_s)
+    logger.info("Audio onsets: %d detected in %s", len(onsets), video_path.name)
+    return onsets
+
+
 # ---------------------------------------------------------------------------
 # Motion analysis
 # ---------------------------------------------------------------------------
@@ -176,6 +254,8 @@ def _state_machine(
     padding_before_s: float,
     padding_after_s: float,
     break_gap_s: float,
+    enter_confirm_s: float = 1.0,
+    exit_confirm_s: float = 2.5,
 ) -> list[Segment]:
     """Hysteresis state machine over per-second play_score → list[Segment]."""
     n = len(play_score)
@@ -184,8 +264,8 @@ def _state_machine(
     raw_rallies: list[tuple[int, int]] = []
 
     # Minimum consecutive seconds to enter/exit
-    enter_confirm = max(1, int(1.0))   # 1 s high
-    exit_confirm  = max(1, int(2.5))   # 2.5 s low
+    enter_confirm = max(1, int(enter_confirm_s))
+    exit_confirm  = max(1, int(exit_confirm_s))
 
     high_streak = 0
     low_streak = 0
@@ -260,6 +340,8 @@ def get_active_segments(
     padding_after_s: float = 0.6,
     break_gap_s: float = 45.0,
     audio_weight: float = 0.5,
+    enter_confirm_s: float = 1.0,
+    exit_confirm_s: float = 2.5,
     output_dir: Path | None = None,
 ) -> list[Segment]:
     """
@@ -286,6 +368,8 @@ def get_active_segments(
         padding_before_s=padding_before_s,
         padding_after_s=padding_after_s,
         break_gap_s=break_gap_s,
+        enter_confirm_s=enter_confirm_s,
+        exit_confirm_s=exit_confirm_s,
     )
 
     rally_count = sum(1 for s in segments if s.type == "rally")

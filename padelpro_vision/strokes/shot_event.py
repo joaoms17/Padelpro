@@ -19,6 +19,10 @@ class ShotEvent:
     # Filled in M3 after homography projection
     court_x: float | None = None
     court_y: float | None = None
+    # Dominant-wrist speed at this frame (bbox-heights/frame) — impact proxy
+    wrist_speed: float | None = None
+    # True when an audio onset confirmed this stroke (None = audio unavailable)
+    audio_onset: bool | None = None
 
 
 def save_shot_events(events: list[ShotEvent], path: Path) -> None:

@@ -17,6 +17,10 @@ try { Invoke-RestMethod "http://127.0.0.1:8010/health" -TimeoutSec 3 | Out-Null;
 if (-not $up) {
     Write-Host "A arrancar API (porta 8010, com análise)..." -ForegroundColor Cyan
     $env:API_MAX_UPLOAD_MB = "95"
+    if (-not $env:PADELPRO_ACCESS_CODE) {
+        $env:PADELPRO_ACCESS_CODE = -join ((48..57) + (97..122) | Get-Random -Count 8 | ForEach-Object {[char]$_})
+    }
+    Write-Host "Codigo de acesso (partilha com a equipa): $($env:PADELPRO_ACCESS_CODE)" -ForegroundColor Yellow
     Start-Process -WindowStyle Minimized -FilePath "$root\.venv\Scripts\python.exe" `
         -ArgumentList "-m", "uvicorn", "api.main:app", "--port", "8010" -WorkingDirectory $root
     $tries = 0
