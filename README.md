@@ -47,7 +47,7 @@ O projeto usa uma única stack, toda com licenças permissivas (ver `LICENSES.md
 |---|---|---|---|
 | Deteção de jogadores | torchvision Faster R-CNN (MobileNetV3) | `pip install torch torchvision` — pesos descarregam sozinhos | BSD-3 |
 | Tracking | ByteTrack via `supervision` | `pip install supervision` | MIT |
-| Pose | RTMPose-m (MMPose) | `mim install mmpose && mim download mmpose --config rtmpose-m_8xb256-420e_coco-256x192 --dest checkpoints/` | Apache 2.0 |
+| Pose | RTMPose-m (rtmlib/ONNX) | `pip install rtmlib onnxruntime` — pesos automáticos | Apache 2.0 |
 | Pancadas | TCN próprio | treinado via revisão/etiquetagem no frontend → `checkpoints/stroke_tcn.pth` | — |
 
 > Sem `supervision` o tracking usa o GreedyTracker interno; sem MMPose a pose corre
