@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse
 from api.routers import matches, analytics, clips, condense, calibrate, review, label, quality
 
 # Bumped whenever the dashboard starts depending on new API endpoints
-API_BUILD = 2
+API_BUILD = 3
 
 app = FastAPI(
     title="PadelPro Vision API",

@@ -2,7 +2,7 @@
 
 import { useRef, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { saveCalibration, autoDetectCorners } from "@/lib/api";
+import { saveCalibration, autoDetectCorners, extractCalibrationFrame } from "@/lib/api";
 
 const CORNERS = [
   "1 · canto cima-esquerda",
@@ -15,8 +15,11 @@ const MAX_W = 720;
 type Pt = { x: number; y: number };
 
 export default function CalibratePage() {
-  const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const imgRef = useRef<HTMLImageElement | null>(null);
+  // Real frame size (original video pixels) — clicks are scaled back to this.
+  const frameSize = useRef<{ w: number; h: number }>({ w: 0, h: 0 });
+
   const [courtId, setCourtId] = useState("court1");
   const [points, setPoints] = useState<Pt[]>([]);
   const [ready, setReady] = useState(false);
@@ -26,77 +29,48 @@ export default function CalibratePage() {
   const [saved, setSaved] = useState(false);
   const [autoBusy, setAutoBusy] = useState(false);
 
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const loadingRef = useRef(false);
-
-  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
-    const v = videoRef.current;
-    if (!file || !v) return;
+    if (!file) return;
     setPoints([]); setReady(false); setSaved(false); setStatus(""); setVideoErr("");
     setLoadingFrame(true);
-    loadingRef.current = true;
-    v.src = URL.createObjectURL(file);
-    v.load();
-    // Browsers podem adiar o carregamento de <video> escondido; play() força o
-    // pipeline de decode a arrancar (permitido porque está muted).
-    v.play().catch(() => { /* autoplay bloqueado — o load() acima ainda serve */ });
-
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(() => {
-      if (loadingRef.current) {
-        loadingRef.current = false;
-        setLoadingFrame(false);
-        setVideoErr(
-          "O vídeo não carregou. Verifica que é um MP4 (H.264) — vídeos de " +
-          "telemóvel funcionam — e tenta de novo.",
-        );
-      }
-    }, 12000);
-  }
-
-  function onLoadedMeta() {
-    const v = videoRef.current;
-    if (!v) return;
     try {
-      v.currentTime = Math.min(10, (v.duration || 20) / 2);
-    } catch {
-      loadingRef.current = false;
+      // The server decodes the video (any codec, incl. HEVC) and returns one frame.
+      const { blob, width, height } = await extractCalibrationFrame(file);
+      frameSize.current = { w: width, h: height };
+
+      const img = new Image();
+      img.onload = () => {
+        const c = canvasRef.current;
+        if (!c) return;
+        const w = Math.min(MAX_W, width || img.naturalWidth);
+        c.width = w;
+        c.height = Math.round(w * ((height || img.naturalHeight) / (width || img.naturalWidth)));
+        imgRef.current = img;
+        setLoadingFrame(false);
+        setReady(true);
+      };
+      img.onerror = () => {
+        setLoadingFrame(false);
+        setVideoErr("Não consegui mostrar o frame extraído.");
+      };
+      img.src = URL.createObjectURL(blob);
+    } catch (err) {
       setLoadingFrame(false);
-      setVideoErr("Não consegui posicionar o vídeo — tenta outro ficheiro.");
+      setVideoErr(
+        "Não consegui extrair um frame do vídeo no servidor. Confirma que a API está a correr " +
+        "(sem faixa amarela no topo) e tenta outro ficheiro. Erro: " +
+        (err instanceof Error ? err.message : String(err)),
+      );
     }
   }
 
-  function onSeeked() {
-    const v = videoRef.current, c = canvasRef.current;
-    if (!v || !c) return;
-    v.pause();
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    loadingRef.current = false;
-    const w = Math.min(MAX_W, v.videoWidth);
-    c.width = w;
-    c.height = Math.round(w * (v.videoHeight / v.videoWidth));
-    setLoadingFrame(false);
-    setVideoErr("");
-    setReady(true);
-  }
-
-  function onVideoError() {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    loadingRef.current = false;
-    setLoadingFrame(false);
-    setVideoErr(
-      "O browser não consegue ler este vídeo. Tenta um MP4 (H.264) — " +
-      "se vier do telemóvel deve funcionar diretamente.",
-    );
-  }
-
   const redraw = useCallback(() => {
-    const v = videoRef.current, c = canvasRef.current;
-    if (!v || !c) return;
+    const c = canvasRef.current, img = imgRef.current;
+    if (!c || !img) return;
     const ctx = c.getContext("2d");
     if (!ctx) return;
-    ctx.drawImage(v, 0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0, c.width, c.height);
     points.forEach((p, i) => {
       ctx.beginPath();
       ctx.arc(p.x, p.y, 7, 0, Math.PI * 2);
@@ -127,22 +101,21 @@ export default function CalibratePage() {
   }
 
   async function autoDetect() {
-    const v = videoRef.current, c = canvasRef.current;
-    if (!v || !c || autoBusy) return;
+    const c = canvasRef.current, img = imgRef.current;
+    if (!c || !img || autoBusy) return;
     setAutoBusy(true);
     setStatus("A detetar os cantos…");
     try {
       // Full-resolution frame for the server-side detector
       const full = document.createElement("canvas");
-      full.width = v.videoWidth;
-      full.height = v.videoHeight;
-      full.getContext("2d")!.drawImage(v, 0, 0);
+      full.width = frameSize.current.w || img.naturalWidth;
+      full.height = frameSize.current.h || img.naturalHeight;
+      full.getContext("2d")!.drawImage(img, 0, 0, full.width, full.height);
       const blob: Blob = await new Promise((resolve, reject) =>
         full.toBlob((b) => (b ? resolve(b) : reject(new Error("frame"))), "image/jpeg", 0.85)
       );
       const res = await autoDetectCorners(blob);
-      // Server points are full-res → scale to the display canvas
-      const sx = c.width / v.videoWidth, sy = c.height / v.videoHeight;
+      const sx = c.width / full.width, sy = c.height / full.height;
       setPoints(res.points.map(([x, y]) => ({ x: x * sx, y: y * sy })));
       setSaved(false);
       setStatus(
@@ -158,13 +131,15 @@ export default function CalibratePage() {
   }
 
   async function submit() {
-    const v = videoRef.current, c = canvasRef.current;
-    if (!v || !c || points.length !== 4) return;
+    const c = canvasRef.current;
+    if (!c || points.length !== 4) return;
     setStatus("A guardar…");
-    const sx = v.videoWidth / c.width, sy = v.videoHeight / c.height;
+    const fw = frameSize.current.w || c.width;
+    const fh = frameSize.current.h || c.height;
+    const sx = fw / c.width, sy = fh / c.height;
     const pts = points.map((p) => [p.x * sx, p.y * sy]);
     try {
-      await saveCalibration(courtId, pts, v.videoWidth, v.videoHeight);
+      await saveCalibration(courtId, pts, fw, fh);
       setSaved(true);
       setStatus(`Campo "${courtId}" calibrado ✓`);
     } catch (err: unknown) {
@@ -181,7 +156,8 @@ export default function CalibratePage() {
 
       <p className="text-sm text-gray-400 max-w-2xl">
         Carrega um vídeo deste campo/câmara e clica nos 4 cantos da linha exterior do court, por esta ordem.
-        O vídeo fica no teu computador — só os 4 pontos são enviados. A calibração serve para todos os jogos da mesma câmara.
+        O frame é extraído no servidor (funciona com qualquer formato, incluindo vídeos de iPhone/WhatsApp).
+        A calibração serve para todos os jogos da mesma câmara.
       </p>
 
       <div className="flex flex-wrap items-end gap-3">
@@ -241,22 +217,11 @@ export default function CalibratePage() {
       {loadingFrame && (
         <div className="flex items-center gap-2 text-sm text-blue-300">
           <span className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-          A extrair uma imagem do vídeo…
+          A extrair uma imagem do vídeo (no servidor)…
         </div>
       )}
       {videoErr && <p className="text-sm text-red-400">{videoErr}</p>}
       {status && <p className={`text-sm ${saved ? "text-green-400" : "text-gray-400"}`}>{status}</p>}
-
-      <video
-        ref={videoRef}
-        onLoadedMetadata={onLoadedMeta}
-        onSeeked={onSeeked}
-        onError={onVideoError}
-        preload="auto"
-        className="hidden"
-        muted
-        playsInline
-      />
     </div>
   );
 }

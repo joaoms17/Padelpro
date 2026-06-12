@@ -58,7 +58,7 @@ async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
 // ---- API version handshake (ApiBanner) ----
 // Bump together with API_BUILD in api/main.py when the dashboard starts
 // depending on new endpoints.
-export const EXPECTED_API_BUILD = 2;
+export const EXPECTED_API_BUILD = 3;
 
 export async function getApiHealth(): Promise<{ status: string; api_build?: number }> {
   const r = await fetch(`${BASE}/health`);   // /health is unauthenticated
@@ -447,6 +447,20 @@ export async function autoDetectCorners(
   const r = await apiFetch(`${BASE}/calibrate/auto`, { method: "POST", body: fd });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
+}
+
+/** Server-side frame extraction — handles HEVC/H.265 the browser can't decode. */
+export async function extractCalibrationFrame(
+  video: File
+): Promise<{ blob: Blob; width: number; height: number }> {
+  const fd = new FormData();
+  fd.append("file", video);
+  const r = await apiFetch(`${BASE}/calibrate/extract-frame`, { method: "POST", body: fd });
+  if (!r.ok) throw new Error(await r.text());
+  const blob = await r.blob();
+  const width = Number(r.headers.get("X-Frame-Width")) || 0;
+  const height = Number(r.headers.get("X-Frame-Height")) || 0;
+  return { blob, width, height };
 }
 
 export async function saveCalibration(

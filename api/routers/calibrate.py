@@ -12,11 +12,59 @@ import logging
 
 import numpy as np
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import Response
 
 from api.models import CalibrateRequest
 
 router = APIRouter(prefix="/calibrate", tags=["calibrate"])
 logger = logging.getLogger(__name__)
+
+
+@router.post("/extract-frame")
+async def extract_frame(file: UploadFile = File(...)):
+    """
+    Extract a single frame (mid-video) server-side with OpenCV/ffmpeg, which
+    decodes formats the browser can't (HEVC/H.265 from iPhone/WhatsApp). Returns
+    a JPEG; the real frame size travels in X-Frame-Width/Height so the page can
+    map clicks back to the original video pixels.
+    """
+    import os
+    import tempfile
+
+    import cv2
+
+    raw = await file.read()
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp.write(raw)
+            tmp_path = tmp.name
+        cap = cv2.VideoCapture(tmp_path)
+        if not cap.isOpened():
+            raise HTTPException(status_code=400, detail="Não consegui abrir o vídeo.")
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        if total > 1:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, total // 2)
+        ok, frame = cap.read()
+        cap.release()
+        if not ok or frame is None:
+            raise HTTPException(status_code=400, detail="Não consegui ler um frame do vídeo.")
+        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        if not ok:
+            raise HTTPException(status_code=500, detail="Falha a codificar o frame.")
+        h, w = frame.shape[:2]
+        return Response(
+            content=buf.tobytes(),
+            media_type="image/jpeg",
+            headers={
+                "X-Frame-Width": str(w),
+                "X-Frame-Height": str(h),
+                "Access-Control-Expose-Headers": "X-Frame-Width, X-Frame-Height",
+            },
+        )
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
 @router.post("/auto")
