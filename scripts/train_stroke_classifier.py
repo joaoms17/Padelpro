@@ -132,6 +132,11 @@ def train(
     X_t = torch.tensor(X, dtype=torch.float32)
     y_t = torch.tensor(y, dtype=torch.long)
 
+    # Shuffle before splitting — feedback/converted datasets arrive grouped
+    # by class, and an unshuffled split would leave validation single-class.
+    perm = torch.randperm(len(X_t), generator=torch.Generator().manual_seed(0))
+    X_t, y_t = X_t[perm], y_t[perm]
+
     # 80/20 train/val split
     n_val = max(1, int(0.2 * len(X_t)))
     X_train, X_val = X_t[n_val:], X_t[:n_val]
@@ -144,7 +149,9 @@ def train(
     optimiser = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
 
-    best_val_acc = 0.0
+    # Start below zero so the first epoch always writes a checkpoint —
+    # otherwise a run whose val_acc never beats 0 would save nothing at all.
+    best_val_acc = -1.0
     for epoch in range(1, epochs + 1):
         model.train()
         for xb, yb in train_loader:

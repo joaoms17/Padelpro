@@ -159,6 +159,16 @@ def main() -> None:
     from padelpro_vision.evaluation.golden import load_golden_set
 
     clips = load_golden_set(args.golden)
+    # Corrections submitted on the review page are golden hits too — every
+    # reviewed match becomes evaluation ground truth for free.
+    feedback_golden = Path("data/feedback/golden")
+    if feedback_golden.exists():
+        extra = load_golden_set(feedback_golden)
+        known = {c.clip_id for c in clips}
+        extra = [c for c in extra if c.clip_id not in known]
+        if extra:
+            logger.info("Including %d reviewed matches from %s.", len(extra), feedback_golden)
+            clips.extend(extra)
     if not clips:
         logger.error(
             "No golden annotations found in %s. See data/golden/README.md "
@@ -191,8 +201,13 @@ def main() -> None:
                 homography_path=homography_path,
             )
         elif not clip_out.exists():
-            logger.warning("[%s] no outputs in %s — skipped.", clip.clip_id, clip_out)
-            continue
+            # Reviewed matches keep their pipeline outputs in data/output/<id>
+            alt = Path("data/output") / clip.clip_id
+            if alt.exists():
+                clip_out = alt
+            else:
+                logger.warning("[%s] no outputs in %s — skipped.", clip.clip_id, clip_out)
+                continue
 
         per_clip.append(evaluate_clip(clip, clip_out, cfg))
 
