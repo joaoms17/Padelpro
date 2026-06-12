@@ -29,29 +29,33 @@ export default function MatchesPage() {
         <div className="flex gap-2">
           <button
             onClick={() => { setShowCondense(!showCondense); setShowUpload(false); }}
-            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white rounded-lg text-sm font-medium transition-colors"
+            className="px-4 py-2 bg-brand hover:bg-brand-dark text-white rounded-lg text-sm font-medium transition-colors"
           >
-            {showCondense ? "Fechar" : "✂️ Cortar tempo útil"}
+            {showCondense ? "Fechar" : "⚡ Analisar jogo"}
           </button>
           <button
             onClick={() => { setShowUpload(!showUpload); setShowCondense(false); }}
-            className="px-4 py-2 bg-brand hover:bg-brand-dark text-white rounded-lg text-sm font-medium transition-colors"
+            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 rounded-lg text-sm font-medium transition-colors"
           >
-            {showUpload ? "Fechar" : "+ Novo jogo"}
+            {showUpload ? "Fechar" : "Pipeline completo (lento)"}
           </button>
         </div>
       </div>
 
       {showCondense && (
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-md">
-          <h2 className="text-lg font-semibold text-white mb-1">Cortar tempo útil</h2>
+          <h2 className="text-lg font-semibold text-white mb-1">⚡ Analisar jogo</h2>
           <CondenseForm />
         </div>
       )}
 
       {showUpload && (
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-md">
-          <h2 className="text-lg font-semibold text-white mb-4">Upload de vídeo</h2>
+          <h2 className="text-lg font-semibold text-white mb-1">Pipeline completo</h2>
+          <p className="text-xs text-yellow-400/80 mb-4">
+            ⚠️ Processa o vídeo inteiro frame a frame (vídeo anotado incluído) — demora
+            ~20 min para 4 min de vídeo. Para resultados rápidos usa “⚡ Analisar jogo”.
+          </p>
           <UploadForm />
         </div>
       )}
@@ -59,7 +63,7 @@ export default function MatchesPage() {
       {matches.length === 0 ? (
         <div className="text-center py-16 text-gray-500">
           <div className="text-4xl mb-3">🎾</div>
-          <p>Ainda não há jogos. Carrega um vídeo para começar.</p>
+          <p>Ainda não há jogos. Usa “⚡ Analisar jogo” para começar.</p>
         </div>
       ) : (
         <div className="space-y-2">

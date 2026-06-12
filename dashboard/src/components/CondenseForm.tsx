@@ -107,8 +107,8 @@ export function CondenseForm() {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <p className="text-sm text-gray-400">
-        Carrega um vídeo e recebes outro só com o <span className="text-gray-200">tempo útil de jogo</span> —
-        o tempo morto entre pontos é removido.
+        Carrega um vídeo: recebes outro só com o <span className="text-gray-200">tempo útil de jogo</span> (tempo
+        morto removido) e, se quiseres, <span className="text-gray-200">estatísticas dos jogadores</span>.
       </p>
 
       <div>
@@ -173,7 +173,7 @@ export function CondenseForm() {
         >
           {uploading && <><Spinner /> A enviar vídeo…</>}
           {analysing && <><Spinner /> A processar…</>}
-          {!busy && "✂️ Cortar tempo útil"}
+          {!busy && "⚡ Analisar jogo"}
         </button>
       )}
 
