@@ -30,6 +30,15 @@ export function withCode(url: string): string {
   return `${url}${url.includes("?") ? "&" : "?"}code=${encodeURIComponent(code)}`;
 }
 
+// Set when a request hits 401, so the AccessCodeModal can open even if it
+// mounts slightly after the failing request resolved.
+let _needsCode = false;
+export function consumeNeedsCode(): boolean {
+  const v = _needsCode;
+  _needsCode = false;
+  return v;
+}
+
 async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
   const doFetch = () => {
     const headers = new Headers(init?.headers);
@@ -38,13 +47,10 @@ async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
     return fetch(url, { ...init, headers });
   };
 
-  let r = await doFetch();
+  const r = await doFetch();
   if (r.status === 401 && typeof window !== "undefined") {
-    const code = window.prompt("Código de acesso do PadelPro:");
-    if (code) {
-      setAccessCode(code.trim());
-      r = await doFetch();
-    }
+    _needsCode = true;
+    window.dispatchEvent(new CustomEvent("padelpro-needs-code"));
   }
   return r;
 }

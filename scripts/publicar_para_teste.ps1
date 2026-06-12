@@ -35,8 +35,15 @@ Start-Sleep -Seconds 1
 
 # --- 2. Arrancar API nova ------------------------------------------------
 $env:API_MAX_UPLOAD_MB = "95"
+# Codigo de acesso ESTAVEL: guardado num ficheiro local para nao mudar a cada
+# arranque (era o que confundia -- o site pedia um codigo diferente sempre).
+$codeFile = Join-Path $root ".padelpro_access_code"
+if (-not $env:PADELPRO_ACCESS_CODE -and (Test-Path $codeFile)) {
+    $env:PADELPRO_ACCESS_CODE = (Get-Content $codeFile -Raw).Trim()
+}
 if (-not $env:PADELPRO_ACCESS_CODE) {
     $env:PADELPRO_ACCESS_CODE = -join ((48..57) + (97..122) | Get-Random -Count 8 | ForEach-Object { [char]$_ })
+    Set-Content -Path $codeFile -Value $env:PADELPRO_ACCESS_CODE -NoNewline
 }
 $code   = $env:PADELPRO_ACCESS_CODE
 $apilog = Join-Path $env:TEMP "padelpro_api.log"
