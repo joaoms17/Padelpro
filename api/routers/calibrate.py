@@ -10,12 +10,38 @@ image→court homography for that court_id.
 from __future__ import annotations
 import logging
 
-from fastapi import APIRouter, HTTPException
+import numpy as np
+from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from api.models import CalibrateRequest
 
 router = APIRouter(prefix="/calibrate", tags=["calibrate"])
 logger = logging.getLogger(__name__)
+
+
+@router.post("/auto")
+async def auto_detect_corners(file: UploadFile = File(...)):
+    """
+    Detect the 4 court corners in an uploaded frame (classic CV). Returns the
+    points + homography quality for the user to confirm — nothing is saved
+    until POST /calibrate/save. 422 when no trustworthy quad is found, so the
+    UI falls back to manual clicking.
+    """
+    import cv2
+    from padelpro_vision.calibration.auto import auto_calibrate
+
+    raw = await file.read()
+    frame = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(status_code=400, detail="Imagem inválida.")
+
+    result = auto_calibrate(frame)
+    if result is None:
+        raise HTTPException(
+            status_code=422,
+            detail="Não encontrei os cantos do campo — clica-os manualmente.",
+        )
+    return {"points": result["points"], "quality": result["quality"]}
 
 
 @router.post("/save")

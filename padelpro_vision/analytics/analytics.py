@@ -242,10 +242,12 @@ def compute_match_analytics(
             player_id, dist, avg_spd, max_spd, atk, dfn, json.dumps(shots),
         )
 
-    # Sync score: first two players found (naïve pairing)
+    # Sync score: two players of the same team (fallback: first two found)
     sync = 0.0
     ids  = list(track_positions.keys())
-    if len(ids) >= 2:
-        sync = _sync_score(track_positions[ids[0]], track_positions[ids[1]])
+    teammates = [tid for tid in ids if team_map.get(tid, 0) == 0]
+    pair = teammates if len(teammates) >= 2 else ids
+    if len(pair) >= 2:
+        sync = _sync_score(track_positions[pair[0]], track_positions[pair[1]])
 
     return MatchAnalyticsResult(player_stats=stats_list, sync_score=round(sync, 3))

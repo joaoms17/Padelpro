@@ -2,7 +2,7 @@
 
 import { useRef, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { saveCalibration } from "@/lib/api";
+import { saveCalibration, autoDetectCorners } from "@/lib/api";
 
 const CORNERS = [
   "1 · canto cima-esquerda",
@@ -24,6 +24,7 @@ export default function CalibratePage() {
   const [videoErr, setVideoErr] = useState("");
   const [status, setStatus] = useState("");
   const [saved, setSaved] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
 
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadingRef = useRef(false);
@@ -125,6 +126,37 @@ export default function CalibratePage() {
     setPoints((p) => [...p, { x, y }]);
   }
 
+  async function autoDetect() {
+    const v = videoRef.current, c = canvasRef.current;
+    if (!v || !c || autoBusy) return;
+    setAutoBusy(true);
+    setStatus("A detetar os cantos…");
+    try {
+      // Full-resolution frame for the server-side detector
+      const full = document.createElement("canvas");
+      full.width = v.videoWidth;
+      full.height = v.videoHeight;
+      full.getContext("2d")!.drawImage(v, 0, 0);
+      const blob: Blob = await new Promise((resolve, reject) =>
+        full.toBlob((b) => (b ? resolve(b) : reject(new Error("frame"))), "image/jpeg", 0.85)
+      );
+      const res = await autoDetectCorners(blob);
+      // Server points are full-res → scale to the display canvas
+      const sx = c.width / v.videoWidth, sy = c.height / v.videoHeight;
+      setPoints(res.points.map(([x, y]) => ({ x: x * sx, y: y * sy })));
+      setSaved(false);
+      setStatus(
+        res.quality.rating === "good"
+          ? "Cantos detetados ✓ — confirma na imagem e guarda."
+          : "Cantos detetados (qualidade média) — ajusta com Recomeçar se estiverem tortos."
+      );
+    } catch {
+      setStatus("Não consegui detetar automaticamente — clica os 4 cantos à mão.");
+    } finally {
+      setAutoBusy(false);
+    }
+  }
+
   async function submit() {
     const v = videoRef.current, c = canvasRef.current;
     if (!v || !c || points.length !== 4) return;
@@ -182,7 +214,12 @@ export default function CalibratePage() {
             onClick={onClickCanvas}
             className="border border-gray-700 rounded-lg cursor-crosshair max-w-full"
           />
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={autoDetect}
+              disabled={autoBusy}
+              className="px-4 py-2 bg-brand/20 hover:bg-brand/30 text-brand rounded-lg text-sm font-medium disabled:opacity-50"
+            >{autoBusy ? "A detetar…" : "🪄 Detetar automaticamente"}</button>
             <button
               onClick={() => { setPoints([]); setSaved(false); setStatus(""); }}
               className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-lg text-sm"
