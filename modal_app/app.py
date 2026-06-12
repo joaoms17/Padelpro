@@ -21,6 +21,7 @@ import tempfile
 from pathlib import Path
 
 import modal
+from fastapi import Request
 
 REPO = "https://github.com/joaoms17/Padelpro.git"
 
@@ -76,11 +77,8 @@ def analyze_video(video_bytes: bytes, court_h: list[list[float]] | None, deep: b
 
 @app.function()
 @modal.fastapi_endpoint(method="POST", label="padelpro-analyze")
-async def analyze(request):  # type: ignore
-    from fastapi import Request
-
-    req: Request = request
-    form = await req.form()
+async def analyze(request: Request):
+    form = await request.form()
     up = form["file"]
     video_bytes = await up.read()
     court_h = json.loads(form.get("court_h") or "null")
