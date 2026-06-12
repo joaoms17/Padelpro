@@ -17,6 +17,7 @@ the clips, and trivially exportable to any training pipeline.
 from __future__ import annotations
 import logging
 import os
+import random
 import re
 import shutil
 from pathlib import Path
@@ -83,7 +84,12 @@ async def get_queue():
         key = c["label"] or "por_classificar"
         counts[key] = counts.get(key, 0) + 1
 
-    clips.sort(key=lambda c: (c["label"] is not None, c["name"]))
+    # Unlabelled first, in random order per request: several validators
+    # working at once start on different clips instead of colliding.
+    unlabelled = [c for c in clips if c["label"] is None]
+    labelled = sorted((c for c in clips if c["label"]), key=lambda c: c["name"])
+    random.shuffle(unlabelled)
+    clips = unlabelled + labelled
     return {
         "root": str(root),
         "labels": labels,

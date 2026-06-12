@@ -56,11 +56,13 @@ export default function LabelPage() {
       });
       if (showLabelled) setIdx((i) => Math.min(i + 1, clips.length - 1));
     } catch (e) {
+      // Likely a colleague labelled/moved this clip first — resync the queue.
       setError(String(e));
+      refresh(true);
     } finally {
       setBusy(false);
     }
-  }, [current, busy, showLabelled, clips.length]);
+  }, [current, busy, showLabelled, clips.length, refresh]);
 
   // Keyboard: digits assign the Nth label, j/k navigate, space replays.
   useEffect(() => {
