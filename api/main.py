@@ -22,6 +22,9 @@ from fastapi.responses import JSONResponse
 
 from api.routers import matches, analytics, clips, condense, calibrate, review, label, quality
 
+# Bumped whenever the dashboard starts depending on new API endpoints
+API_BUILD = 2
+
 app = FastAPI(
     title="PadelPro Vision API",
     description="Padel match analysis — detection, tracking, pose, analytics, clips.",
@@ -73,4 +76,6 @@ app.include_router(quality.router)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "0.1.0"}
+    # api_build: bump when the frontend depends on new endpoints — the
+    # dashboard compares it and shows an "API desatualizada" banner.
+    return {"status": "ok", "version": "0.2.0", "api_build": API_BUILD}

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import "./globals.css";
 import { Nav } from "@/components/Nav";
+import { ApiBanner } from "@/components/ApiBanner";
 
 export const metadata: Metadata = {
   title: "PadelPro Vision",
@@ -13,6 +14,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="pt">
       <body className="min-h-screen flex flex-col">
         <Nav />
+        <ApiBanner />
         <main className="flex-1 px-6 py-8 max-w-6xl mx-auto w-full">
           {children}
         </main>
