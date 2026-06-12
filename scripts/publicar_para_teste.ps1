@@ -108,10 +108,14 @@ if (-not $pubOk) { Fail "O tunel abriu mas /health nao responde atraves dele." }
 Write-Host "Tunel chega a API OK." -ForegroundColor Green
 
 # --- 5. Apontar o Vercel para o tunel + redeploy -------------------------
-try {
-    & "$PSScriptRoot\set_api_url.ps1" -Url $url
-} catch {
-    Fail "O redeploy do Vercel falhou: $($_.Exception.Message)"
+& "$PSScriptRoot\set_api_url.ps1" -Url $url
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "API e tunel estao OK, mas o Vercel nao foi actualizado (ver acima)." -ForegroundColor Yellow
+    Write-Host "Se diz 'Token nao encontrado', corre UMA vez:  npx vercel login" -ForegroundColor Yellow
+    Write-Host "O tunel desta sessao:  $url" -ForegroundColor Yellow
+    Write-Host "(podes mete-lo a mao em Vercel > Settings > Environment Variables > NEXT_PUBLIC_API_URL e Redeploy)" -ForegroundColor Yellow
+    Fail "Vercel por actualizar."
 }
 
 Write-Host ""
