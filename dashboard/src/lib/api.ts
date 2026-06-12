@@ -78,30 +78,6 @@ export interface Clip {
   thumbnail_url: string | null;
 }
 
-export interface PlayerSummary {
-  player_id: number;
-  match_count: number;
-  match_id?: string;
-  distance_m?: number;
-  avg_speed_ms?: number;
-  max_speed_ms?: number;
-  attack_pct?: number;
-  defense_pct?: number;
-  transition_pct?: number;
-}
-
-export interface ProgressionPoint {
-  measured_at: string;
-  value: number;
-  match_id: string | null;
-}
-
-export interface ProgressionData {
-  player_id: string;
-  metric: string;
-  history: ProgressionPoint[];
-}
-
 export async function createMatch(court_id: string): Promise<MatchStatus> {
   const r = await apiFetch(`${BASE}/matches/`, {
     method: "POST",
@@ -196,18 +172,6 @@ export async function getMontageStatus(job_id: string): Promise<{ status: string
 
 export function montageDownloadUrl(job_id: string): string {
   return withCode(`${BASE}/clips/montage/${job_id}/download`);
-}
-
-export async function listPlayers(): Promise<PlayerSummary[]> {
-  const r = await apiFetch(`${BASE}/analytics/players`);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export async function getProgression(player_id: number, metric: string): Promise<ProgressionData> {
-  const r = await apiFetch(`${BASE}/analytics/progression/${player_id}/${metric}`);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
 }
 
 // ---- Condense ("useful time") ----
