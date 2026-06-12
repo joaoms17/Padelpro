@@ -29,9 +29,8 @@ python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\act
 # Instalar dependências base
 pip install -e .
 
-# Instalar opcionais de deteção (necessário para deteção real)
-pip install openmim
-mim install mmcv mmdet
+# Instalar opcionais de deteção/tracking (necessário para deteção real)
+pip install torch torchvision supervision
 
 # Copiar e preencher variáveis de ambiente
 cp .env.example .env
@@ -40,35 +39,20 @@ cp .env.example .env
 
 ---
 
-## Pesos de modelos necessários
+## Stack de modelos
 
-> Confirma a licença de cada ficheiro de pesos antes de uso em produção (ver `LICENSES.md`).
+O projeto usa uma única stack, toda com licenças permissivas (ver `LICENSES.md`):
 
-### YOLOX-m (recomendado para M1)
+| Tarefa | Modelo | Instalação | Licença |
+|---|---|---|---|
+| Deteção de jogadores | torchvision Faster R-CNN (MobileNetV3) | `pip install torch torchvision` — pesos descarregam sozinhos | BSD-3 |
+| Tracking | ByteTrack via `supervision` | `pip install supervision` | MIT |
+| Pose | RTMPose-m (MMPose) | `mim install mmpose && mim download mmpose --config rtmpose-m_8xb256-420e_coco-256x192 --dest checkpoints/` | Apache 2.0 |
+| Pancadas | TCN próprio | treinado via revisão/etiquetagem no frontend → `checkpoints/stroke_tcn.pth` | — |
 
-**Licença:** Apache 2.0
-
-```bash
-mim download mmdet --config yolox_m_8xb8-300e_coco --dest checkpoints/
-```
-
-### RTMDet-m (alternativa)
-
-**Licença:** Apache 2.0
-
-```bash
-mim download mmdet --config rtmdet_m_8xb32-300e_coco --dest checkpoints/
-```
-
-### ByteTrack (tracking)
-
-**Licença:** MIT
-
-```bash
-pip install git+https://github.com/ifzhang/ByteTrack.git
-```
-
-> Sem estes pesos, o pipeline corre em modo stub (sem deteções, estrutura de código completa).
+> Sem `supervision` o tracking usa o GreedyTracker interno; sem MMPose a pose corre
+> em stub (sem classificação real de pancadas). O TCN é usado automaticamente
+> quando `checkpoints/stroke_tcn.pth` existe; até lá valem as regras geométricas.
 
 ---
 
@@ -154,8 +138,8 @@ Datasets e modelos externos utilizáveis: [docs/RESOURCES.md](docs/RESOURCES.md)
 padelpro_vision/
 ├── pipeline.py          # orquestrador M1
 ├── calibration/         # homografia + cache
-├── detection/           # YOLOX / RTMDet wrapper
-├── tracking/            # ByteTrack wrapper
+├── detection/           # torchvision Faster R-CNN (BSD)
+├── tracking/            # ByteTrack (supervision) + GreedyTracker
 ├── io/                  # vídeo I/O + Supabase client
 ├── constants/           # dimensões ITF do campo
 ├── segmentation/        # TODO: corte de tempo morto

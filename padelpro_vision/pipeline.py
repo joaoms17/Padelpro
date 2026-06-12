@@ -175,7 +175,7 @@ class Pipeline:
             )
             # Use the trained TCN when available (feedback loop retrains it);
             # StrokeClassifier falls back to rules if loading fails.
-            tcn_weights = self._cfg.model.detector_weights.parent / "stroke_tcn.pth"
+            tcn_weights = self._cfg.model.checkpoints_dir / "stroke_tcn.pth"
             if tcn_weights.exists():
                 stroke_clf = StrokeClassifier(mode="tcn", weights_path=tcn_weights,
                                               device=self._cfg.model.device)

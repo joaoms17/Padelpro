@@ -1,6 +1,6 @@
 # Recursos para Pipeline de Análise de Vídeo de Padel
 
-> Levantamento verificado em 2026-06-12. Todos os URLs marcados ✅ foram confirmados por acesso direto nesta data. Pipeline de referência: **YOLOX-m (deteção) + ByteTrack + RTMPose-m (pose) + classificador TCN de pancadas + homografia de 4 pontos**.
+> Levantamento verificado em 2026-06-12. Todos os URLs marcados ✅ foram confirmados por acesso direto nesta data. Pipeline atual: **torchvision Faster R-CNN (deteção) + ByteTrack via supervision + RTMPose-m (pose) + classificador TCN de pancadas + homografia de 4 pontos**. As referências a YOLOX-m abaixo descrevem o baseline antigo, já removido do código.
 >
 > Legenda: ✅ **descarregável hoje** · 📄 **apenas paper / acesso indireto** · ⚠️ **licença restritiva (não comercial)**
 

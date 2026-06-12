@@ -7,10 +7,8 @@ ROOT = Path(__file__).parent
 
 @dataclass
 class ModelConfig:
-    detector_type: str = "yolox"  # "yolox" | "rtmdet"
-    detector_config: Path = field(default_factory=lambda: ROOT / "checkpoints" / "yolox_m.py")
-    detector_weights: Path = field(default_factory=lambda: ROOT / "checkpoints" / "yolox_m.pth")
-    tracker_type: str = "bytetrack"
+    detector_type: str = "torchvision"   # torchvision Faster R-CNN (BSD)
+    checkpoints_dir: Path = field(default_factory=lambda: ROOT / "checkpoints")
     pose_config: Path = field(default_factory=lambda: ROOT / "checkpoints" / "rtmpose_m.py")
     pose_weights: Path = field(default_factory=lambda: ROOT / "checkpoints" / "rtmpose_m.pth")
     score_threshold: float = 0.5
