@@ -194,6 +194,9 @@ class Pipeline:
         # {"player:frame": normalised 17x2 keypoint window} — training features
         # for the feedback loop (saved only for events that survive fusion)
         pose_windows: dict[str, list] = {}
+        # Shirt-colour appearance per track, for post-hoc re-identification
+        from padelpro_vision.tracking.reid import TrackAppearance, torso_histogram
+        appearances: dict[int, TrackAppearance] = {}
 
         try:
             from tqdm import tqdm
@@ -223,6 +226,13 @@ class Pipeline:
                     from padelpro_vision.projection.projection import foot_point
                     px, py = foot_point(t.box)
                     pixel_positions.setdefault(t.track_id, []).append((ts_ms, px, py))
+                    # Appearance sample every 3rd frame (cheap re-ID cue)
+                    if frame_idx % 3 == 0:
+                        hist = torso_histogram(frame, t.box)
+                        if hist is not None:
+                            appearances.setdefault(
+                                t.track_id, TrackAppearance(t.track_id)
+                            ).add(hist, ts_ms, (px, py))
 
                 # M2: pose + strokes
                 if pose_estimator is not None and stroke_clf is not None:
@@ -268,6 +278,23 @@ class Pipeline:
                         court_pts[t.track_id] = (cx, cy)
                     annotated = draw_mini_court(annotated, court_pts)
                 writer.write(annotated)
+
+        # ----------------------------------------------------------------
+        # Re-ID: merge fragmented tracks so each player keeps one ID
+        # ----------------------------------------------------------------
+        if self._cfg.quality.reid_enabled and len(appearances) > self._cfg.quality.expected_players:
+            from padelpro_vision.tracking.reid import merge_fragmented_tracks, remap_ids
+            mapping = merge_fragmented_tracks(
+                appearances, px_per_m=self._estimate_px_per_m(H)
+            )
+            if any(k != v for k, v in mapping.items()):
+                remap_ids(mapping, pixel_positions, all_shot_events)
+                for fr in frame_results:
+                    remap_ids(mapping, fr.tracks)
+                pose_windows = {
+                    f"{mapping.get(int(k.split(':')[0]), int(k.split(':')[0]))}:{k.split(':')[1]}": v
+                    for k, v in pose_windows.items()
+                }
 
         self._write_csv(frame_results, csv_path)
 
@@ -388,6 +415,22 @@ class Pipeline:
         )
 
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _estimate_px_per_m(H: np.ndarray | None) -> float | None:
+        """Rough px/m scale at mid-court (net line) from the homography —
+        good enough for the re-ID gap-plausibility check."""
+        if H is None:
+            return None
+        try:
+            import cv2
+            H_inv = np.linalg.inv(H)
+            net = np.array([[[0.0, 10.0]], [[10.0, 10.0]]], dtype=np.float64)
+            px = cv2.perspectiveTransform(net, H_inv)
+            dist = float(np.linalg.norm(px[0, 0] - px[1, 0]))
+            return dist / 10.0 if dist > 1.0 else None
+        except np.linalg.LinAlgError:
+            return None
 
     @staticmethod
     def _project_positions(
