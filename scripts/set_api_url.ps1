@@ -51,17 +51,24 @@ try {
 }
 Write-Host "NEXT_PUBLIC_API_URL = $Url -- a redeployar..." -ForegroundColor Cyan
 
-# --- Redeploy ------------------------------------------------------------
-$dash = Join-Path (Split-Path $PSScriptRoot -Parent) "dashboard"
-Push-Location $dash
+# --- Redeploy via REST ---------------------------------------------------
+# Nao usamos a CLI (com Root Directory = dashboard, 'vercel --prod' duplica
+# o caminho -> dashboard\dashboard). Disparamos o redeploy do ultimo build
+# de producao com o token, que ja apanha a variavel acabada de gravar.
+$hdr = @{ Authorization = "Bearer $token" }
 try {
-    npx vercel --prod --yes
-    $rc = $LASTEXITCODE
-} finally {
-    Pop-Location
-}
-if ($rc -ne 0) {
-    Write-Host "O 'vercel --prod' falhou (codigo $rc)." -ForegroundColor Red
+    $latest = Invoke-RestMethod -Method Get -Headers $hdr `
+        -Uri "https://api.vercel.com/v6/deployments?app=padelpro-dashboard&target=production&limit=1&teamId=$TEAM"
+    $depId = $latest.deployments[0].uid
+    if (-not $depId) { throw "nao encontrei um deployment de producao anterior" }
+
+    $rbody = @{ name = "padelpro-dashboard"; deploymentId = $depId; target = "production" } | ConvertTo-Json
+    Invoke-RestMethod -Method Post -Headers $hdr -ContentType "application/json" -Body $rbody `
+        -Uri "https://api.vercel.com/v13/deployments?teamId=$TEAM&forceNew=1" | Out-Null
+    Write-Host "Redeploy disparado (fica Ready em ~1-2 min)." -ForegroundColor Green
+    exit 0
+} catch {
+    Write-Host "Variavel actualizada, mas o redeploy automatico falhou: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "Faz Redeploy a mao:  Vercel > Deployments > (ultimo) > ... > Redeploy" -ForegroundColor Yellow
     exit 1
 }
-exit 0
