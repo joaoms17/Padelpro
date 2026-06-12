@@ -13,6 +13,17 @@ export function AccessCodeModal() {
   const [code, setCode] = useState("");
 
   useEffect(() => {
+    // Foolproof path: code can travel in the URL (?code=...). Store it and
+    // strip it from the address bar so a shared "link + code" just works.
+    const params = new URLSearchParams(window.location.search);
+    const fromUrl = params.get("code");
+    if (fromUrl) {
+      setAccessCode(fromUrl.trim());
+      params.delete("code");
+      const qs = params.toString();
+      window.history.replaceState({}, "", window.location.pathname + (qs ? `?${qs}` : ""));
+      return;   // already authenticated — no need to open the modal
+    }
     if (consumeNeedsCode()) setOpen(true);
     const handler = () => setOpen(true);
     window.addEventListener("padelpro-needs-code", handler);
