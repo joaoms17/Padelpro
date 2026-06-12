@@ -111,6 +111,26 @@ async def retry_pipeline(match_id: str, background_tasks: BackgroundTasks):
     return MatchStatus(match_id=match_id, status="processing")
 
 
+@router.delete("/{match_id}")
+async def delete_match(match_id: str):
+    """Remove a match: job entry + uploaded video + output artifacts."""
+    if match_id not in _jobs:
+        raise HTTPException(status_code=404, detail="Match not found.")
+    if _jobs[match_id].get("status") == "processing":
+        raise HTTPException(status_code=409, detail="Análise a decorrer — espera que termine.")
+
+    job = _jobs.pop(match_id)
+    import shutil
+    video_path = job.get("video_path")
+    if video_path:
+        Path(video_path).unlink(missing_ok=True)
+    out_dir = Path("data/output") / match_id
+    if out_dir.exists():
+        shutil.rmtree(out_dir, ignore_errors=True)
+    logger.info("Match %s deleted (video + outputs).", match_id)
+    return {"match_id": match_id, "deleted": True}
+
+
 @router.get("/{match_id}/status", response_model=MatchStatus)
 async def get_status(match_id: str):
     if match_id not in _jobs:

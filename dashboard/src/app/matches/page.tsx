@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
-import { listMatches, retryAnalysis, type MatchStatus } from "@/lib/api";
+import { listMatches, retryAnalysis, deleteMatch, type MatchStatus } from "@/lib/api";
 import { StatusBadge } from "@/components/StatusBadge";
 import { UploadForm } from "@/components/UploadForm";
 
@@ -90,6 +90,19 @@ export default function MatchesPage() {
                     🔁 Reiniciar análise
                   </button>
                 </span>
+              )}
+              {m.status !== "processing" && (
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (!confirm("Apagar este jogo? Remove o vídeo e os resultados.")) return;
+                    deleteMatch(m.match_id).then(refresh).catch((err) => alert(String(err)));
+                  }}
+                  title="Apagar jogo"
+                  className="ml-3 px-2 py-1 text-gray-600 hover:text-red-400 hover:bg-red-950/40 rounded-lg text-sm transition-colors"
+                >
+                  ✕
+                </button>
               )}
             </Link>
           ))}
