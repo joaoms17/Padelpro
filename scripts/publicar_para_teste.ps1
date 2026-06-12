@@ -12,9 +12,17 @@
 $root = Split-Path $PSScriptRoot -Parent
 
 # --- 1. API local ---------------------------------------------------------
-$up = $false
-try { Invoke-RestMethod "http://127.0.0.1:8010/health" -TimeoutSec 3 | Out-Null; $up = $true } catch {}
-if (-not $up) {
+# Reinicia SEMPRE a API: um processo antigo fica com código/config velhos em
+# memória (os imports são lazy) e sem o código de acesso — reaproveitá-lo
+# depois de um git pull dá erros tipo "'ModelConfig' object has no attribute".
+$old = Get-NetTCPConnection -LocalPort 8010 -State Listen -ErrorAction SilentlyContinue |
+    Select-Object -First 1 -ExpandProperty OwningProcess
+if ($old) {
+    Write-Host "A parar API antiga (PID $old) para arrancar com o código atual..." -ForegroundColor Cyan
+    Stop-Process -Id $old -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 1
+}
+if ($true) {
     Write-Host "A arrancar API (porta 8010, com análise)..." -ForegroundColor Cyan
     $env:API_MAX_UPLOAD_MB = "95"
     if (-not $env:PADELPRO_ACCESS_CODE) {
@@ -28,8 +36,6 @@ if (-not $up) {
         Start-Sleep -Seconds 2
         try { Invoke-RestMethod "http://127.0.0.1:8010/health" -TimeoutSec 2 | Out-Null; break } catch { $tries++ }
     }
-} else {
-    Write-Host "API 8010 já está a correr." -ForegroundColor Green
 }
 
 # --- 2. Túnel -------------------------------------------------------------
