@@ -629,6 +629,28 @@ def analyze_clip(
                 "type": shot_type,
                 "via_ball": via_ball,
             })
+        # Pose-based stroke classification (deep pass): run the real pose on
+        # the hitter around each hit, refine the stroke type and save pose
+        # windows for training. Fully optional — geometric types kept on failure.
+        if deep and hit_records:
+            try:
+                from padelpro_vision.strokes.clip_strokes import classify_clip_strokes
+                if phase_cb:
+                    phase_cb("classificação de pancadas (pose)")
+                pose_types, pose_windows = classify_clip_strokes(
+                    video_path, hit_records, player_tracks,
+                    sampled_fps=sampled_fps, device="cpu",
+                )
+                for hi, (stype, _conf) in pose_types.items():
+                    hit_records[hi]["type"] = stype
+                if pose_windows:
+                    import json as _json
+                    with open(output_dir / "pose_windows.json", "w") as f:
+                        _json.dump(pose_windows, f)
+                    logger.info("Saved %d pose windows for training.", len(pose_windows))
+            except Exception:
+                logger.exception("Pose stroke classification failed — keeping geometric types.")
+
         for p in players:
             p["hits"] = sum(1 for h in hit_records if h["player_id"] == p["id"])
             types: dict[str, int] = {}
