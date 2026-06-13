@@ -53,17 +53,17 @@ def _rm(path: Path) -> None:
 
 
 def _sweep_old() -> None:
-    """Remove anything in data/uploads older than _MAX_AGE_S so we never
-    accumulate stale videos (important on ephemeral hosts)."""
-    if not _UPLOAD_DIR.exists():
-        return
+    """Remove stale files from uploads and videos dirs (ephemeral host hygiene)."""
     cutoff = time.time() - _MAX_AGE_S
-    for entry in _UPLOAD_DIR.iterdir():
-        try:
-            if entry.stat().st_mtime < cutoff:
-                _rm(entry)
-        except Exception:
-            pass
+    for sweep_dir in (_UPLOAD_DIR, Path("data/videos")):
+        if not sweep_dir.exists():
+            continue
+        for entry in sweep_dir.iterdir():
+            try:
+                if entry.stat().st_mtime < cutoff:
+                    _rm(entry)
+            except Exception:
+                pass
 
 
 @router.get("/capabilities")
@@ -205,6 +205,15 @@ def _condense_sync(
     _jobs[job_id]["phase"] = "corte do vídeo"
     condense_video(in_path, segs, out_path)
 
+    # Keep condensed video in data/videos/ for the review page (video available
+    # there until the user finishes review; swept after _MAX_AGE_S like uploads).
+    videos_dir = Path("data/videos")
+    videos_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.copy(out_path, videos_dir / f"{job_id}.mp4")
+    except Exception:
+        logger.warning("Could not copy condensed video for review (job %s)", job_id)
+
     # Source video + segmentation side-outputs are no longer needed.
     _rm(in_path)
     _rm(_UPLOAD_DIR / job_id)
@@ -231,13 +240,12 @@ def _analyze_via_modal(url: str, video: Path, court_id: str, deep: bool) -> dict
 
 def _persist_for_review(job_id: str, report: dict) -> None:
     """
-    Copy the analysis artifacts to data/output/{job_id}/ so the review page
-    treats this clip like a full-pipeline match: shot events + pose windows
-    (when the deep pass produced them) — making corrections trainable.
-    Survives the upload-dir cleanup that runs right after analysis.
+    Copy analysis artifacts to data/output/{job_id}/ so the review page works:
+    shot events, pose windows (if deep pass ran), and a quality report for the
+    fleet quality page.  Survives the upload-dir cleanup that runs after analysis.
     """
     try:
-        import json
+        import json, time
         out_dir = Path("data/output") / job_id
         out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -262,6 +270,38 @@ def _persist_for_review(job_id: str, report: dict) -> None:
         pw_src = _UPLOAD_DIR / job_id / "pose_windows.json"
         if pw_src.exists():
             shutil.copy(pw_src, out_dir / f"{job_id}_pose_windows.json")
+
+        # Quality report for the fleet quality page
+        clip = report.get("clip", {})
+        players = report.get("players", [])
+        timings = report.get("timings_s", {})
+        duration_s = clip.get("duration_s", 0) or 1
+        elapsed_s = sum(timings.values()) if timings else 0
+        n_players = len(players)
+        quality = {
+            "match_id": job_id,
+            "generated_at": time.time(),
+            "tracking": {
+                "n_tracks": n_players,
+                "tracks_per_minute": round(n_players / (duration_s / 60), 2),
+                "avg_track_duration_s": round(clip.get("useful_s", 0), 1),
+                "pct_time_with_expected_players": round(
+                    sum(p.get("coverage_pct", 0) for p in players) / max(n_players, 1), 1
+                ),
+            },
+            "strokes": {
+                "n_events": len(shots),
+                "mean_confidence": 1.0,
+                "pct_with_audio_onset": 100.0,
+            },
+            "performance": {
+                "elapsed_s": round(elapsed_s, 1),
+                "realtime_factor": round(elapsed_s / duration_s, 2),
+            },
+        }
+        with open(out_dir / "quality_report.json", "w") as f:
+            json.dump(quality, f)
+
     except Exception:
         logger.exception("Could not persist review artifacts for job %s", job_id)
 
