@@ -193,9 +193,9 @@ def _condense_sync(
         if modal_url:
             try:
                 _jobs[job_id]["phase"] = "análise na GPU (cloud)"
-                _jobs[job_id]["report"] = _analyze_via_modal(
-                    modal_url, in_path, court_id, deep
-                )
+                report = _analyze_via_modal(modal_url, in_path, court_id, deep)
+                _jobs[job_id]["report"] = report
+                _persist_for_review(job_id, report)
             except Exception as exc:
                 logger.exception("Modal analysis failed for job %s", job_id)
                 _jobs[job_id]["report_error"] = f"Análise GPU falhou: {exc}"
