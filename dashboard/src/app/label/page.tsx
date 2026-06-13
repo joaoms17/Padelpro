@@ -11,9 +11,6 @@ const STROKE_LABELS: Record<string, string> = {
   vibora: "Víbora",
   smash: "Smash",
   serve: "Serviço",
-  rede: "Rede",
-  meio: "Meio",
-  fundo: "Fundo",
 };
 
 export default function LabelPage() {
@@ -82,7 +79,7 @@ export default function LabelPage() {
           e.preventDefault(); setIdx((i) => Math.max(i - 1, 0)); break;
         case " ": {
           e.preventDefault();
-          const v = document.querySelector<HTMLVideoElement>("#label-video");
+          const v = document.querySelector("#label-video");
           if (v) { v.currentTime = 0; v.play().catch(() => {}); }
           break;
         }
@@ -162,7 +159,7 @@ export default function LabelPage() {
         <div className="bg-green-950/40 border border-green-800 rounded-xl p-8 text-center space-y-2">
           <p className="text-green-300 font-medium">🎉 Tudo classificado!</p>
           <p className="text-sm text-gray-400">
-            {Object.entries(queue.counts).filter(([k]) => k !== "por_classificar").map(([k, v]) => `${k}: ${v}`).join(" · ")}
+            {Object.entries(queue.counts).filter(([k]) => k !== "por_classificar").map(([k, v]) => k + ": " + v).join(" · ")}
           </p>
         </div>
       ) : null}
@@ -179,4 +176,4 @@ export default function LabelPage() {
       {error && <p className="text-sm text-red-400">{error}</p>}
     </div>
   );
-}
+                }
