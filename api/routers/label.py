@@ -76,8 +76,7 @@ async def get_queue():
     """Clips to label (unlabelled first), available labels, per-label counts."""
     root = _root()
     clips = _scan(root)
-    existing_labels = sorted({c["label"] for c in clips if c["label"]})
-    labels = sorted(set(existing_labels) | set(_default_labels()))
+    labels = sorted(_default_labels())
 
     counts: dict[str, int] = {}
     for c in clips:
