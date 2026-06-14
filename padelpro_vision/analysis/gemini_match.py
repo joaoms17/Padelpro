@@ -226,6 +226,7 @@ Posição inicial: Equipa A no lado [esquerdo/direito], Equipa B no lado [esquer
   "pausas": [
     { "id": 1, "inicio": "00:00:00", "fim": "00:00:00", "duracao_segundos": 0, "tipo_pausa": "troca_de_campo" }
   ],
+
   "rallies": [
     {
       "id": 1,
