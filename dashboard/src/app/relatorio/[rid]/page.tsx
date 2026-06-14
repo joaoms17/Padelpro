@@ -15,6 +15,7 @@ import { FormationDonut } from "@/components/report/FormationDonut";
 import { RallyTimeline } from "@/components/report/RallyTimeline";
 import { KeyFramesGallery } from "@/components/report/KeyFramesGallery";
 import { ScoreTimeline } from "@/components/report/ScoreTimeline";
+import { PlayerOutcomeCards } from "@/components/report/PlayerOutcomeCards";
 
 type View =
   | { state: "loading" }
@@ -112,6 +113,16 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 function ReportBody({ report, rid }: { report: MatchReport; rid: string }) {
   return (
     <div className="space-y-6">
+      {/* 1. Match summary */}
+      {report.match_summary && (
+        <section className="card p-5 border-l-2 border-brand/50 bg-brand/5">
+          <p className="text-sm text-gray-300 leading-relaxed italic">{report.match_summary}</p>
+          {report.confidence != null && (
+            <div className="mt-2 text-xs text-gray-500">Confiança da IA: {Math.round(report.confidence * 100)}%</div>
+          )}
+        </section>
+      )}
+
       {/* 2. Score + validation */}
       <ScoreCard report={report} />
 
@@ -123,7 +134,15 @@ function ReportBody({ report, rid }: { report: MatchReport; rid: string }) {
         </section>
       )}
 
-      {/* 3 + 4 — heatmap and shot counts side by side on wide screens */}
+      {/* 3. Player outcome breakdown */}
+      {(report.shots?.length ?? 0) > 0 && (
+        <section className="card p-6">
+          <SectionTitle>Qualidade por jogador</SectionTitle>
+          <PlayerOutcomeCards report={report} />
+        </section>
+      )}
+
+      {/* 4 + 5 — heatmap and shot counts side by side on wide screens */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         <section className="card p-6">
           <SectionTitle>Mapa de calor</SectionTitle>

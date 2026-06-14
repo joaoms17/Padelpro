@@ -322,6 +322,23 @@ export interface MatchReport {
   ball_trajectory_source?: "kalman" | "interpolated";
 }
 
+export interface ReportHistoryEntry {
+  rid: string;
+  status: string;
+  filename?: string;
+  updated_at?: number;
+  duration_s?: number;
+  final_score?: { team1_sets: number; team2_sets: number; detail: string };
+  match_summary?: string;
+  confidence?: number;
+}
+
+export async function listReports(): Promise<ReportHistoryEntry[]> {
+  const r = await apiFetch(`${BASE}/report/history`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
 export async function uploadForReport(file: File): Promise<{ rid: string }> {
   const fd = new FormData();
   fd.append("file", file);

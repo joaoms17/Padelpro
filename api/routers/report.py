@@ -22,7 +22,7 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
-from api.db import save_job, get_job, update_job
+from api.db import save_job, get_job, update_job, list_jobs
 
 router = APIRouter(prefix="/report", tags=["report"])
 logger = logging.getLogger(__name__)
@@ -45,6 +45,27 @@ def _condensed_path(rid: str) -> Path:
 
 
 # ── Create / ingest ──────────────────────────────────────────────────────────
+
+@router.get("/history")
+def list_report_history():
+    """Return the 50 most recent report jobs (newest first)."""
+    jobs = list_jobs("report", limit=50)
+    out = []
+    for j in jobs:
+        status = j.get("status", "unknown")
+        rpt = j.get("report") or {}
+        out.append({
+            "rid":        j.get("job_id", ""),
+            "status":     status,
+            "filename":   j.get("filename"),
+            "updated_at": j.get("_updated_at"),
+            "duration_s": rpt.get("duration_s"),
+            "final_score": rpt.get("final_score"),
+            "match_summary": (rpt.get("match_summary") or "")[:200],
+            "confidence": rpt.get("confidence"),
+        })
+    return out
+
 
 @router.get("/capabilities")
 async def report_capabilities():
