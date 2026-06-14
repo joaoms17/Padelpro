@@ -31,6 +31,7 @@ API_BUILD = 6
 async def _lifespan(_app: FastAPI):
     from api.db import prune_jobs
     prune_jobs("report", max_age_s=7200.0)
+    prune_jobs("condense", max_age_s=7200.0)
     yield
 
 
@@ -59,13 +60,6 @@ app.include_router(quality.router)
 app.include_router(annotate.router)
 app.include_router(report.router)
 app.include_router(training.router)
-
-
-@app.on_event("startup")
-async def startup():
-    from api.db import prune_jobs
-    prune_jobs("report")
-    prune_jobs("condense")
 
 
 @app.get("/health")
