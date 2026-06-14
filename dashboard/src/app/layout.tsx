@@ -1,18 +1,31 @@
 import type { Metadata } from "next";
+import { Inter, Sora } from "next/font/google";
 import Link from "next/link";
 import "./globals.css";
 import { Nav } from "@/components/Nav";
 import { ApiBanner } from "@/components/ApiBanner";
 import { AccessCodeModal } from "@/components/AccessCodeModal";
 
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
+const sora = Sora({
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
+  variable: "--font-sora",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "PadelPro Vision",
-  description: "Análise de padel por visão computacional",
+  title: "PadelPro — Video Analytics for Padel",
+  description: "Análise de vídeo de padel: tempo útil, estatísticas por jogador e leitura da IA.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="pt">
+    <html lang="pt" className={`${inter.variable} ${sora.variable}`}>
       <body className="min-h-screen flex flex-col">
         <Nav />
         <ApiBanner />

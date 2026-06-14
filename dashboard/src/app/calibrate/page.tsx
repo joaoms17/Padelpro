@@ -181,7 +181,7 @@ export default function CalibratePage() {
           <label className="block text-sm font-medium text-gray-300 mb-1">Vídeo do campo</label>
           <input
             type="file" accept="video/*" onChange={onFile}
-            className="text-sm text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-brand file:text-white file:text-sm file:font-medium hover:file:bg-brand-dark cursor-pointer"
+            className="text-sm text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-brand file:text-navy-950 file:text-sm file:font-bold hover:file:bg-brand-dark cursor-pointer"
           />
         </div>
       </div>
@@ -216,7 +216,7 @@ export default function CalibratePage() {
             <button
               onClick={submit}
               disabled={points.length !== 4 || saved}
-              className="px-4 py-2 bg-brand hover:bg-brand-dark disabled:opacity-40 text-white rounded-lg text-sm font-medium"
+              className="px-4 py-2 bg-brand hover:bg-brand-dark disabled:opacity-40 text-navy-950 rounded-lg text-sm font-bold"
             >Guardar calibração</button>
           </div>
         </div>

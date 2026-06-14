@@ -5,45 +5,63 @@
 :root { color-scheme: dark; }
 
 body {
-  color: #f3f4f6;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color: #ffffff;
+  font-family: var(--font-inter), system-ui, -apple-system, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
-  background-color: #0a0c0b;
+  background-color: #07111F; /* navy-950 */
   background-image:
-    radial-gradient(1200px 600px at 85% -10%, rgba(22, 163, 74, 0.10), transparent 60%),
-    radial-gradient(900px 500px at -10% 110%, rgba(22, 163, 74, 0.06), transparent 55%);
+    radial-gradient(1200px 620px at 80% -10%, rgba(0, 224, 164, 0.16), transparent 60%),
+    radial-gradient(900px 520px at -10% 110%, rgba(84, 167, 255, 0.10), transparent 55%);
   background-attachment: fixed;
+}
+
+/* Branded display font for headings */
+h1, h2, h3 {
+  font-family: var(--font-sora), var(--font-inter), system-ui, sans-serif;
+  letter-spacing: -0.02em;
 }
 
 * { box-sizing: border-box; }
 
 ::selection {
-  background: rgba(22, 163, 74, 0.4);
+  background: rgba(0, 224, 164, 0.35);
 }
 
-/* Slim dark scrollbars (review/label lists scroll a lot) */
+/* Slim navy scrollbars (review/label lists scroll a lot) */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #374151 transparent;
+  scrollbar-color: #173654 transparent;
 }
 *::-webkit-scrollbar { width: 8px; height: 8px; }
-*::-webkit-scrollbar-thumb { background: #374151; border-radius: 8px; }
+*::-webkit-scrollbar-thumb { background: #173654; border-radius: 8px; }
 *::-webkit-scrollbar-track { background: transparent; }
 
 @layer components {
   .card {
-    @apply bg-gray-900/70 border border-gray-800 rounded-2xl backdrop-blur-sm;
+    @apply bg-gray-900/70 border border-gray-800 rounded-3xl backdrop-blur-sm;
+    box-shadow: 0 18px 45px rgba(0, 0, 0, 0.28);
   }
   .card-hover {
-    @apply transition-all duration-200 hover:border-brand/60 hover:shadow-[0_0_24px_rgba(22,163,74,0.08)] hover:-translate-y-0.5;
+    @apply transition-all duration-200 hover:border-brand/60 hover:-translate-y-0.5;
   }
+  .card-hover:hover {
+    box-shadow: 0 0 28px rgba(0, 224, 164, 0.12);
+  }
+  /* Primary = teal pill with navy text (brand v2) */
   .btn-primary {
-    @apply bg-brand hover:bg-brand-dark text-white rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-brand hover:bg-brand-dark text-navy-950 rounded-full font-extrabold transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
   }
   .btn-ghost {
-    @apply bg-gray-800/80 hover:bg-gray-700 border border-gray-700 text-gray-300 rounded-xl font-medium transition-colors;
+    @apply bg-gray-800/80 hover:bg-gray-700 border border-gray-700 text-gray-200 rounded-full font-semibold transition-colors;
   }
   .kbd {
     @apply px-1.5 py-0.5 bg-gray-800 border border-gray-700 rounded text-xs font-mono text-gray-300;
+  }
+  /* Lime insight tag (brand v2) */
+  .tag-insight {
+    @apply inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-bold;
+    background: rgba(232, 255, 61, 0.12);
+    color: #E8FF3D;
+    border: 1px solid rgba(232, 255, 61, 0.28);
   }
 }

@@ -17,16 +17,17 @@ export function Nav() {
     <nav className="sticky top-0 z-50 border-b border-gray-800/80 bg-black/60 backdrop-blur-md">
       <div className="max-w-6xl mx-auto px-6 py-3 flex items-center gap-5 flex-wrap">
         <Link href="/" className="flex items-center gap-2 font-bold text-white text-lg">
-          <span className="text-brand text-xl leading-none">●</span>
-          PadelPro
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/brand/padelpro_icon.svg" alt="" className="w-7 h-7 rounded-lg" />
+          <span className="font-display tracking-tight">Padel<span className="text-brand">Pro</span></span>
         </Link>
 
         <Link
           href="/"
-          className={`px-3 py-1.5 rounded-xl text-sm font-semibold transition-colors ${
+          className={`px-3 py-1.5 rounded-full text-sm font-bold transition-colors ${
             pathname === "/"
-              ? "bg-brand text-white"
-              : "bg-brand/15 text-brand hover:bg-brand hover:text-white"
+              ? "bg-brand text-navy-950"
+              : "bg-brand/15 text-brand hover:bg-brand hover:text-navy-950"
           }`}
         >
           ⚡ Analisar

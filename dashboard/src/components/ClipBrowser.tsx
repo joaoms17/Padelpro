@@ -94,7 +94,7 @@ export function ClipBrowser({ matchId }: { matchId: string }) {
             )}
             <button
               onClick={handleMontage}
-              className="px-3 py-1.5 bg-brand hover:bg-brand-dark text-white rounded-lg text-sm font-medium transition-colors"
+              className="px-3 py-1.5 bg-brand hover:bg-brand-dark text-navy-950 rounded-lg text-sm font-bold transition-colors"
             >
               Montar seleção
             </button>

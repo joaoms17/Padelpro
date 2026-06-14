@@ -130,7 +130,7 @@ export function CondenseForm() {
           required
           disabled={busy}
           onChange={onPick}
-          className="w-full text-sm text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-brand file:text-white file:text-sm file:font-medium hover:file:bg-brand-dark cursor-pointer disabled:opacity-50"
+          className="w-full text-sm text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-brand file:text-navy-950 file:text-sm file:font-bold hover:file:bg-brand-dark cursor-pointer disabled:opacity-50"
         />
         {fileMB != null && (
           <p className={`text-xs mt-1 ${oversize ? "text-red-400" : "text-green-400"}`}>
@@ -206,7 +206,7 @@ export function CondenseForm() {
         <button
           type="submit"
           disabled={busy || oversize}
-          className="w-full py-2.5 bg-brand hover:bg-brand-dark disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-colors flex items-center justify-center gap-2"
+          className="w-full py-2.5 bg-brand hover:bg-brand-dark disabled:opacity-50 text-navy-950 rounded-full font-bold text-sm transition-colors flex items-center justify-center gap-2"
         >
           {uploading && <><Spinner /> A enviar vídeo…</>}
           {analysing && <><Spinner /> A processar…</>}
@@ -240,7 +240,7 @@ export function CondenseForm() {
           </div>
           <a
             href={condenseDownloadUrl(job.job_id)}
-            className="block w-full text-center py-2.5 bg-brand hover:bg-brand-dark text-white rounded-lg font-medium text-sm transition-colors"
+            className="block w-full text-center py-2.5 bg-brand hover:bg-brand-dark text-navy-950 rounded-full font-bold text-sm transition-colors"
           >
             ⬇️ Descarregar vídeo (tempo útil)
           </a>

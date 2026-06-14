@@ -60,7 +60,7 @@ export function UploadForm() {
           type="file"
           accept="video/*"
           required
-          className="w-full text-sm text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-brand file:text-white file:text-sm file:font-medium hover:file:bg-brand-dark cursor-pointer"
+          className="w-full text-sm text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-brand file:text-navy-950 file:text-sm file:font-bold hover:file:bg-brand-dark cursor-pointer"
         />
       </div>
 
@@ -73,7 +73,7 @@ export function UploadForm() {
       <button
         type="submit"
         disabled={loading}
-        className="w-full py-2.5 bg-brand hover:bg-brand-dark disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-colors"
+        className="w-full py-2.5 bg-brand hover:bg-brand-dark disabled:opacity-50 text-navy-950 rounded-full font-bold text-sm transition-colors"
       >
         {loading ? "A processar…" : "Analisar jogo"}
       </button>

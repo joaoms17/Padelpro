@@ -11,7 +11,7 @@ export default function HomePage() {
         <div className="lg:col-span-2 space-y-4 pt-2">
           <h1 className="text-4xl font-bold text-white leading-tight">
             Analisa o teu jogo de{" "}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand to-emerald-300">
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-brand to-info">
               padel
             </span>
           </h1>
