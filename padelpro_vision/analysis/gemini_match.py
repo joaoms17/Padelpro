@@ -177,15 +177,19 @@ def analyze_full_match(video_path: str | Path, api_key: str | None = None) -> di
         raise RuntimeError(f"Processamento do vídeo no Gemini falhou: {state}")
     logger.info("Gemini file ready (%.1fs)", time.time() - t0)
 
-    cfg_kwargs = dict(
+    cfg_kwargs: dict = dict(
         response_mime_type="application/json",
         temperature=0.1,
         max_output_tokens=65536,
     )
+    # Use a moderate thinking budget so Gemini reasons about player positions
+    # and shot attribution before committing to JSON. thinking_budget=0 (off)
+    # was the main cause of low-quality analysis. Thinking tokens are separate
+    # from the output-token budget so this doesn't reduce the JSON space.
     try:
-        cfg_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+        cfg_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=8192)
     except Exception:
-        pass
+        pass  # older SDK version — proceed without thinking config
 
     response = client.models.generate_content(
         model=GEMINI_MODEL,
@@ -198,28 +202,96 @@ def analyze_full_match(video_path: str | Path, api_key: str | None = None) -> di
     except Exception:
         pass
 
-    report = _parse_match_json(response.text)
+    report = _parse_match_json(response.text or "")
+    n_pos = len(report.get("player_positions", []))
+    n_shots = len(report.get("shots", []))
+    n_rallies = len(report.get("rallies", []))
+    dur = report.get("duration_s", 0.0)
+    min_pos = max(4, int(dur / 5) * 4) if dur else 4
+    if n_pos < min_pos:
+        logger.warning(
+            "Gemini returned only %d positions for %.0fs video (expected ≥%d) — "
+            "heatmap will be sparse. Consider re-analysing.",
+            n_pos, dur, min_pos,
+        )
     logger.info(
-        "Gemini full-match: %d positions, %d shots, %d rallies",
-        len(report.get("player_positions", [])),
-        len(report.get("shots", [])),
-        len(report.get("rallies", [])),
+        "Gemini full-match: %d positions, %d shots, %d rallies (duration=%.0fs)",
+        n_pos, n_shots, n_rallies, dur,
     )
     return report
 
 
 def _parse_match_json(text: str) -> dict:
-    """Parse the report JSON, tolerating truncation by falling back to the
-    shared salvage parser and filling any missing top-level keys with defaults."""
-    import json
+    """Parse the full-match report JSON with robust truncation recovery.
 
-    data: dict
+    When Gemini truncates mid-array, standard json.loads fails.  We try
+    a series of progressively more aggressive recovery strategies:
+      1. json.loads as-is (ideal path)
+      2. Close open brackets/braces and retry
+      3. Extract whatever top-level keys parsed before the truncation point
+    """
+    import json, re
+
+    data: dict = {}
+
+    # Strategy 1: clean parse
     try:
         data = json.loads(text)
+        _fill_defaults(data)
+        return data
     except json.JSONDecodeError:
-        logger.warning("Match JSON truncated (%d chars) — salvaging", len(text))
-        data = _parse_gemini_json(text)  # best-effort; returns at least {}
+        logger.warning("Match JSON truncated (%d chars) — attempting recovery", len(text))
 
+    # Strategy 2: close unclosed brackets then retry
+    repaired = text.rstrip()
+    # Count open vs close brackets/braces
+    opens  = repaired.count("[") - repaired.count("]")
+    opens_b = repaired.count("{") - repaired.count("}")
+    # Trim to the last complete top-level comma-separated entry if inside an array
+    # by backing up to the last '},' boundary
+    last_obj = repaired.rfind("},")
+    if last_obj > len(repaired) // 2:
+        repaired = repaired[: last_obj + 1]
+        opens   = repaired.count("[") - repaired.count("]")
+        opens_b = repaired.count("{") - repaired.count("}")
+    repaired += "]" * max(0, opens) + "}" * max(0, opens_b)
+    try:
+        data = json.loads(repaired)
+        logger.info("Recovery strategy 2 succeeded (%d chars)", len(repaired))
+        _fill_defaults(data)
+        return data
+    except json.JSONDecodeError:
+        pass
+
+    # Strategy 3: extract top-level scalar fields + whatever arrays parsed
+    for key_match in re.finditer(r'"(\w+)"\s*:\s*', text):
+        key = key_match.group(1)
+        rest = text[key_match.end():]
+        # Try scalars first (numbers, strings, booleans)
+        scalar = re.match(r'(-?\d+(?:\.\d+)?|"[^"]*"|true|false|null)', rest)
+        if scalar:
+            try:
+                data[key] = json.loads(scalar.group(1))
+            except Exception:
+                pass
+        elif rest.startswith("["):
+            # Try to parse the array up to first failure
+            objs: list = []
+            for m in re.finditer(r'\{[^{}]*\}', rest):
+                try:
+                    objs.append(json.loads(m.group(0)))
+                except Exception:
+                    pass
+            if objs:
+                data[key] = objs
+
+    if data:
+        logger.info("Recovery strategy 3: extracted keys %s", list(data.keys()))
+    _fill_defaults(data)
+    return data
+
+
+def _fill_defaults(data: dict) -> None:
     data.setdefault("duration_s", 0.0)
     for key in ("player_positions", "shots", "formation_samples",
                 "score_timeline", "key_frames", "rallies"):
@@ -227,7 +299,94 @@ def _parse_match_json(text: str) -> dict:
     data.setdefault("final_score", {"team1_sets": 0, "team2_sets": 0, "detail": ""})
     data.setdefault("match_summary", "")
     data.setdefault("confidence", 0.0)
-    return data
+
+
+# ── Position gap filling ─────────────────────────────────────────────────────
+
+def interpolate_positions(
+    positions: list[dict],
+    duration_s: float,
+    target_interval_s: float = 5.0,
+) -> list[dict]:
+    """
+    Fill temporal gaps in Gemini's player_positions with linear interpolation.
+
+    Gemini sometimes samples only every 10-30s instead of the requested 5s,
+    leaving the heatmap with bare patches.  This function adds synthetic
+    entries between existing samples so the heatmap looks continuous.
+
+    Only adds entries where the gap is > 1.5 × target_interval_s (i.e. not
+    already dense enough).  Marks added entries with `_interpolated: True`.
+    """
+    if not positions:
+        return positions
+
+    # Sort and group by player
+    by_player: dict[int, list[dict]] = {}
+    for p in positions:
+        pid = p.get("player")
+        if pid not in (1, 2, 3, 4):
+            continue
+        by_player.setdefault(pid, []).append(p)
+
+    result: list[dict] = list(positions)
+    gap_threshold = target_interval_s * 1.5
+
+    for pid, pts in by_player.items():
+        pts_sorted = sorted(pts, key=lambda p: p.get("t_s", 0.0))
+
+        # Fill gap at the start (if first sample is late)
+        if pts_sorted and pts_sorted[0].get("t_s", 0.0) > gap_threshold:
+            first = pts_sorted[0]
+            t = 0.0
+            while t < first.get("t_s", 0.0) - target_interval_s / 2:
+                result.append({
+                    "t_s": round(t, 1),
+                    "player": pid,
+                    "court_x": first["court_x"],
+                    "court_y": first["court_y"],
+                    "_interpolated": True,
+                })
+                t += target_interval_s
+
+        # Fill gaps between samples
+        for i in range(len(pts_sorted) - 1):
+            a, b = pts_sorted[i], pts_sorted[i + 1]
+            t_a, t_b = float(a.get("t_s", 0)), float(b.get("t_s", 0))
+            if t_b - t_a <= gap_threshold:
+                continue
+            x_a, y_a = float(a.get("court_x", 0.5)), float(a.get("court_y", 0.25 if pid <= 2 else 0.75))
+            x_b, y_b = float(b.get("court_x", 0.5)), float(b.get("court_y", 0.25 if pid <= 2 else 0.75))
+            t = t_a + target_interval_s
+            while t < t_b - target_interval_s / 2:
+                frac = (t - t_a) / (t_b - t_a)
+                result.append({
+                    "t_s": round(t, 1),
+                    "player": pid,
+                    "court_x": round(x_a + frac * (x_b - x_a), 3),
+                    "court_y": round(y_a + frac * (y_b - y_a), 3),
+                    "_interpolated": True,
+                })
+                t += target_interval_s
+
+        # Fill gap at the end
+        if duration_s > 0 and pts_sorted:
+            last = pts_sorted[-1]
+            t = float(last.get("t_s", 0.0)) + target_interval_s
+            while t <= duration_s:
+                result.append({
+                    "t_s": round(t, 1),
+                    "player": pid,
+                    "court_x": last["court_x"],
+                    "court_y": last["court_y"],
+                    "_interpolated": True,
+                })
+                t += target_interval_s
+
+    added = len(result) - len(positions)
+    if added:
+        logger.info("interpolate_positions: added %d synthetic entries (was %d)", added, len(positions))
+    return result
 
 
 # ── Derived metrics ──────────────────────────────────────────────────────────
@@ -279,6 +438,16 @@ def compute_rally_stats(rallies: list[dict], duration_s: float) -> dict:
 
 def enrich_report(report: dict) -> dict:
     """Add derived fields the frontend consumes, then apply game-rule fixes."""
+    # Fill position gaps with interpolation before game-rules (gives rules
+    # more data to work with for team-side constraint checks).
+    try:
+        report["player_positions"] = interpolate_positions(
+            report.get("player_positions", []),
+            duration_s=report.get("duration_s", 0.0),
+        )
+    except Exception:
+        logger.exception("Position interpolation failed — using raw positions")
+
     # Apply game-rule validator: fix team-side violations, infer rally boundaries
     try:
         from padelpro_vision.analysis.game_rules import apply_game_rules
