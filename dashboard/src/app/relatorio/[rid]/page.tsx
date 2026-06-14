@@ -164,15 +164,7 @@ function ReportBody({ report, rid }: { report: MatchReport; rid: string }) {
         </section>
       </div>
 
-      {/* 5. Phase breakdown (v2 schema) */}
-      {report.resumo?.tempo_por_fase && (
-        <section className="card p-6">
-          <SectionTitle>Tempo por Fase</SectionTitle>
-          <PhaseBreakdown report={report} />
-        </section>
-      )}
-
-      {/* 6. Formations */}
+      {/* 5. Formations */}
       <section className="card p-6">
         <SectionTitle>Formações</SectionTitle>
         <FormationDonut report={report} />
