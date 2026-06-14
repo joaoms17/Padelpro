@@ -1,54 +1,39 @@
 # Deploy — como pôr o PadelPro no ar
 
-Três topologias, da mais usada à mais simples. O frontend está sempre no
-Vercel (`padelpro-dashboard.vercel.app`); o que muda é onde corre a API.
+Tudo na cloud, sempre no ar. Nenhuma peça depende do teu PC estar ligado.
 
-## 0. Frontend (Vercel) — como é que ele atualiza
+| Peça | O que faz | Onde |
+|---|---|---|
+| Frontend | o site | Vercel |
+| API | corte de tempo útil, revisão, qualidade, calibração, import por link | Render (Docker) |
+| IA semântica | tipos de pancada, tática, winners/erros | Gemini API |
+| GPU (opcional) | análise espacial pesada (pose/tracking) | Modal |
 
-O projeto Vercel **não está ligado ao Git** (deploys são via CLI). Há duas vias:
+## Frontend (Vercel)
 
-- **Manual (hoje):** `cd dashboard; npx vercel --prod --yes` — também corre
-  automaticamente no fim do `publicar_para_teste.ps1`, mas só se a API e o
-  túnel tiverem arrancado primeiro.
-- **Recomendado (uma vez):** no dashboard do Vercel → **Connect Git** →
-  repo `joaoms17/Padelpro` → **Root Directory = `dashboard`** → branch
-  `main`. A partir daí cada push ao `main` deploya sozinho.
+- Ligar o projeto Vercel ao Git **uma vez**: dashboard Vercel → *Connect Git* →
+  repo `joaoms17/Padelpro` → **Root Directory = `dashboard`** → branch `main`.
+  A partir daí cada push ao `main` deploya sozinho.
+- Define `NEXT_PUBLIC_API_URL` no projeto Vercel a apontar para a API do Render
+  (ex.: `https://padelpro-api.onrender.com`). É permanente — já não há túnel.
 
-## 1. API local + tunnel Cloudflare (testes com a equipa — o habitual)
+## API (Render)
 
-A análise completa precisa de torch/pose, que correm na tua máquina:
+`render.yaml` está pronto: Render → *New +* → *Blueprint* → repo. Auto-deploy a
+cada push ao `main`. Variáveis no dashboard do Render:
 
-```powershell
-git checkout main; git pull
-.\scripts\publicar_para_teste.ps1
-```
+- `GEMINI_API_KEY` — leitura de pancadas/tática (necessária para a análise IA).
+- `MODAL_ANALYZE_URL` — endpoint Modal GPU para a análise espacial de jogadores
+  (opcional; sem ela, "Analisar jogadores" fica indisponível, mas o corte +
+  Gemini continuam a funcionar).
+- `PADELPRO_ACCESS_CODE` — opcional; tranca a API com um código partilhado.
 
-O script: arranca a API (porta 8010), **gera e imprime o código de acesso**,
-abre o tunnel e aponta o Vercel para lá. Partilha com a equipa:
-- o link `https://padelpro-dashboard.vercel.app`
-- o código de acesso (o site pede-o uma vez e fica guardado no browser)
+A imagem é leve de propósito (sem torch): corte de tempo útil, calibração,
+revisão, dashboard de qualidade, Gemini e import por link (yt-dlp) funcionam. A
+análise espacial pesada é offloaded para o Modal. Disco do Render free é
+efémero — calibrações e feedback não sobrevivem a redeploys.
 
-Mantém a janela aberta enquanto durar a sessão. No fim: `CTRL+C` e
-`.\scripts\repor_api_render.ps1`.
-
-> Os clips para etiquetar (`/label`) vivem em `data/dataset/hits/` da TUA
-> máquina — etiquetar move os ficheiros aí em tempo real.
-
-## 2. API no Render (sempre no ar, sem a tua máquina)
-
-O `render.yaml` está pronto: Render → New + → Blueprint → repo. Auto-deploya
-a cada push ao `main`.
-
-- **Define `PADELPRO_ACCESS_CODE`** no dashboard do Render (o blueprint já
-  declara a variável) se quiseres a API trancada.
-- A imagem é leve **de propósito** (sem torch): corta de tempo útil,
-  calibração (manual e automática), revisão e dashboard de qualidade
-  funcionam; análise de jogadores e retreino respondem com mensagem clara
-  de indisponível.
-- Disco do Render free é efémero: calibrações e feedback não sobrevivem a
-  redeploys — para sessões de etiquetagem/treino usa a topologia 1.
-
-## 3. Tudo local (desenvolvimento)
+## Local (desenvolvimento)
 
 ```powershell
 .\scripts\run_local_api.ps1          # API em 127.0.0.1:8010
@@ -59,7 +44,6 @@ Sem `PADELPRO_ACCESS_CODE` definido, a API fica aberta — normal em dev.
 
 ## Checklist pós-deploy (30 segundos)
 
-1. `https://padelpro-dashboard.vercel.app/ajuda` abre o tutorial novo.
-2. A navegação mostra **⚡ Analisar · Jogos · Jogadores · Etiquetar · Qualidade · Calibrar**.
-3. `/label` carrega (pede o código se estiver definido) e mostra a fila.
-4. `<api>/health` responde `{"status": "ok"}` sem código (é o único endpoint aberto).
+1. `<api>/health` responde `{"status": "ok"}` (único endpoint aberto sem código).
+2. O site abre e o formulário **⚡ Analisar jogo** mostra as opções (Gemini, link/YouTube).
+3. Carrega um clip curto do PC → recebes o vídeo cortado + relatório com a leitura da IA.

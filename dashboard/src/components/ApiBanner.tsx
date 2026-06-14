@@ -28,17 +28,9 @@ export function ApiBanner() {
 
   return (
     <div className="bg-yellow-950/80 border-b border-yellow-700 px-6 py-2 text-center text-sm text-yellow-200">
-      {state === "outdated" ? (
-        <>⚠️ A API está desatualizada em relação ao site — no PC que a corre:{" "}
-          <code className="bg-yellow-900/60 px-1.5 py-0.5 rounded">git pull</code> +{" "}
-          <code className="bg-yellow-900/60 px-1.5 py-0.5 rounded">.\scripts\publicar_para_teste.ps1</code>
-        </>
-      ) : (
-        <>⚠️ A API não está acessível — no PC que a corre, arranca{" "}
-          <code className="bg-yellow-900/60 px-1.5 py-0.5 rounded">.\scripts\publicar_para_teste.ps1</code>{" "}
-          e espera que termine (o URL do túnel muda a cada arranque).
-        </>
-      )}
+      {state === "outdated"
+        ? "⚠️ A API está a atualizar — recarrega daqui a pouco."
+        : "⚠️ O servidor está temporariamente indisponível — tenta novamente daqui a pouco."}
     </div>
   );
 }

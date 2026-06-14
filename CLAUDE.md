@@ -1,10 +1,16 @@
 # PadelPro Vision
 
-Análise de jogos de padel por visão computacional: o utilizador filma o jogo
-com um telemóvel atrás do campo, carrega o vídeo no site, e recebe o tempo
-útil + estatísticas por jogador (zonas, heatmaps, velocidades, pancadas).
-O sistema melhora com feedback humano: cada correção feita no frontend vira
-exemplo de treino.
+Análise de jogos de padel: o utilizador filma o jogo com um telemóvel atrás do
+campo, carrega o vídeo (ou cola um link/YouTube) no site, e recebe o tempo útil
++ estatísticas por jogador (zonas, heatmaps, velocidades) + a leitura da IA
+(tipos de pancada, winners/erros, tática).
+
+**Duas camadas (não confundir):**
+- **Runtime** (quando alguém usa a app): o **Gemini** lê o jogo — é o motor
+  atual. As correções no `/review` validam essa leitura e formam um golden set.
+- **Treino** (offline, futuro): o objetivo é um modelo próprio (TCN) treinado a
+  partir de pancadas rotuladas pelo Gemini → RTMPose → TCN, que correria em
+  tempo real e substituiria o Gemini no runtime. Ainda **não** está construído.
 
 ## Stack (decidida — não mudar sem razão forte)
 
@@ -13,10 +19,11 @@ exemplo de treino.
 | Deteção de jogadores | torchvision Faster R-CNN (BSD) | pesos COCO automáticos |
 | Tracking | ByteTrack via `supervision` (MIT) + GreedyTracker fallback | re-ID por cor da camisola em `tracking/reid.py` |
 | Pose | RTMPose-m via rtmlib/ONNX (Apache 2.0) | `pip install rtmlib onnxruntime`; stub geométrico se faltar |
-| Pancadas | TCN próprio (`strokes/classifier.py`) | regras geométricas até existir `checkpoints/stroke_tcn.pth` |
+| Pancadas (tipo/outcome/tática) | **Gemini** em runtime (`analysis/gemini_clip.py`) | TCN próprio (`strokes/classifier.py`) é o objetivo futuro, treinado offline |
 | Calibração | homografia 4 pontos + deteção automática (`calibration/auto.py`) | qualidade validada e guardada |
+| Análise espacial pesada | Modal GPU (`MODAL_ANALYZE_URL`) | pose/tracking; opcional — sem ela, "Analisar jogadores" indisponível |
 | Backend | FastAPI (`api/`) | jobs em memória — reiniciar perde a lista |
-| Frontend | Next.js 14 + Tailwind (`dashboard/`) | deploy Vercel automático a cada push ao `main` |
+| Frontend | Next.js 14 + Tailwind (`dashboard/`) | deploy Vercel automático a cada push ao `main`; marca v2 (navy+teal) |
 
 **REGRA DE LICENÇAS: nada de AGPL (Ultralytics YOLO proibido) nem NonCommercial.**
 Ver `LICENSES.md` e `docs/RESOURCES.md` (levantamento verificado de datasets/modelos externos).
@@ -31,8 +38,8 @@ uvicorn api.main:app --port 8010    # API local
 python scripts/evaluate.py --golden data/golden --out outputs/eval   # avaliação vs ground truth
 ```
 
-Windows (máquina do João): `.\scripts\publicar_para_teste.ps1` arranca API +
-túnel Cloudflare + aponta o Vercel. **Scripts .ps1 têm de ser ASCII puro ou
+Tudo na cloud (Vercel + Render + Gemini + Modal) — ver `docs/DEPLOY.md`. Já não
+há túnel Cloudflare nem API no PC. **Scripts .ps1 têm de ser ASCII puro ou
 UTF-8 com BOM** — o Windows PowerShell parte acentos sem BOM.
 
 ## Filosofia: medir antes de mexer
@@ -45,18 +52,23 @@ Este projeto tem um sistema de medição completo — usa-o:
 
 **Nunca afirmar que uma mudança de modelo/config melhorou sem scorecard antes/depois.**
 
-## Ciclo de treino (o coração do produto)
+## Runtime hoje vs treino (futuro)
 
-```
-analisar jogo → rever pancadas (/review) ou etiquetar clips (/label)
-→ correções viram amostras de treino + ground truth de avaliação
-→ retreino (botão no site ou padelpro_vision/feedback/retrain.py)
-→ checkpoints/stroke_tcn.pth → pipeline usa-o automaticamente
-```
+**Hoje (runtime):** o Gemini lê cada jogo. As correções no `/review` validam essa
+leitura e escrevem o golden set (`data/feedback/golden/`) usado por
+`scripts/evaluate.py`. Não há retreino no site — isso era do TCN antigo e foi
+removido.
 
-Mínimo 40 amostras / 2 classes para o retreino disparar. O pipeline guarda
-janelas de pose por evento (`*_pose_windows.json`) — é a elas que as
-correções se colam.
+**Futuro (treino do modelo próprio, offline — ainda por construir):**
+```
+corpus de vídeos → Gemini rotula pancadas (CSV: tempo+tipo)
+→ RTMPose extrai poses nesses tempos (Modal GPU)
+→ TCN treina (scripts/train_stroke_classifier.py)
+→ checkpoints/stroke_tcn.pth → runtime passa a usar o TCN em vez do Gemini
+```
+A página `/annotate` continua a treinar os **detetores de bola e jogadores**
+(`feedback/retrain.py: retrain_ball_detector / retrain_player_detector`) — esses
+são modelos de visão úteis e independentes do classificador de pancadas.
 
 ## Convenções de trabalho
 
@@ -77,6 +89,6 @@ correções se colam.
 
 ## Armadilhas conhecidas
 
-- Processo antigo da API + `git pull` = erros tipo `'ModelConfig' object has no attribute ...` (imports lazy carregam código novo com config velha em memória). Reiniciar a API resolve; o script de publicação já o faz.
-- O Render (deploy leve) não tem torch — análise de jogadores e retreino respondem indisponível lá; é por design.
-- `data/dataset/hits/` (clips para etiquetar) vive na máquina de quem corre a API — a árvore de pastas É o dataset.
+- O Render (deploy leve) não tem torch — a análise espacial de jogadores requer `MODAL_ANALYZE_URL` (Modal GPU); sem ela responde indisponível, mas corte + Gemini funcionam. É por design.
+- Import por link usa `yt-dlp` (vem no extra `backend`). O YouTube bloqueia muitas vezes downloads de IPs de datacenter (Render) — nesse caso o upload do PC é o caminho fiável.
+- Jobs do condense vivem em memória (`_jobs`) e são limpos ~1h depois; os artefactos de revisão persistem em `data/output/{id}/` (inclui `gemini.json`).

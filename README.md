@@ -48,11 +48,13 @@ O projeto usa uma única stack, toda com licenças permissivas (ver `LICENSES.md
 | Deteção de jogadores | torchvision Faster R-CNN (MobileNetV3) | `pip install torch torchvision` — pesos descarregam sozinhos | BSD-3 |
 | Tracking | ByteTrack via `supervision` | `pip install supervision` | MIT |
 | Pose | RTMPose-m (rtmlib/ONNX) | `pip install rtmlib onnxruntime` — pesos automáticos | Apache 2.0 |
-| Pancadas | TCN próprio | treinado via revisão/etiquetagem no frontend → `checkpoints/stroke_tcn.pth` | — |
+| Pancadas (tipo/tática) | Gemini em runtime (`analysis/gemini_clip.py`) | `GEMINI_API_KEY` | — |
 
-> Sem `supervision` o tracking usa o GreedyTracker interno; sem MMPose a pose corre
-> em stub (sem classificação real de pancadas). O TCN é usado automaticamente
-> quando `checkpoints/stroke_tcn.pth` existe; até lá valem as regras geométricas.
+> A leitura semântica das pancadas (tipo, winner/erro, tática) é feita pelo Gemini
+> em runtime. Um TCN próprio (`strokes/classifier.py`), treinado offline a partir
+> de rótulos do Gemini, é o objetivo futuro para correr em tempo real sem custo por
+> jogo — ainda por construir. Sem `supervision` o tracking usa o GreedyTracker
+> interno; sem MMPose a pose corre em stub.
 
 ---
 
