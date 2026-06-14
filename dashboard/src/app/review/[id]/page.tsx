@@ -10,6 +10,7 @@ import {
   type ReviewItem,
   type Correction,
 } from "@/lib/api";
+import { GeminiInsights } from "@/components/GeminiInsights";
 
 const STROKE_LABELS: Record<string, string> = {
   forehand_volley: "Vólei de direita",
@@ -201,6 +202,13 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
         <kbd className="px-1 bg-gray-800 rounded">2</kbd> tipo errado ·{" "}
         <kbd className="px-1 bg-gray-800 rounded">3</kbd> não foi batida — avança sozinho.
       </p>
+
+      {data.gemini && (
+        <GeminiInsights
+          gemini={data.gemini}
+          shots={data.items.map((it) => ({ type: it.stroke_type, outcome: it.outcome ?? undefined }))}
+        />
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Video */}

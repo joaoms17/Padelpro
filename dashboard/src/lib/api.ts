@@ -275,25 +275,43 @@ export interface CondenseStatus {
   gemini_error?: string;
 }
 
-export async function getCondenseCapabilities(): Promise<{ analyze: boolean; gemini: boolean; max_upload_mb?: number }> {
+export async function getCondenseCapabilities(): Promise<{ analyze: boolean; gemini: boolean; youtube: boolean; max_upload_mb?: number }> {
   const r = await apiFetch(`${BASE}/condense/capabilities`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
 
-export async function uploadForCondense(
-  file: File,
-  opts?: { analyze?: boolean; courtId?: string; deep?: boolean; gemini?: boolean },
-): Promise<{ job_id: string }> {
+type CondenseOpts = { analyze?: boolean; courtId?: string; deep?: boolean; gemini?: boolean };
+
+function condenseFields(opts?: CondenseOpts): FormData {
   const fd = new FormData();
-  fd.append("file", file);
   if (opts?.analyze) {
     fd.append("analyze", "true");
     fd.append("court_id", opts.courtId || "court1");
     if (opts.deep) fd.append("deep", "true");
   }
   if (opts?.gemini) fd.append("gemini", "true");
+  return fd;
+}
+
+export async function uploadForCondense(
+  file: File,
+  opts?: CondenseOpts,
+): Promise<{ job_id: string }> {
+  const fd = condenseFields(opts);
+  fd.append("file", file);
   const r = await apiFetch(`${BASE}/condense/upload`, { method: "POST", body: fd });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function uploadUrlForCondense(
+  url: string,
+  opts?: CondenseOpts,
+): Promise<{ job_id: string }> {
+  const fd = condenseFields(opts);
+  fd.append("url", url);
+  const r = await apiFetch(`${BASE}/condense/upload-url`, { method: "POST", body: fd });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
@@ -314,10 +332,10 @@ export interface ReviewItem {
   ts_ms: number;
   player_id: number;
   stroke_type: string;
+  outcome: string | null;
   confidence: number | null;
   audio_onset: boolean | null;
   frame_idx: number | null;
-  trainable: boolean;
 }
 
 export interface ReviewData {
@@ -326,6 +344,13 @@ export interface ReviewData {
   previous_corrections: Correction[];
   video_available: boolean;
   stroke_classes: string[];
+  gemini: {
+    tactics: string;
+    summary: string;
+    dominant_side: string | null;
+    n_rallies: number | null;
+    n_strokes: number;
+  } | null;
 }
 
 export interface Correction {
@@ -337,12 +362,6 @@ export interface Correction {
   frame_idx?: number | null;
 }
 
-export interface RetrainStatus {
-  status: "idle" | "running" | "ok" | "skipped" | "error";
-  detail?: string;
-  n_samples?: number;
-}
-
 export async function getReviewData(rid: string): Promise<ReviewData> {
   const r = await apiFetch(`${BASE}/review/${rid}`);
   if (!r.ok) throw new Error(await r.text());
@@ -352,7 +371,7 @@ export async function getReviewData(rid: string): Promise<ReviewData> {
 export async function submitReview(
   rid: string,
   corrections: Correction[]
-): Promise<{ saved: number; training_samples: number; golden_hits: number }> {
+): Promise<{ saved: number; golden_hits: number }> {
   const r = await apiFetch(`${BASE}/review/${rid}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -362,50 +381,8 @@ export async function submitReview(
   return r.json();
 }
 
-export async function triggerRetrain(rid: string): Promise<{ status: string }> {
-  const r = await apiFetch(`${BASE}/review/${rid}/retrain`, { method: "POST" });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export async function getRetrainStatus(): Promise<RetrainStatus> {
-  const r = await apiFetch(`${BASE}/review/retrain/status`);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
 export function reviewVideoUrl(rid: string): string {
   return withCode(`${BASE}/review/${rid}/video`);
-}
-
-// ---- Clip labelling (dataset building) ----
-
-export interface LabelQueue {
-  root: string;
-  labels: string[];
-  clips: { name: string; label: string | null }[];
-  counts: Record<string, number>;
-  n_unlabelled: number;
-}
-
-export async function getLabelQueue(): Promise<LabelQueue> {
-  const r = await apiFetch(`${BASE}/label/queue`);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export async function labelClip(name: string, label: string): Promise<{ moved: boolean }> {
-  const r = await apiFetch(`${BASE}/label/clip/${encodeURIComponent(name)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ label }),
-  });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export function labelClipUrl(name: string): string {
-  return withCode(`${BASE}/label/clip/${encodeURIComponent(name)}`);
 }
 
 // ---- Fleet quality ----

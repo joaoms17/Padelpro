@@ -4,6 +4,7 @@ import { useRef, useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import {
   uploadForCondense,
+  uploadUrlForCondense,
   getCondenseStatus,
   getCondenseCapabilities,
   condenseDownloadUrl,
@@ -35,6 +36,9 @@ export function CondenseForm() {
   const [error, setError] = useState("");
   const [canAnalyze, setCanAnalyze] = useState(false);
   const [canGemini, setCanGemini] = useState(false);
+  const [canYoutube, setCanYoutube] = useState(false);
+  const [source, setSource] = useState<"file" | "url">("file");
+  const [videoUrl, setVideoUrl] = useState("");
   const [analyze, setAnalyze] = useState(false);
   const [deep, setDeep] = useState(false);
   const [gemini, setGemini] = useState(false);
@@ -47,9 +51,10 @@ export function CondenseForm() {
       .then((c) => {
         setCanAnalyze(!!c.analyze);
         setCanGemini(!!c.gemini);
+        setCanYoutube(!!c.youtube);
         if (c.max_upload_mb && c.max_upload_mb > 0) setMaxMB(c.max_upload_mb);
       })
-      .catch(() => { setCanAnalyze(false); setCanGemini(false); });
+      .catch(() => { setCanAnalyze(false); setCanGemini(false); setCanYoutube(false); });
   }, []);
 
   const poll = useCallback(async () => {
@@ -83,6 +88,27 @@ export function CondenseForm() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const opts = { analyze, courtId, deep, gemini };
+
+    if (source === "url") {
+      const url = videoUrl.trim();
+      if (!url) return;
+      if (!/^https?:\/\//.test(url)) {
+        setError("Cola um link válido (começa por http).");
+        return;
+      }
+      setError(""); setJob(null); setJobId(null); setUploading(true);
+      try {
+        const { job_id } = await uploadUrlForCondense(url, opts);
+        setJobId(job_id);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setUploading(false);
+      }
+      return;
+    }
+
     const file = fileRef.current?.files?.[0];
     if (!file) return;
     if (file.size > maxMB * 1024 * 1024) {
@@ -97,7 +123,7 @@ export function CondenseForm() {
     setJobId(null);
     setUploading(true);
     try {
-      const { job_id } = await uploadForCondense(file, { analyze, courtId, deep, gemini });
+      const { job_id } = await uploadForCondense(file, opts);
       setJobId(job_id);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -112,32 +138,71 @@ export function CondenseForm() {
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <p className="text-sm text-gray-400">
-        Carrega um vídeo: recebes outro só com o <span className="text-gray-200">tempo útil de jogo</span> (tempo
-        morto removido) e, se quiseres, <span className="text-gray-200">estatísticas dos jogadores</span>.
+        Carrega um vídeo ou cola um link: recebes outro só com o{" "}
+        <span className="text-gray-200">tempo útil de jogo</span> (tempo morto removido) e, se
+        quiseres, <span className="text-gray-200">estatísticas dos jogadores</span> e a{" "}
+        <span className="text-gray-200">leitura da IA</span>.
       </p>
 
-      <div>
-        <div className="flex items-baseline justify-between mb-1">
-          <label className="block text-sm font-medium text-gray-300">Vídeo do jogo</label>
-          <span className={`text-xs ${oversize ? "text-red-400" : "text-gray-500"}`}>
-            máx. {maxMB} MB
-          </span>
+      {canYoutube && (
+        <div className="flex gap-1 bg-gray-900 border border-gray-800 rounded-full p-1 w-fit">
+          {([["file", "📁 Do PC"], ["url", "🔗 Link / YouTube"]] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              disabled={busy}
+              onClick={() => { setSource(key); setError(""); }}
+              className={`px-3 py-1 rounded-full text-xs font-bold transition-colors ${
+                source === key ? "bg-brand text-navy-950" : "text-gray-400 hover:text-white"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="video/*"
-          required
-          disabled={busy}
-          onChange={onPick}
-          className="w-full text-sm text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-brand file:text-navy-950 file:text-sm file:font-bold hover:file:bg-brand-dark cursor-pointer disabled:opacity-50"
-        />
-        {fileMB != null && (
-          <p className={`text-xs mt-1 ${oversize ? "text-red-400" : "text-green-400"}`}>
-            Selecionado: {Math.round(fileMB)} MB {oversize && "— acima do limite"}
+      )}
+
+      {source === "file" ? (
+        <div>
+          <div className="flex items-baseline justify-between mb-1">
+            <label className="block text-sm font-medium text-gray-300">Vídeo do jogo</label>
+            <span className={`text-xs ${oversize ? "text-red-400" : "text-gray-500"}`}>
+              máx. {maxMB} MB
+            </span>
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="video/*"
+            required={source === "file"}
+            disabled={busy}
+            onChange={onPick}
+            className="w-full text-sm text-gray-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-brand file:text-navy-950 file:text-sm file:font-bold hover:file:bg-brand-dark cursor-pointer disabled:opacity-50"
+          />
+          {fileMB != null && (
+            <p className={`text-xs mt-1 ${oversize ? "text-red-400" : "text-green-400"}`}>
+              Selecionado: {Math.round(fileMB)} MB {oversize && "— acima do limite"}
+            </p>
+          )}
+        </div>
+      ) : (
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-1">Link do vídeo</label>
+          <input
+            type="url"
+            inputMode="url"
+            placeholder="https://www.youtube.com/watch?v=…"
+            value={videoUrl}
+            disabled={busy}
+            onChange={(e) => { setVideoUrl(e.target.value); setError(""); }}
+            className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder:text-gray-600 focus:border-brand outline-none disabled:opacity-50"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            YouTube ou link direto. O servidor descarrega o vídeo (até {maxMB} MB, 720p).
+            Se o YouTube bloquear, carrega o ficheiro do PC.
           </p>
-        )}
-      </div>
+        </div>
+      )}
 
       {(canAnalyze || canGemini) && (
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 space-y-2">

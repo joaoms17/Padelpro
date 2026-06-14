@@ -1,18 +1,14 @@
 """
-Review & feedback endpoints — the human-in-the-loop training cycle.
+Review & feedback endpoints — correcting the AI's read of a match.
 
 After an analysis finishes, the dashboard shows a review page where each
-detected stroke is confirmed or corrected. Submitted corrections become:
-  1. training labels for the TCN stroke classifier (when the pipeline saved
-     pose windows for the events), and
-  2. golden-set hits usable by scripts/evaluate.py.
+detected stroke (type + outcome, from Gemini) is confirmed or corrected.
+Submitted corrections are persisted and turned into a golden set
+(scripts/evaluate.py) used to measure how well the AI reads the game.
 
 Works for both flows:
   - full pipeline matches  → outputs in data/output/{rid}/
   - fast condense+analyze  → report in the condense job store
-
-POST /review/{rid}/retrain retrains the TCN in the background; the pipeline
-picks the new weights up automatically on the next run.
 """
 
 from __future__ import annotations
@@ -20,7 +16,7 @@ import logging
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/review", tags=["review"])
@@ -29,9 +25,6 @@ logger = logging.getLogger(__name__)
 _FEEDBACK_DIR = Path("data/feedback")
 _OUTPUT_DIR = Path("data/output")
 _VIDEO_DIR = Path("data/videos")
-
-# Single retrain at a time; results visible at GET /review/retrain/status
-_retrain_state: dict = {"status": "idle"}
 
 
 class CorrectionIn(BaseModel):
@@ -57,16 +50,15 @@ def _items_from_pipeline(rid: str) -> list[dict] | None:
         return None
     with open(events_path) as f:
         events = json.load(f)
-    has_windows = (_OUTPUT_DIR / rid / f"{rid}_pose_windows.json").exists()
     return [
         {
             "ts_ms": ev["ts_ms"],
             "player_id": ev["player_id"],
             "stroke_type": ev["stroke_type"],
+            "outcome": ev.get("outcome"),
             "confidence": ev.get("confidence"),
             "audio_onset": ev.get("audio_onset"),
-            "frame_idx": ev.get("frame_idx") if has_windows else None,
-            "trainable": has_windows and ev.get("frame_idx") is not None,
+            "frame_idx": ev.get("frame_idx"),
         }
         for ev in events
     ]
@@ -83,13 +75,38 @@ def _items_from_condense(rid: str) -> list[dict] | None:
             "ts_ms": s["t_s"] * 1000.0,
             "player_id": s["player_id"],
             "stroke_type": s.get("type", "other"),
+            "outcome": s.get("outcome"),
             "confidence": None,
             "audio_onset": True,   # fast-path hits come from audio onsets
             "frame_idx": None,
-            "trainable": False,    # no pose in the fast path
         }
         for s in report["shots"]
     ]
+
+
+def _gemini_block(rid: str) -> dict | None:
+    """The Gemini semantic block (summary, tactics, outcomes) for this analysis,
+    from the live job if still in memory, else the persisted gemini.json."""
+    try:
+        from api.routers.condense import _jobs as condense_jobs
+        job = condense_jobs.get(rid) or {}
+        report = job.get("report")
+        if report and report.get("gemini"):
+            return report["gemini"]
+        gr = job.get("gemini_report")
+        if gr:
+            return {k: gr.get(k) for k in
+                    ("tactics", "summary", "dominant_side", "n_rallies", "n_strokes")}
+    except Exception:
+        pass
+    p = _OUTPUT_DIR / rid / "gemini.json"
+    if p.exists():
+        try:
+            with open(p) as f:
+                return json.load(f)
+        except Exception:
+            return None
+    return None
 
 
 def _video_path(rid: str) -> Path | None:
@@ -120,6 +137,7 @@ async def get_review_items(rid: str):
         "previous_corrections": previous,
         "video_available": _video_path(rid) is not None,
         "stroke_classes": _stroke_classes(),
+        "gemini": _gemini_block(rid),
     }
 
 
@@ -130,11 +148,9 @@ def _stroke_classes() -> list[str]:
 
 @router.post("/{rid}")
 async def submit_review(rid: str, body: ReviewSubmission):
-    """Persist corrections; turn them into training samples + golden hits."""
+    """Persist corrections and write the golden set used to evaluate the AI."""
     from padelpro_vision.feedback.store import (
-        Correction, VERDICTS, save_corrections,
-        build_training_samples, append_training_samples,
-        corrections_to_golden_hits,
+        Correction, VERDICTS, save_corrections, corrections_to_golden_hits,
     )
 
     corrections = []
@@ -150,18 +166,7 @@ async def submit_review(rid: str, body: ReviewSubmission):
 
     save_corrections(rid, corrections, _FEEDBACK_DIR)
 
-    # Training samples (only when the pipeline saved pose windows)
-    n_samples = 0
-    windows_path = _OUTPUT_DIR / rid / f"{rid}_pose_windows.json"
-    if windows_path.exists():
-        with open(windows_path) as f:
-            pose_windows = json.load(f)
-        samples = build_training_samples(corrections, pose_windows)
-        if samples:
-            append_training_samples(samples, rid, _FEEDBACK_DIR)
-        n_samples = len(samples)
-
-    # Golden-set hits for evaluate.py
+    # Golden-set hits for evaluate.py (the reference set that keeps the AI honest)
     hits = corrections_to_golden_hits(corrections)
     golden_dir = _FEEDBACK_DIR / "golden"
     golden_dir.mkdir(parents=True, exist_ok=True)
@@ -171,35 +176,8 @@ async def submit_review(rid: str, body: ReviewSubmission):
     return {
         "rid": rid,
         "saved": len(corrections),
-        "training_samples": n_samples,
         "golden_hits": len(hits),
     }
-
-
-@router.post("/{rid}/retrain")
-async def trigger_retrain(rid: str, background_tasks: BackgroundTasks):
-    """Retrain the stroke classifier from all accumulated feedback."""
-    if _retrain_state.get("status") == "running":
-        raise HTTPException(status_code=409, detail="Já há um treino a decorrer.")
-    _retrain_state.clear()
-    _retrain_state.update({"status": "running", "triggered_by": rid})
-    background_tasks.add_task(_retrain_bg)
-    return {"status": "running"}
-
-
-@router.get("/retrain/status")
-async def retrain_status():
-    return _retrain_state
-
-
-def _retrain_bg() -> None:
-    try:
-        from padelpro_vision.feedback.retrain import retrain_from_feedback
-        result = retrain_from_feedback(feedback_dir=_FEEDBACK_DIR)
-        _retrain_state.update(result)
-    except Exception as exc:
-        logger.exception("Retrain failed")
-        _retrain_state.update({"status": "error", "detail": str(exc)})
 
 
 # ---------------------------------------------------------------------------

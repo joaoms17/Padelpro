@@ -84,10 +84,15 @@ async def capabilities():
     except Exception:
         gemini = False
     try:
+        import yt_dlp  # noqa: F401
+        youtube = True
+    except Exception:
+        youtube = False
+    try:
         max_mb = int(os.environ.get("API_MAX_UPLOAD_MB", "150"))
     except ValueError:
         max_mb = 150
-    return {"analyze": analyze, "gemini": gemini, "max_upload_mb": max_mb}
+    return {"analyze": analyze, "gemini": gemini, "youtube": youtube, "max_upload_mb": max_mb}
 
 
 @router.post("/upload")
@@ -125,6 +130,51 @@ async def upload_and_condense(
     )
 
     background_tasks.add_task(_condense_bg, job_id, in_path, out_path, analyze, court_id, deep, gemini)
+    return {"job_id": job_id}
+
+
+@router.post("/upload-url")
+async def condense_from_url(
+    background_tasks: BackgroundTasks,
+    url: str = Form(...),
+    analyze: bool = Form(False),
+    court_id: str = Form("court1"),
+    deep: bool = Form(False),
+    gemini: bool = Form(False),
+):
+    """Ingest a video by URL (YouTube and any yt-dlp-supported site), then run
+    the same condense pipeline. The download happens in the background; poll the
+    returned job_id for status."""
+    try:
+        import yt_dlp  # noqa: F401
+    except Exception:
+        raise HTTPException(
+            status_code=501,
+            detail="Importação por link não disponível neste servidor (yt-dlp não instalado).",
+        )
+    if not (url.startswith("http://") or url.startswith("https://")):
+        raise HTTPException(status_code=400, detail="URL inválido.")
+
+    job_id = str(uuid.uuid4())
+    _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    _sweep_old()
+
+    in_path = _UPLOAD_DIR / f"{job_id}.mp4"
+    out_path = _UPLOAD_DIR / f"{job_id}_useful.mp4"
+
+    _jobs[job_id] = {
+        "job_id": job_id,
+        "status": "processing",
+        "phase": "a descarregar do link",
+        "filename": url,
+        "output": str(out_path),
+    }
+    logger.info("Condense job %s: from URL %s (analyze=%s, deep=%s, gemini=%s)",
+                job_id, url, analyze, deep, gemini)
+
+    background_tasks.add_task(
+        _condense_from_url_bg, job_id, url, in_path, out_path, analyze, court_id, deep, gemini
+    )
     return {"job_id": job_id}
 
 
@@ -201,7 +251,6 @@ def _condense_sync(
                 _jobs[job_id]["phase"] = "análise na GPU (cloud)"
                 report = _analyze_via_modal(modal_url, in_path, court_id, deep)
                 _jobs[job_id]["report"] = report
-                _persist_for_review(job_id, report)
             except Exception as exc:
                 logger.exception("Modal analysis failed for job %s", job_id)
                 _jobs[job_id]["report_error"] = f"Análise GPU falhou: {exc}"
@@ -212,6 +261,14 @@ def _condense_sync(
     # the CV hits) and must happen before the original is deleted.
     if gemini:
         _run_gemini_analysis(job_id, in_path, cv_report=_jobs[job_id].get("report"))
+
+    # Persist review artifacts AFTER Gemini so the saved report carries the
+    # semantic layer (types, outcomes, tactics) when the user revisits later.
+    _persist_for_review(
+        job_id,
+        report=_jobs[job_id].get("report"),
+        gemini_report=_jobs[job_id].get("gemini_report"),
+    )
 
     _jobs[job_id]["phase"] = "corte do vídeo"
     condense_video(in_path, segs, out_path)
@@ -249,40 +306,87 @@ def _analyze_via_modal(url: str, video: Path, court_id: str, deep: bool) -> dict
     return r.json()
 
 
-def _persist_for_review(job_id: str, report: dict) -> None:
+# Gemini quadrant (player_pos) → a stable pseudo player id for the Gemini-only
+# path (no CV tracking to give real ids).
+_POS_TO_PID = {"NL": 1, "NR": 2, "FL": 3, "FR": 4}
+
+
+def _persist_for_review(
+    job_id: str,
+    report: dict | None = None,
+    gemini_report: dict | None = None,
+) -> None:
     """
-    Copy analysis artifacts to data/output/{job_id}/ so the review page works:
-    shot events, pose windows (if deep pass ran), and a quality report for the
-    fleet quality page.  Survives the upload-dir cleanup that runs after analysis.
+    Copy analysis artifacts to data/output/{job_id}/ so the review page works
+    after the job leaves memory:
+      - shot events (with Gemini type/outcome merged in)
+      - the Gemini block (summary, tactics, outcomes) → gemini.json
+      - a quality report for the fleet quality page (CV path only)
+    Survives the upload-dir cleanup that runs after analysis.
     """
     try:
         import json, time
+        if report is None and gemini_report is None:
+            return
         out_dir = Path("data/output") / job_id
         out_dir.mkdir(parents=True, exist_ok=True)
 
-        shots = report.get("shots", [])
-        events = [
-            {
-                "match_id": job_id,
-                "player_id": s.get("player_id"),
-                "rally_id": s.get("rally", -1),
-                "ts_ms": float(s.get("t_s", 0.0)) * 1000.0,
-                "stroke_type": s.get("type", "other"),
-                "confidence": 1.0,
-                "frame_idx": s.get("frame_idx"),
-                "court_x": (s.get("pos") or [None, None])[0],
-                "court_y": (s.get("pos") or [None, None])[1],
-            }
-            for s in shots
-        ]
+        if report is not None:
+            shots = report.get("shots", [])
+            events = [
+                {
+                    "match_id": job_id,
+                    "player_id": s.get("player_id"),
+                    "rally_id": s.get("rally", -1),
+                    "ts_ms": float(s.get("t_s", 0.0)) * 1000.0,
+                    "stroke_type": s.get("type", "other"),
+                    "outcome": s.get("outcome"),
+                    "confidence": 1.0,
+                    "frame_idx": s.get("frame_idx"),
+                    "court_x": (s.get("pos") or [None, None])[0],
+                    "court_y": (s.get("pos") or [None, None])[1],
+                }
+                for s in shots
+            ]
+        else:
+            # Gemini-only: build a reviewable list straight from Gemini strokes.
+            shots = gemini_report.get("strokes", [])
+            events = [
+                {
+                    "match_id": job_id,
+                    "player_id": _POS_TO_PID.get(s.get("player_pos", ""), 1),
+                    "rally_id": -1,
+                    "ts_ms": float(s.get("t_s", 0.0)) * 1000.0,
+                    "stroke_type": s.get("type", "other"),
+                    "outcome": s.get("outcome"),
+                    "confidence": None,
+                    "frame_idx": None,
+                    "court_x": None,
+                    "court_y": None,
+                }
+                for s in shots
+            ]
         with open(out_dir / f"{job_id}_shot_events.json", "w") as f:
             json.dump(events, f)
+
+        # Gemini semantic block (summary/tactics/outcomes) for the review page.
+        gemini_block = (report or {}).get("gemini")
+        if gemini_block is None and gemini_report is not None:
+            gemini_block = {
+                k: gemini_report.get(k)
+                for k in ("tactics", "summary", "dominant_side", "n_rallies", "n_strokes")
+            }
+        if gemini_block:
+            with open(out_dir / "gemini.json", "w") as f:
+                json.dump(gemini_block, f)
 
         pw_src = _UPLOAD_DIR / job_id / "pose_windows.json"
         if pw_src.exists():
             shutil.copy(pw_src, out_dir / f"{job_id}_pose_windows.json")
 
-        # Quality report for the fleet quality page
+        # Quality report for the fleet quality page (needs CV stats).
+        if report is None:
+            return
         clip = report.get("clip", {})
         players = report.get("players", [])
         timings = report.get("timings_s", {})
@@ -376,7 +480,6 @@ def _run_local_analysis(
                 progress_cb=_progress, phase_cb=_phase,
             )
             _jobs[job_id]["report"] = report
-            _persist_for_review(job_id, report)
         else:
             _jobs[job_id]["report_error"] = (
                 "Este servidor não tem o motor de análise (torch) instalado."
@@ -384,6 +487,44 @@ def _run_local_analysis(
     except Exception as exc:
         logger.exception("Analysis failed for job %s", job_id)
         _jobs[job_id]["report_error"] = f"Análise falhou: {exc}"
+
+
+def _download_video(url: str, dest: Path) -> None:
+    """Download a video by URL (YouTube etc.) to `dest` (mp4) via yt-dlp.
+    Caps resolution to keep it fast/cheap on the free tier; keeps audio (needed
+    for onset detection)."""
+    import yt_dlp
+
+    _ensure_ffmpeg()
+    try:
+        max_mb = int(os.environ.get("API_MAX_UPLOAD_MB", "150"))
+    except ValueError:
+        max_mb = 150
+
+    tmpl = str(dest.with_suffix("")) + ".%(ext)s"
+    ydl_opts = {
+        "outtmpl": tmpl,
+        "format": "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+        "merge_output_format": "mp4",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "max_filesize": max_mb * 1024 * 1024,
+        "retries": 2,
+    }
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
+
+    # yt-dlp may write <stem>.mp4 (or another ext if merge fell back) — locate it.
+    if not dest.exists():
+        produced = sorted(dest.parent.glob(dest.stem + ".*"))
+        produced = [p for p in produced if p.suffix.lower() in (".mp4", ".mkv", ".webm")]
+        if not produced:
+            raise RuntimeError(
+                "Não consegui descarregar este link. O YouTube por vezes bloqueia "
+                "downloads a partir de servidores — tenta carregar o vídeo do PC."
+            )
+        produced[0].rename(dest)
 
 
 async def _condense_bg(
@@ -399,5 +540,24 @@ async def _condense_bg(
         logger.info("Condense job %s done.", job_id)
     except Exception as exc:
         logger.exception("Condense job %s failed", job_id)
+        _jobs[job_id]["status"] = "error"
+        _jobs[job_id]["error"] = str(exc)
+
+
+async def _condense_from_url_bg(
+    job_id: str, url: str, in_path: Path, out_path: Path,
+    analyze: bool = False, court_id: str = "court1",
+    deep: bool = False, gemini: bool = False,
+) -> None:
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: _download_video(url, in_path))
+        await loop.run_in_executor(
+            None, lambda: _condense_sync(job_id, in_path, out_path, analyze, court_id, deep, gemini)
+        )
+        _jobs[job_id]["status"] = "done"
+        logger.info("Condense job %s (url) done.", job_id)
+    except Exception as exc:
+        logger.exception("Condense job %s (url) failed", job_id)
         _jobs[job_id]["status"] = "error"
         _jobs[job_id]["error"] = str(exc)
