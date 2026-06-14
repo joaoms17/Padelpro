@@ -302,6 +302,15 @@ async def _analyze_bg(rid: str, in_path: Path) -> None:
 
         update_job("report", rid, status="done", phase="concluído", condensed_available=condensed_ok)
         logger.info("Report %s done (condensed=%s).", rid, condensed_ok)
+
+        # Auto-train segmentation classifier from Gemini rally boundaries
+        if report.get("rallies") and in_path.exists():
+            try:
+                from padelpro_vision.segmentation.learned import train_from_rallies
+                await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: train_from_rallies(in_path, report["rallies"]))
+            except Exception:
+                pass
     except Exception as exc:
         logger.exception("Report analysis failed for %s", rid)
         update_job("report", rid, status="error", error=str(exc))
