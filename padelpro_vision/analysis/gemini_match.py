@@ -362,6 +362,9 @@ def _parse_match_json(text: str) -> dict:
         logger.info("Gemini reasoning (first 1000 chars): %s", reasoning_text[:1000])
         text = text[text.lower().find('</raciocinio>') + len('</raciocinio>'):]
 
+    # Strip markdown code fences that Gemini adds around JSON (```json ... ```)
+    text = re.sub(r'```(?:json)?\s*\n?', '', text)
+
     # Find the start of the JSON object
     json_start = text.find('{')
     # Always save a preview of what comes after the reasoning block for debugging
