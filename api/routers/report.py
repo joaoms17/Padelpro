@@ -328,8 +328,21 @@ async def _analyze_bg(rid: str, in_path: Path) -> None:
 
 def _run_analysis(in_path: Path, api_key: str) -> dict:
     from padelpro_vision.analysis.gemini_match import analyze_full_match, enrich_report
+    from padelpro_vision.tracking.ball_tracker import interpolate_shot_trajectory
     raw = analyze_full_match(in_path, api_key)
-    return enrich_report(raw)
+    report = enrich_report(raw)
+    # Add sparse ball trajectory from shot timestamps + player positions
+    try:
+        traj = interpolate_shot_trajectory(
+            report.get("shots", []),
+            report.get("player_positions", []),
+            report.get("duration_s", 0.0),
+            sample_hz=2.0,  # 1 point every 0.5s — enough for heatmap overlay
+        )
+        report["ball_trajectory"] = traj
+    except Exception:
+        report["ball_trajectory"] = []
+    return report
 
 
 def _create_condensed_video(video: Path, rallies: list, output: Path) -> bool:

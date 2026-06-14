@@ -278,7 +278,22 @@ def compute_rally_stats(rallies: list[dict], duration_s: float) -> dict:
 
 
 def enrich_report(report: dict) -> dict:
-    """Add the derived fields the frontend consumes (counts, pct, stats)."""
+    """Add derived fields the frontend consumes, then apply game-rule fixes."""
+    # Apply game-rule validator: fix team-side violations, infer rally boundaries
+    try:
+        from padelpro_vision.analysis.game_rules import apply_game_rules
+        corrections = apply_game_rules(
+            shots=report.get("shots", []),
+            positions=report.get("player_positions", []),
+            existing_rallies=report.get("rallies"),
+        )
+        report["shots"]   = corrections["shots"]
+        report["rallies"] = corrections["rallies"]
+        if corrections["n_fixes"]:
+            logger.info("Game-rules validator applied %d corrections.", corrections["n_fixes"])
+    except Exception:
+        logger.exception("Game-rules validation failed — using raw Gemini output")
+
     report["shot_counts"] = compute_shot_counts(report.get("shots", []))
     report["formation_pct"] = compute_formation_pct(report.get("formation_samples", []))
     report["rally_stats"] = compute_rally_stats(

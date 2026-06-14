@@ -58,12 +58,21 @@ function buildGrid(positions: PlayerPosition[]): number[][] {
 
 export function MatchHeatmap({ report }: { report: MatchReport }) {
   const positions = report.player_positions ?? [];
+  const ballTraj = report.ball_trajectory ?? [];
 
   const grids = useMemo(() => {
     return [1, 2, 3, 4].map((pid) =>
       buildGrid(positions.filter((p) => p.player === pid)),
     );
   }, [positions]);
+
+  // Ball trajectory as SVG polyline points (sample every 3rd point for clarity)
+  const ballPoints = useMemo(() => {
+    return ballTraj
+      .filter((_, i) => i % 3 === 0 && ballTraj[i].conf > 0.3)
+      .map((p) => `${PAD + p.x * COURT_W},${PAD + p.y * COURT_H}`)
+      .join(" ");
+  }, [ballTraj]);
 
   const cellW = COURT_W / COLS;
   const cellH = COURT_H / ROWS;
@@ -116,6 +125,20 @@ export function MatchHeatmap({ report }: { report: MatchReport }) {
               );
             }),
           ),
+        )}
+
+        {/* Ball trajectory (interpolated from Gemini shot positions) */}
+        {ballPoints && (
+          <polyline
+            points={ballPoints}
+            fill="none"
+            stroke="#FFFFFF"
+            strokeWidth={1.5}
+            strokeDasharray="3 4"
+            opacity={0.45}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         )}
 
         {/* Service lines */}
