@@ -4,9 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const LINKS = [
-  { href: "/matches", label: "Jogos" },
-  { href: "/qualidade", label: "Deteção" },
-  { href: "/calibrate", label: "Calibrar" },
+  { href: "/modelo", label: "O teu modelo" },
+  { href: "/tempo-util", label: "Tempo útil" },
   { href: "/ajuda", label: "Como funciona" },
 ];
 
