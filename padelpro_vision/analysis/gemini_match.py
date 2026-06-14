@@ -47,13 +47,26 @@ PADEL BASICS:
 - 2v2 sport on an enclosed glass court (10m wide × 20m long)
 - Players 1 & 2 = NEAR team (the pair on the half closest to the camera, court_y 0.0-0.5)
 - Players 3 & 4 = FAR team (the pair on the far half, court_y 0.5-1.0)
-- Within each team: player 1 and 3 are on the LEFT side, 2 and 4 on the RIGHT side
+- Within each team: player 1 and 3 are on the LEFT side (court_x ≈ 0.1-0.45),
+                    player 2 and 4 are on the RIGHT side (court_x ≈ 0.55-0.9)
 - Each SET has multiple GAMES; each GAME has multiple POINTS; each POINT = one RALLY
 - A typical padel match has 50-200 individual rallies across 2-3 sets
 
 COORDINATE SYSTEM (all values 0.0–1.0):
   court_x: 0.0 = left edge, 1.0 = right edge (as seen from camera)
   court_y: 0.0 = near baseline (camera side), 0.5 = net, 1.0 = far baseline
+
+PLAYER POSITION RULES — VERY IMPORTANT:
+- Player 1: court_y ALWAYS 0.0-0.5, court_x USUALLY 0.1-0.45 (left side of near court)
+- Player 2: court_y ALWAYS 0.0-0.5, court_x USUALLY 0.55-0.9 (right side of near court)
+- Player 3: court_y ALWAYS 0.5-1.0, court_x USUALLY 0.1-0.45 (left side of far court)
+- Player 4: court_y ALWAYS 0.5-1.0, court_x USUALLY 0.55-0.9 (right side of far court)
+- Teammates are ALWAYS on OPPOSITE sides — the difference in court_x between player 1
+  and player 2 (or 3 and 4) MUST be at least 0.25 at any given time.
+- NEVER give two different players the same court_x AND court_y values simultaneously.
+- When a player moves (to follow the ball), their court_x changes — track this movement.
+- Typical attacking position (at net): court_y ≈ 0.35-0.45 for near team, 0.55-0.65 for far team
+- Typical defending position (at back): court_y ≈ 0.05-0.20 for near team, 0.80-0.95 for far team
 
 Return ONLY a single valid JSON object — NO markdown fences, NO text before or after.
 
@@ -65,7 +78,9 @@ Return ONLY a single valid JSON object — NO markdown fences, NO text before or
     // Total entries MUST be at least ceil(duration_s / 5) * 4.
     // For a 5-minute video that is at least 240 entries.
     // If a player is briefly off-screen, estimate their most likely position.
-    // Players 1 & 2 are always in the court_y 0.0-0.5 half; 3 & 4 in 0.5-1.0.
+    // CRITICAL: Players 1&2 MUST have different court_x values (≥0.25 apart).
+    //           Players 3&4 MUST have different court_x values (≥0.25 apart).
+    //           Players 1&2 MUST have court_y < 0.5. Players 3&4 MUST have court_y > 0.5.
     {"t_s": <float>, "player": <1|2|3|4>, "court_x": <0.0-1.0>, "court_y": <0.0-1.0>},
     ...
   ],
@@ -74,6 +89,7 @@ Return ONLY a single valid JSON object — NO markdown fences, NO text before or
     // Every single racket-ball contact = 1 shot entry (serves, volleys, groundstrokes…).
     // Attribute to the player whose racket touched the ball.
     // ALL 4 players should have shots if they played the whole match.
+    // Shots MUST alternate between teams (team 1 hits, then team 2, then team 1...).
     {"t_s": <float>, "player": <1|2|3|4>,
      "type": "<forehand|backhand|volley|smash|bandeja|vibora|serve|lob|other>",
      "outcome": "<winner|unforced_error|forced_error|let|continuation>"},
@@ -132,7 +148,9 @@ CRITICAL — read before answering:
 2. formation_samples MUST have ≥ ceil(duration_s/5) entries. Do NOT skip intervals.
 3. Every player who touched the ball MUST appear in shots with a non-zero count.
 4. rallies must cover the actual points played — count them from the video carefully.
-5. Return ONLY the raw JSON object. No explanation, no markdown.
+5. Player 1 and 2 MUST have different court_x at every timestamp (≥0.25 apart).
+6. Player 3 and 4 MUST have different court_x at every timestamp (≥0.25 apart).
+7. Return ONLY the raw JSON object. No explanation, no markdown.
 """.strip()
 
 
@@ -301,6 +319,62 @@ def _fill_defaults(data: dict) -> None:
     data.setdefault("confidence", 0.0)
 
 
+# ── Position quality fixes ───────────────────────────────────────────────────
+
+# Default side for each player (court_x) when Gemini collapses them together.
+_DEFAULT_X = {1: 0.25, 2: 0.75, 3: 0.25, 4: 0.75}
+_DEFAULT_Y = {1: 0.25, 2: 0.25, 3: 0.75, 4: 0.75}
+_MIN_X_SPREAD = 0.20   # minimum court_x difference between teammates
+
+
+def fix_collapsed_positions(positions: list[dict]) -> list[dict]:
+    """
+    Detect and repair timestamps where Gemini put two players on the same
+    team at identical (or nearly identical) court_x coordinates.
+
+    Common failure mode: Gemini outputs (0.5, 0.25) for both player 1 and
+    player 2 at every timestamp → heatmap shows one blob per team instead
+    of two individual player zones.
+
+    Fix: when teammates are within _MIN_X_SPREAD of each other in court_x,
+    nudge them apart to their canonical sides (left: 0.25, right: 0.75).
+    The y-coordinate is kept as-is (it encodes attack/defend depth).
+    """
+    from copy import deepcopy
+    fixed = deepcopy(positions)
+    n_fixed = 0
+
+    # Group by timestamp
+    by_t: dict[float, list[dict]] = {}
+    for p in fixed:
+        t = float(p.get("t_s", 0.0))
+        by_t.setdefault(t, []).append(p)
+
+    for t, pts in by_t.items():
+        by_player = {p["player"]: p for p in pts if p.get("player") in (1, 2, 3, 4)}
+
+        # Check each team pair
+        for left, right in ((1, 2), (3, 4)):
+            p1 = by_player.get(left)
+            p2 = by_player.get(right)
+            if p1 is None or p2 is None:
+                continue
+            x1 = float(p1.get("court_x", _DEFAULT_X[left]))
+            x2 = float(p2.get("court_x", _DEFAULT_X[right]))
+            if abs(x1 - x2) < _MIN_X_SPREAD:
+                # Too close — force to canonical sides
+                p1["court_x"] = _DEFAULT_X[left]
+                p2["court_x"] = _DEFAULT_X[right]
+                n_fixed += 1
+
+    if n_fixed:
+        logger.info(
+            "fix_collapsed_positions: spread %d timestamp(s) where teammates were too close",
+            n_fixed,
+        )
+    return fixed
+
+
 # ── Position gap filling ─────────────────────────────────────────────────────
 
 def interpolate_positions(
@@ -438,8 +512,14 @@ def compute_rally_stats(rallies: list[dict], duration_s: float) -> dict:
 
 def enrich_report(report: dict) -> dict:
     """Add derived fields the frontend consumes, then apply game-rule fixes."""
-    # Fill position gaps with interpolation before game-rules (gives rules
-    # more data to work with for team-side constraint checks).
+    # Fix collapsed positions first (teammates at same x), then fill gaps.
+    try:
+        report["player_positions"] = fix_collapsed_positions(
+            report.get("player_positions", [])
+        )
+    except Exception:
+        logger.exception("Position collapse fix failed — using raw positions")
+
     try:
         report["player_positions"] = interpolate_positions(
             report.get("player_positions", []),
