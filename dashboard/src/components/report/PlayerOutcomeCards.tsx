@@ -67,7 +67,14 @@ export function PlayerOutcomeCards({ report }: { report: MatchReport }) {
           <div key={s.player} className="rounded-xl bg-[#0B1B2E] border border-gray-800 p-4 space-y-3">
             <div className="flex items-center gap-2">
               <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
-              <span className="text-sm font-semibold text-gray-100">Jogador {s.player}</span>
+              <div>
+                <span className="text-sm font-semibold text-gray-100">J{s.player}</span>
+                {report.players?.find((p) => p.player === s.player)?.shirt_color && (
+                  <span className="ml-1 text-xs text-gray-500">
+                    ({report.players!.find((p) => p.player === s.player)!.shirt_color})
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="text-xs text-gray-500">{s.total} pancadas</div>

@@ -3,6 +3,11 @@
 import { useMemo } from "react";
 import type { MatchReport } from "@/lib/api";
 
+function playerLabel(report: MatchReport, playerNum: number): string {
+  const p = report.players?.find((pl) => pl.player === playerNum);
+  return p?.shirt_color ? `J${playerNum} (${p.shirt_color})` : `Jogador ${playerNum}`;
+}
+
 // Type order + PT-PT labels.
 const SHOT_LABELS: Record<string, string> = {
   forehand: "Direita",
@@ -50,7 +55,7 @@ export function ShotCountsTable({ report }: { report: MatchReport }) {
             <th className="text-left font-medium py-2 pr-3">Pancada</th>
             {PLAYERS.map((_, i) => (
               <th key={i} className="text-right font-medium py-2 px-3 whitespace-nowrap">
-                Jogador {i + 1}
+                {playerLabel(report, i + 1)}
               </th>
             ))}
             <th className="text-right font-semibold py-2 pl-3 text-gray-400">Total</th>

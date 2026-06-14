@@ -43,12 +43,19 @@ _MATCH_PROMPT = """
 You are an expert padel coach analysing a match video. Watch the ENTIRE video from
 start to finish before answering. Be precise and count carefully.
 
+STEP 1 — IDENTIFY PLAYERS BY SHIRT COLOUR (do this first, before anything else):
+Look at the players in the first 10 seconds. Each of the 4 players wears a distinct
+shirt colour (e.g. white, black, blue, red, yellow, green…). Assign:
+  Player 1 = near team, LEFT side  (court_x ≈ 0.1-0.45, court_y < 0.5)
+  Player 2 = near team, RIGHT side (court_x ≈ 0.55-0.9, court_y < 0.5)
+  Player 3 = far team,  LEFT side  (court_x ≈ 0.1-0.45, court_y > 0.5)
+  Player 4 = far team,  RIGHT side (court_x ≈ 0.55-0.9, court_y > 0.5)
+Use the shirt colour to track the SAME physical person throughout the whole match.
+If two players on the same team swap sides during play, follow the COLOUR, not the position.
+
 PADEL BASICS:
 - 2v2 sport on an enclosed glass court (10m wide × 20m long)
-- Players 1 & 2 = NEAR team (the pair on the half closest to the camera, court_y 0.0-0.5)
-- Players 3 & 4 = FAR team (the pair on the far half, court_y 0.5-1.0)
-- Within each team: player 1 and 3 are on the LEFT side (court_x ≈ 0.1-0.45),
-                    player 2 and 4 are on the RIGHT side (court_x ≈ 0.55-0.9)
+- Near team = players closest to the camera. Far team = players at the far end.
 - Each SET has multiple GAMES; each GAME has multiple POINTS; each POINT = one RALLY
 - A typical padel match has 50-200 individual rallies across 2-3 sets
 
@@ -56,40 +63,51 @@ COORDINATE SYSTEM (all values 0.0–1.0):
   court_x: 0.0 = left edge, 1.0 = right edge (as seen from camera)
   court_y: 0.0 = near baseline (camera side), 0.5 = net, 1.0 = far baseline
 
-PLAYER POSITION RULES — VERY IMPORTANT:
-- Player 1: court_y ALWAYS 0.0-0.5, court_x USUALLY 0.1-0.45 (left side of near court)
-- Player 2: court_y ALWAYS 0.0-0.5, court_x USUALLY 0.55-0.9 (right side of near court)
-- Player 3: court_y ALWAYS 0.5-1.0, court_x USUALLY 0.1-0.45 (left side of far court)
-- Player 4: court_y ALWAYS 0.5-1.0, court_x USUALLY 0.55-0.9 (right side of far court)
-- Teammates are ALWAYS on OPPOSITE sides — the difference in court_x between player 1
-  and player 2 (or 3 and 4) MUST be at least 0.25 at any given time.
-- NEVER give two different players the same court_x AND court_y values simultaneously.
-- When a player moves (to follow the ball), their court_x changes — track this movement.
-- Typical attacking position (at net): court_y ≈ 0.35-0.45 for near team, 0.55-0.65 for far team
-- Typical defending position (at back): court_y ≈ 0.05-0.20 for near team, 0.80-0.95 for far team
+PLAYER POSITION RULES:
+- Players 1 & 2: court_y ALWAYS < 0.5. Players 3 & 4: court_y ALWAYS > 0.5.
+- Player 1 & 3 (LEFT players): court_x usually 0.1-0.45
+- Player 2 & 4 (RIGHT players): court_x usually 0.55-0.9
+- Teammates MUST have court_x ≥ 0.25 apart at every timestamp.
+- Attacking (at net): court_y ≈ 0.35-0.45 (near team) or 0.55-0.65 (far team)
+- Defending (at back): court_y ≈ 0.05-0.20 (near team) or 0.80-0.95 (far team)
+
+SHOT ATTRIBUTION RULES:
+- Watch which player's racket physically hits the ball — attribute the shot to THAT player.
+- Do NOT distribute shots evenly across 4 players. Real match data is uneven:
+  some players hit many more shots than others (e.g. a dominating player may hit 40%).
+- The player at the net typically hits more volleys/smashes.
+- The player at the back typically hits more groundstrokes/lobs.
+- Shots MUST alternate between teams (near team hits → far team hits → near team hits…).
 
 Return ONLY a single valid JSON object — NO markdown fences, NO text before or after.
 
 {
   "duration_s": <total video length in seconds, float>,
 
+  "players": [
+    // Identify each player by their shirt colour (seen in the video).
+    // This anchors player IDs to real people throughout the analysis.
+    {"player": 1, "shirt_color": "<colour in Portuguese, e.g. branco, azul, vermelho>",
+     "team": "near", "side": "left"},
+    {"player": 2, "shirt_color": "<colour>", "team": "near", "side": "right"},
+    {"player": 3, "shirt_color": "<colour>", "team": "far",  "side": "left"},
+    {"player": 4, "shirt_color": "<colour>", "team": "far",  "side": "right"}
+  ],
+
   "player_positions": [
     // MANDATORY: record ALL 4 players EVERY 5 SECONDS throughout the video.
     // Total entries MUST be at least ceil(duration_s / 5) * 4.
-    // For a 5-minute video that is at least 240 entries.
-    // If a player is briefly off-screen, estimate their most likely position.
-    // CRITICAL: Players 1&2 MUST have different court_x values (≥0.25 apart).
-    //           Players 3&4 MUST have different court_x values (≥0.25 apart).
-    //           Players 1&2 MUST have court_y < 0.5. Players 3&4 MUST have court_y > 0.5.
+    // Track each player by their shirt colour — the same person keeps the same player ID.
+    // Players 1&2: court_y < 0.5. Players 3&4: court_y > 0.5.
+    // Players 1&2 court_x MUST differ by ≥0.25. Same for players 3&4.
     {"t_s": <float>, "player": <1|2|3|4>, "court_x": <0.0-1.0>, "court_y": <0.0-1.0>},
     ...
   ],
 
   "shots": [
-    // Every single racket-ball contact = 1 shot entry (serves, volleys, groundstrokes…).
-    // Attribute to the player whose racket touched the ball.
-    // ALL 4 players should have shots if they played the whole match.
-    // Shots MUST alternate between teams (team 1 hits, then team 2, then team 1...).
+    // Every single racket-ball contact = 1 shot entry.
+    // Identify the hitter by their shirt colour, map to player ID.
+    // Shot counts WILL be uneven — do not artificially balance them.
     {"t_s": <float>, "player": <1|2|3|4>,
      "type": "<forehand|backhand|volley|smash|bandeja|vibora|serve|lob|other>",
      "outcome": "<winner|unforced_error|forced_error|let|continuation>"},
@@ -99,57 +117,49 @@ Return ONLY a single valid JSON object — NO markdown fences, NO text before or
   "formation_samples": [
     // MANDATORY: record the formation EVERY 5 SECONDS.
     // Total entries MUST be at least ceil(duration_s / 5).
-    // Formation describes the NEAR team (players 1 & 2) relative to the net (court_y=0.5):
-    //   "both_net"        — both near-team players are within 2m of the net (attacking)
-    //   "both_back"       — both near-team players are near their own baseline (defending)
-    //   "split_near_net"  — one near player at net, one at back (transition)
-    //   "split_far_net"   — far team has one up, one back (near team both at baseline)
-    //   "mixed"           — other configurations
-    // NOTE: in padel, "both_net" for the attacking team is VERY COMMON (not rare).
-    //       A healthy match typically has 30-50% "both_net" samples.
+    //   "both_net"        — both near-team players attacking at net
+    //   "both_back"       — both near-team players defending at back
+    //   "split_near_net"  — one near player at net, one at back
+    //   "split_far_net"   — far team split; near team at back
+    //   "mixed"           — other
+    // Attacking "both_net" is common in padel: expect 30-50% of samples.
     {"t_s": <float>, "type": "<both_net|both_back|split_near_net|split_far_net|mixed>"},
     ...
   ],
 
   "score_timeline": [
-    // Record score after each game (not every point — too many).
     {"t_s": <float>, "team1_games": <int>, "team2_games": <int>},
     ...
   ],
 
   "key_frames": [
-    // 8-12 moments where ALL 4 players AND the ball are clearly visible simultaneously.
+    // 8-12 moments where all 4 players AND ball are clearly visible.
     {"t_s": <float>, "n_players": <0-4>, "ball_visible": <bool>,
      "description": "<one-sentence description in Portuguese>"},
     ...
   ],
 
   "rallies": [
-    // One entry PER POINT PLAYED (not per game or set).
-    // start_s = the moment the server's racket hits the ball.
-    // end_s   = the moment the point ends (ball hits wall/floor twice/net/out).
-    // A single padel game of 5 points has 5 rally entries.
-    // Typical rally duration: 5-25 seconds. Very short rallies (<3s) may be service errors.
+    // One entry PER POINT. start_s = serve contact. end_s = point ends.
     {"start_s": <float>, "end_s": <float>, "num_shots": <int>, "winner_team": <1|2|null>},
     ...
   ],
 
   "final_score": {
-    "team1_sets": <int>,
-    "team2_sets": <int>,
-    "detail": "<e.g. '6-3 4-6 7-5' or '6-2 6-1'>"
+    "team1_sets": <int>, "team2_sets": <int>,
+    "detail": "<e.g. '6-3 4-6 7-5'>"
   },
   "match_summary": "<2-3 sentences in Portuguese summarising the match and who won>",
-  "confidence": <0.0-1.0 overall confidence in this analysis>
+  "confidence": <0.0-1.0>
 }
 
-CRITICAL — read before answering:
-1. player_positions MUST have ≥ ceil(duration_s/5) × 4 entries. Do NOT skip intervals.
-2. formation_samples MUST have ≥ ceil(duration_s/5) entries. Do NOT skip intervals.
-3. Every player who touched the ball MUST appear in shots with a non-zero count.
-4. rallies must cover the actual points played — count them from the video carefully.
-5. Player 1 and 2 MUST have different court_x at every timestamp (≥0.25 apart).
-6. Player 3 and 4 MUST have different court_x at every timestamp (≥0.25 apart).
+CRITICAL:
+1. player_positions MUST have ≥ ceil(duration_s/5) × 4 entries.
+2. formation_samples MUST have ≥ ceil(duration_s/5) entries.
+3. Identify players by shirt colour — fill the "players" array first.
+4. Shot counts MUST NOT be equal across players. Real data is uneven.
+5. Shots MUST alternate between teams (near→far→near→far…).
+6. Players 1&2 court_x MUST differ ≥0.25. Same for players 3&4.
 7. Return ONLY the raw JSON object. No explanation, no markdown.
 """.strip()
 
@@ -311,6 +321,7 @@ def _parse_match_json(text: str) -> dict:
 
 def _fill_defaults(data: dict) -> None:
     data.setdefault("duration_s", 0.0)
+    data.setdefault("players", [])
     for key in ("player_positions", "shots", "formation_samples",
                 "score_timeline", "key_frames", "rallies"):
         data.setdefault(key, [])
