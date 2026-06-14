@@ -48,8 +48,8 @@ export function ShotCountsTable({ report }: { report: MatchReport }) {
   }
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm border-collapse">
+    <div className="overflow-x-auto -mx-2 px-2">
+      <table className="min-w-max w-full text-sm border-collapse">
         <thead>
           <tr className="text-gray-500 text-xs uppercase tracking-wide">
             <th className="text-left font-medium py-2 pr-3">Pancada</th>

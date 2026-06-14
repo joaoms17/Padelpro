@@ -3,196 +3,155 @@
 import { useMemo } from "react";
 import type { MatchReport } from "@/lib/api";
 
-const PLAYER_COLORS = ["#00E0A4", "#54A7FF", "#E8FF3D", "#FF7A59"];
+// Players 1,2 = Equipa A (near / camera side); 3,4 = Equipa B (far side).
+const TEAM_COLORS: Record<number, string> = {
+  1: "#00E0A4",
+  2: "#54A7FF",
+  3: "#E8FF3D",
+  4: "#FF7A59",
+};
 
-// Court drawing area (the playable rectangle), inside an SVG with padding.
-const COLS = 12;
-const ROWS = 18;
-const PAD = 24;
-const COURT_W = 300;
-const COURT_H = 440;
+const COLS = 10;
+const ROWS = 16;
+const PAD = 18;
+const COURT_W = 220;
+const COURT_H = 340;
 const SVG_W = COURT_W + PAD * 2;
 const SVG_H = COURT_H + PAD * 2;
 
-type PlayerPosition = MatchReport["player_positions"][number];
+const GAUSS_SIGMA = 1.3; // smaller sigma → tighter blobs, less cross-team bleed
 
-const GAUSS_SIGMA = 1.8; // Gaussian spread in cells — makes sparse data render as blobs
+type PP = MatchReport["player_positions"][number];
 
-/** Build a COLS×ROWS density grid (0..1) for a single player's positions. */
-function buildGrid(positions: PlayerPosition[]): number[][] {
+function buildGrid(positions: PP[]): number[][] {
   const grid: number[][] = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
-
   for (const p of positions) {
     const cx = Math.min(0.999, Math.max(0, p.court_x));
     const cy = Math.min(0.999, Math.max(0, p.court_y));
-    const gc = cx * COLS; // fractional column
-    const gr = cy * ROWS; // fractional row
-
+    const gc = cx * COLS;
+    const gr = cy * ROWS;
     const radius = Math.ceil(GAUSS_SIGMA * 3);
-    const r0 = Math.max(0, Math.floor(gr) - radius);
-    const r1 = Math.min(ROWS - 1, Math.floor(gr) + radius);
-    const c0 = Math.max(0, Math.floor(gc) - radius);
-    const c1 = Math.min(COLS - 1, Math.floor(gc) + radius);
-
-    for (let r = r0; r <= r1; r++) {
-      for (let c = c0; c <= c1; c++) {
+    for (let r = Math.max(0, Math.floor(gr) - radius); r <= Math.min(ROWS - 1, Math.floor(gr) + radius); r++) {
+      for (let c = Math.max(0, Math.floor(gc) - radius); c <= Math.min(COLS - 1, Math.floor(gc) + radius); c++) {
         const dr = r + 0.5 - gr;
         const dc = c + 0.5 - gc;
         grid[r][c] += Math.exp(-(dr * dr + dc * dc) / (2 * GAUSS_SIGMA * GAUSS_SIGMA));
       }
     }
   }
-
   let max = 0;
-  for (let r = 0; r < ROWS; r++)
-    for (let c = 0; c < COLS; c++)
-      if (grid[r][c] > max) max = grid[r][c];
-
-  if (max > 0)
-    for (let r = 0; r < ROWS; r++)
-      for (let c = 0; c < COLS; c++)
-        grid[r][c] /= max;
-
+  for (const row of grid) for (const v of row) if (v > max) max = v;
+  if (max > 0) for (const row of grid) for (let c = 0; c < COLS; c++) row[c] /= max;
   return grid;
+}
+
+interface MiniCourtProps {
+  title: string;
+  players: { pid: number; label: string }[];
+  grids: (number[][] | null)[];
+  allColors: Record<number, string>;
+}
+
+function MiniCourt({ title, players, grids, allColors }: MiniCourtProps) {
+  const cellW = COURT_W / COLS;
+  const cellH = COURT_H / ROWS;
+  const netY = PAD + COURT_H / 2;
+  const serviceFrac = 6.95 / 10 / 2;
+  const svcTopY = netY - COURT_H * serviceFrac;
+  const svcBotY = netY + COURT_H * serviceFrac;
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="text-xs font-semibold text-gray-300 uppercase tracking-wide">{title}</div>
+      <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="w-full max-w-[200px] h-auto" role="img">
+        {/* Court surface */}
+        <rect x={PAD} y={PAD} width={COURT_W} height={COURT_H} rx={8} fill="#0B1B2E" stroke="#173654" strokeWidth={1.5} />
+
+        {/* Heat cells for each player */}
+        {players.map(({ pid }) => {
+          const grid = grids[pid - 1];
+          if (!grid) return null;
+          const color = allColors[pid];
+          return grid.map((rowVals, r) =>
+            rowVals.map((v, c) => {
+              if (v <= 0.03) return null;
+              return (
+                <rect
+                  key={`p${pid}-${r}-${c}`}
+                  x={PAD + c * cellW}
+                  y={PAD + r * cellH}
+                  width={cellW}
+                  height={cellH}
+                  fill={color}
+                  opacity={Math.min(0.75, Math.pow(v, 0.6) * 0.75)}
+                />
+              );
+            }),
+          );
+        })}
+
+        {/* Service lines */}
+        <line x1={PAD} y1={svcTopY} x2={PAD + COURT_W} y2={svcTopY} stroke="rgba(255,255,255,0.35)" strokeWidth={1} />
+        <line x1={PAD} y1={svcBotY} x2={PAD + COURT_W} y2={svcBotY} stroke="rgba(255,255,255,0.35)" strokeWidth={1} />
+        <line x1={PAD + COURT_W / 2} y1={svcTopY} x2={PAD + COURT_W / 2} y2={svcBotY} stroke="rgba(255,255,255,0.35)" strokeWidth={1} />
+
+        {/* Net */}
+        <line x1={PAD} y1={netY} x2={PAD + COURT_W} y2={netY} stroke="#54A7FF" strokeWidth={2.5} strokeDasharray="6 4" />
+        <text x={PAD + COURT_W / 2} y={netY - 5} textAnchor="middle" fontSize={9} fontWeight={700} letterSpacing={2} fill="#54A7FF">
+          REDE
+        </text>
+      </svg>
+
+      {/* Per-player legend */}
+      <div className="flex gap-3">
+        {players.map(({ pid, label }) => (
+          <div key={pid} className="flex items-center gap-1 text-xs text-gray-400">
+            <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: allColors[pid] }} />
+            <span>{label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function MatchHeatmap({ report }: { report: MatchReport }) {
   const positions = report.player_positions ?? [];
-  const ballTraj = report.ball_trajectory ?? [];
 
-  const grids = useMemo(() => {
-    return [1, 2, 3, 4].map((pid) =>
-      buildGrid(positions.filter((p) => p.player === pid)),
-    );
-  }, [positions]);
-
-  // Ball trajectory as SVG polyline points (sample every 3rd point for clarity)
-  const ballPoints = useMemo(() => {
-    return ballTraj
-      .filter((_, i) => i % 3 === 0 && ballTraj[i].conf > 0.3)
-      .map((p) => `${PAD + p.x * COURT_W},${PAD + p.y * COURT_H}`)
-      .join(" ");
-  }, [ballTraj]);
-
-  const cellW = COURT_W / COLS;
-  const cellH = COURT_H / ROWS;
-
-  // Court line geometry (service line at ITF 6.95 m of a 10 m half-court).
-  const netY = PAD + COURT_H / 2;
-  const serviceFrac = 6.95 / 10 / 2; // fraction of full court depth from net
-  const svcTopY = netY - COURT_H * serviceFrac;
-  const svcBotY = netY + COURT_H * serviceFrac;
+  const grids = useMemo(
+    () => [1, 2, 3, 4].map((pid) => buildGrid(positions.filter((p) => p.player === pid))),
+    [positions],
+  );
 
   if (positions.length === 0) {
     return <div className="text-gray-400 text-sm">Sem dados de posição.</div>;
   }
 
+  const getLabel = (pid: number) => {
+    const p = report.players?.find((pl) => pl.player === pid);
+    return p?.shirt_color ? `J${pid} (${p.shirt_color})` : `J${pid}`;
+  };
+
   return (
-    <div className="flex flex-col items-center gap-4">
-      <svg
-        viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-        className="w-full max-w-[340px] h-auto"
-        role="img"
-        aria-label="Mapa de calor do campo"
-      >
-        {/* Court surface */}
-        <rect
-          x={PAD}
-          y={PAD}
-          width={COURT_W}
-          height={COURT_H}
-          rx={10}
-          fill="#0B1B2E"
-          stroke="#173654"
-          strokeWidth={2}
-        />
-
-        {/* Density cells, per player */}
-        {grids.map((grid, pi) =>
-          grid.map((rowVals, r) =>
-            rowVals.map((v, c) => {
-              if (v <= 0.02) return null;
-              return (
-                <rect
-                  key={`p${pi}-${r}-${c}`}
-                  x={PAD + c * cellW}
-                  y={PAD + r * cellH}
-                  width={cellW}
-                  height={cellH}
-                  fill={PLAYER_COLORS[pi]}
-                  opacity={Math.min(0.7, Math.pow(v, 0.7) * 0.7)}
-                />
-              );
-            }),
-          ),
-        )}
-
-        {/* Ball trajectory (interpolated from Gemini shot positions) */}
-        {ballPoints && (
-          <polyline
-            points={ballPoints}
-            fill="none"
-            stroke="#FFFFFF"
-            strokeWidth={1.5}
-            strokeDasharray="3 4"
-            opacity={0.45}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        )}
-
-        {/* Service lines */}
-        <line x1={PAD} y1={svcTopY} x2={PAD + COURT_W} y2={svcTopY} stroke="rgba(255,255,255,0.4)" strokeWidth={1.5} />
-        <line x1={PAD} y1={svcBotY} x2={PAD + COURT_W} y2={svcBotY} stroke="rgba(255,255,255,0.4)" strokeWidth={1.5} />
-        {/* Centre service line (between net and each service line) */}
-        <line x1={PAD + COURT_W / 2} y1={svcTopY} x2={PAD + COURT_W / 2} y2={svcBotY} stroke="rgba(255,255,255,0.4)" strokeWidth={1.5} />
-
-        {/* Net */}
-        <line
-          x1={PAD}
-          y1={netY}
-          x2={PAD + COURT_W}
-          y2={netY}
-          stroke="#54A7FF"
-          strokeWidth={3}
-          strokeDasharray="8 5"
-        />
-        <text
-          x={PAD + COURT_W / 2}
-          y={netY - 6}
-          textAnchor="middle"
-          fontSize={11}
-          fontWeight={700}
-          letterSpacing={2}
-          fill="#54A7FF"
-        >
-          REDE
-        </text>
-      </svg>
-
-      {/* Legend */}
-      <div className="flex flex-wrap justify-center gap-x-4 gap-y-2">
-        {PLAYER_COLORS.map((color, i) => {
-          const playerInfo = report.players?.find((p) => p.player === i + 1);
-          return (
-            <div key={i} className="flex items-center gap-1.5 text-xs text-gray-400">
-              <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-              <span>
-                J{i + 1}
-                {playerInfo?.shirt_color && (
-                  <span className="text-gray-500 ml-1">({playerInfo.shirt_color})</span>
-                )}
-              </span>
-            </div>
-          );
-        })}
-        {ballPoints && (
-          <div className="flex items-center gap-1.5 text-xs text-gray-400">
-            <span className="inline-block w-5 h-0 border-t-2 border-dashed border-white/50" />
-            {report.ball_trajectory_source === "kalman" ? "Bola (Kalman)" : "Bola (estimada)"}
-          </div>
-        )}
-      </div>
+    <div className="flex flex-col sm:flex-row gap-6 justify-center">
+      <MiniCourt
+        title="Equipa A (câmara)"
+        players={[
+          { pid: 1, label: getLabel(1) },
+          { pid: 2, label: getLabel(2) },
+        ]}
+        grids={grids}
+        allColors={TEAM_COLORS}
+      />
+      <MiniCourt
+        title="Equipa B (fundo)"
+        players={[
+          { pid: 3, label: getLabel(3) },
+          { pid: 4, label: getLabel(4) },
+        ]}
+        grids={grids}
+        allColors={TEAM_COLORS}
+      />
     </div>
   );
 }

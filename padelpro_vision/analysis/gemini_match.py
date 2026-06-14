@@ -641,12 +641,9 @@ def _derive_compat_fields(data: dict, is_v2: bool | None = None) -> None:
             team: {ph: _s_to_hhmmss(v) for ph, v in phases.items()}
             for team, phases in phase_totals.items()
         }
-        # Only overwrite if we computed meaningful values; else keep Gemini's value
-        total_computed = sum(
-            v for phases in phase_totals.values() for v in phases.values()
-        )
-        if total_computed > 0 or not resumo.get("tempo_por_fase"):
-            resumo["tempo_por_fase"] = computed_tpf
+        # Always use values computed from actual fases — don't trust Gemini's resumo
+        # summary which is often wrong (symmetric or all-zero).
+        resumo["tempo_por_fase"] = computed_tpf
 
         # player_positions[] from fases (zone → coordinates)
         positions: list = []
