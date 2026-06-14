@@ -610,6 +610,7 @@ def _derive_compat_fields(data: dict, is_v2: bool | None = None) -> None:
                     "player": pnum,
                     "type": old_type,
                     "outcome": "continuation",  # new schema has no per-shot outcome
+                    "zone": p.get("zona", ""),
                 })
                 pk = f"player_{pnum}"
                 shot_counts.setdefault(pk, {})

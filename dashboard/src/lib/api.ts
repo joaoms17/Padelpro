@@ -383,7 +383,7 @@ export interface MatchReport {
     play_time_pct: number;
   };
   player_positions: { t_s: number; player: number; court_x: number; court_y: number }[];
-  shots: { t_s: number; player: number; type: string; outcome: string }[];
+  shots: { t_s: number; player: number; type: string; outcome: string; zone?: string }[];
   formation_samples: { t_s: number; type: string }[];
   score_timeline: { t_s: number; team1_games: number; team2_games: number }[];
   key_frames: { t_s: number; n_players: number; ball_visible: boolean; description: string; ball_x_norm?: number | null; ball_y_norm?: number | null; ball_conf?: number | null }[];

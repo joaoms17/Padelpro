@@ -11,6 +11,9 @@ import {
 import { ScoreCard } from "@/components/report/ScoreCard";
 import { MatchHeatmap } from "@/components/report/MatchHeatmap";
 import { ShotCountsTable } from "@/components/report/ShotCountsTable";
+import { ShotTypeBars } from "@/components/report/ShotTypeBars";
+import { ShotOriginMap } from "@/components/report/ShotOriginMap";
+import { PointSequence } from "@/components/report/PointSequence";
 import { FormationDonut } from "@/components/report/FormationDonut";
 import { RallyTimeline } from "@/components/report/RallyTimeline";
 import { KeyFramesGallery } from "@/components/report/KeyFramesGallery";
@@ -135,6 +138,14 @@ function ReportBody({ report, rid }: { report: MatchReport; rid: string }) {
         </section>
       )}
 
+      {/* 2c. Point sequence / momentum strip */}
+      {(report.rallies?.length ?? 0) > 0 && (
+        <section className="card p-6">
+          <SectionTitle>Sequência de pontos</SectionTitle>
+          <PointSequence report={report} />
+        </section>
+      )}
+
       {/* 3. Player outcome breakdown */}
       {(report.shots?.length ?? 0) > 0 && (
         <section className="card p-6">
@@ -151,7 +162,15 @@ function ReportBody({ report, rid }: { report: MatchReport; rid: string }) {
         </section>
       )}
 
-      {/* 4 + 5 — heatmap and shot counts side by side on wide screens */}
+      {/* 4. Shot type distribution per player (stacked bars) */}
+      {(report.shots?.length ?? 0) > 0 && (
+        <section className="card p-6">
+          <SectionTitle>Distribuição de pancadas</SectionTitle>
+          <ShotTypeBars report={report} />
+        </section>
+      )}
+
+      {/* 5 + 6 — heatmap and shot origin side by side on wide screens */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
         <section className="card p-6">
           <SectionTitle>Mapa de calor</SectionTitle>
@@ -159,30 +178,44 @@ function ReportBody({ report, rid }: { report: MatchReport; rid: string }) {
         </section>
 
         <section className="card p-6">
-          <SectionTitle>Pancadas por jogador</SectionTitle>
-          <ShotCountsTable report={report} />
+          <SectionTitle>Origem das pancadas</SectionTitle>
+          <ShotOriginMap report={report} />
         </section>
       </div>
 
-      {/* 5. Formations */}
+      {/* 6b. Raw shot counts (detail table, collapsible) */}
+      {(report.shots?.length ?? 0) > 0 && (
+        <section className="card p-6">
+          <details>
+            <summary className="cursor-pointer text-sm font-medium text-gray-400 hover:text-gray-200">
+              Tabela detalhada de pancadas
+            </summary>
+            <div className="mt-4">
+              <ShotCountsTable report={report} />
+            </div>
+          </details>
+        </section>
+      )}
+
+      {/* 7. Formations */}
       <section className="card p-6">
         <SectionTitle>Formações</SectionTitle>
         <FormationDonut report={report} />
       </section>
 
-      {/* 6. Rally timeline */}
+      {/* 8. Rally timeline */}
       <section className="card p-6">
         <SectionTitle>Pontos e tempo útil</SectionTitle>
         <RallyTimeline report={report} />
       </section>
 
-      {/* 7. Key frames */}
+      {/* 9. Key frames */}
       <section className="card p-6">
         <SectionTitle>Momentos-chave</SectionTitle>
         <KeyFramesGallery report={report} />
       </section>
 
-      {/* 7b. Gemini reasoning debug */}
+      {/* 10. Gemini reasoning debug */}
       {report._gemini_reasoning && (
         <section className="card p-6">
           <details>
@@ -207,7 +240,7 @@ function ReportBody({ report, rid }: { report: MatchReport; rid: string }) {
         </section>
       )}
 
-      {/* 8. Footer CTAs */}
+      {/* 11. Footer CTAs */}
       <section className="card p-6">
         <div className="flex flex-wrap gap-3">
           <a className="btn-primary px-4 py-2" href={`/annotate/${rid}`}>
