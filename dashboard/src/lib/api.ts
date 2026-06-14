@@ -23,6 +23,8 @@ export interface AnalysisReport {
   shots: Array<{ time_s: number; player: number; type: string; outcome: string }>;
   score_timeline: Array<{ time_s: number; team1_games: number; team2_games: number; team1_points: string; team2_points: string }>;
   key_frames: Array<{ time_s: number; description: string; all_players_visible: boolean; ball_visible: boolean }>;
+  rallies: Array<{ start_s: number; end_s: number; duration_s: number; num_shots: number; winner_team: 1 | 2 | null }>;
+  rally_stats: { total_rallies: number; avg_duration_s: number; total_play_time_s: number; play_time_pct: number };
 }
 
 export async function createMatch(youtube_url?: string): Promise<MatchStatus> {

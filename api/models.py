@@ -29,3 +29,5 @@ class AnalysisReport(BaseModel):
     shots: list[dict]
     score_timeline: list[dict]
     key_frames: list[dict]
+    rallies: list[dict]  # list of {start_s, end_s, duration_s, num_shots, winner_team}
+    rally_stats: dict  # computed: total_rallies, avg_duration_s, total_play_time_s, play_time_pct

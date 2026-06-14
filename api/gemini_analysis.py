@@ -55,7 +55,7 @@ IMPORTANT RULES:
 - Players 1&2 are one team (start on one side), Players 3&4 are the other team
 - formation_samples: sample every 5 seconds
 - key_frames: identify 8-12 moments where all 4 players AND ball are clearly visible
-- rallies: identify EVERY rally (start_s = first serve/ball contact, end_s = point ends). This segments useful play time from dead time.
+- rallies: identify each rally (active play period). start_s = first ball contact after serve, end_s = when point ends (ball out/net/winner). Include ALL rallies in the video.
 - Return ONLY the JSON, nothing else"""
 
 

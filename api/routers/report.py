@@ -1,25 +1,23 @@
-"""Report retrieval endpoints."""
+"""Report endpoints — read analysis results, serve frames, generate training data."""
 
 from __future__ import annotations
-
 import io
 import json
+import logging
 import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 
-from api.gemini_analysis import GeminiAnalyzer
 from api.models import AnalysisReport
 
 router = APIRouter(prefix="/report", tags=["report"])
-
-OUTPUT_DIR = Path("data/output")
-VIDEOS_DIR = Path("data/videos")
+logger = logging.getLogger(__name__)
 
 
 def _compute_rally_stats(rallies: list[dict], duration_s: float) -> dict:
+    """Compute aggregate stats from rally list."""
     total_play = sum(r.get("duration_s", 0) for r in rallies)
     return {
         "total_rallies": len(rallies),
@@ -30,27 +28,37 @@ def _compute_rally_stats(rallies: list[dict], duration_s: float) -> dict:
 
 
 def _compute_formation_pct(formation_samples: list[dict]) -> dict:
-    keys = ["both_net", "both_back", "t1_net_t2_back", "t1_back_t2_net", "mixed"]
-    counts = {k: 0 for k in keys}
-    total = len(formation_samples)
-    if total == 0:
-        return {k: 0.0 for k in keys}
+    """Compute percentage time in each formation type."""
+    counts: dict[str, int] = {
+        "both_net": 0,
+        "both_back": 0,
+        "t1_net_t2_back": 0,
+        "t1_back_t2_net": 0,
+        "mixed": 0,
+    }
     for sample in formation_samples:
         t = sample.get("type", "mixed")
         if t in counts:
             counts[t] += 1
         else:
             counts["mixed"] += 1
+
+    total = sum(counts.values())
+    if total == 0:
+        return {k: 0.0 for k in counts}
     return {k: round(v / total * 100, 1) for k, v in counts.items()}
 
 
 @router.get("/{match_id}", response_model=AnalysisReport)
-async def get_report(match_id: str) -> AnalysisReport:
-    report_path = OUTPUT_DIR / match_id / "report.json"
+async def get_report(match_id: str):
+    """Read analysis report for a match."""
+    report_path = Path("data/output") / match_id / "report.json"
     if not report_path.exists():
-        raise HTTPException(status_code=404, detail="Report not found")
+        raise HTTPException(status_code=404, detail="Report not found. Analysis may still be running.")
 
-    data = json.loads(report_path.read_text())
+    with open(report_path) as f:
+        data = json.load(f)
+
     formation_pct = _compute_formation_pct(data.get("formation_samples", []))
     rallies = data.get("rallies", [])
     duration_s = data.get("duration_s", 0.0)
@@ -74,45 +82,53 @@ async def get_report(match_id: str) -> AnalysisReport:
 
 
 @router.get("/{match_id}/frames/{frame_id}")
-async def get_frame(match_id: str, frame_id: int) -> FileResponse:
-    frame_path = OUTPUT_DIR / match_id / "frames" / f"frame_{frame_id:04d}.jpg"
+async def get_frame(match_id: str, frame_id: int):
+    """Serve an extracted frame image."""
+    frame_path = Path("data/output") / match_id / "frames" / f"frame_{frame_id:04d}.jpg"
     if not frame_path.exists():
-        raise HTTPException(status_code=404, detail="Frame not found")
+        raise HTTPException(status_code=404, detail=f"Frame {frame_id} not found.")
     return FileResponse(str(frame_path), media_type="image/jpeg")
 
 
 @router.get("/{match_id}/training-data")
-async def get_training_data(match_id: str) -> StreamingResponse:
-    report_path = OUTPUT_DIR / match_id / "report.json"
-    if not report_path.exists():
-        raise HTTPException(status_code=404, detail="Report not found")
+async def get_training_data(match_id: str):
+    """Generate YOLO training data zip and return as download."""
+    report_path = Path("data/output") / match_id / "report.json"
+    video_path = Path("data/videos") / f"{match_id}.mp4"
 
-    data = json.loads(report_path.read_text())
-    video_path = str(VIDEOS_DIR / f"{match_id}.mp4")
-    training_dir = OUTPUT_DIR / match_id / "training"
+    if not report_path.exists():
+        raise HTTPException(status_code=404, detail="Report not found.")
+
+    with open(report_path) as f:
+        report = json.load(f)
+
+    # Generate training data
+    training_dir = Path("data/output") / match_id / "training"
     training_dir.mkdir(parents=True, exist_ok=True)
 
-    analyzer = GeminiAnalyzer()
-    try:
-        analyzer.generate_training_data(data, video_path, str(training_dir))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Training data generation failed: {e}")
+    if video_path.exists():
+        try:
+            from api.gemini_analysis import GeminiAnalyzer
+            analyzer = GeminiAnalyzer()
+            analyzer.generate_training_data(report, str(video_path), str(training_dir))
+        except Exception as exc:
+            logger.warning("Could not generate training data: %s", exc)
 
     # Write rallies.json as additional training data
-    rallies = data.get("rallies", [])
+    rallies = report.get("rallies", [])
     rallies_path = training_dir / "rallies.json"
     rallies_path.write_text(json.dumps(rallies, ensure_ascii=False, indent=2))
 
-    # Create zip in memory
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+    # Create zip from training directory
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for file_path in training_dir.rglob("*"):
             if file_path.is_file():
                 zf.write(file_path, file_path.relative_to(training_dir))
-    zip_buffer.seek(0)
 
+    buf.seek(0)
     return StreamingResponse(
-        zip_buffer,
+        buf,
         media_type="application/zip",
         headers={"Content-Disposition": f"attachment; filename=training_{match_id}.zip"},
     )

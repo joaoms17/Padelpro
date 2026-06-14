@@ -1,5 +1,5 @@
 """
-PadelPro Vision — FastAPI backend (Gemini-powered).
+PadelPro Vision — FastAPI backend (Gemini AI rewrite).
 
 Start:
     uvicorn api.main:app --reload --port 8000
@@ -17,7 +17,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import matches, report
+from api.routers import matches
+from api.routers import report
 
 app = FastAPI(
     title="PadelPro Vision API",
