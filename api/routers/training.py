@@ -26,6 +26,22 @@ _CHECKPOINT_FILES = {
 }
 
 
+_HITS_DIR = Path("data/dataset/hits")
+
+
+def _count_shot_clips() -> dict:
+    """Count auto-extracted shot clips by type in data/dataset/hits/."""
+    if not _HITS_DIR.exists():
+        return {"total": 0, "by_type": {}}
+    by_type: dict[str, int] = {}
+    for d in _HITS_DIR.iterdir():
+        if d.is_dir():
+            n = sum(1 for _ in d.glob("*.mp4"))
+            if n:
+                by_type[d.name] = n
+    return {"total": sum(by_type.values()), "by_type": by_type}
+
+
 @router.get("/status")
 async def training_status():
     """Per-track annotation counts mapped to levels 1-5, plus trained-model state."""
@@ -38,6 +54,7 @@ async def training_status():
     for track in data["tracks"]:
         track["model"] = models.get(track["key"], {"trained": False})
     data["models"] = models
+    data["shot_clips"] = _count_shot_clips()
     return data
 
 

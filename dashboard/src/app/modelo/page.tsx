@@ -219,6 +219,32 @@ export default function ModeloPage() {
         </div>
       </section>
 
+      {/* Auto-extracted shot clips */}
+      {(status.shot_clips?.total ?? 0) > 0 && (
+        <section className="card p-6 space-y-4">
+          <div>
+            <h2 className="text-lg font-bold text-gray-200">Clips de pancadas recolhidos</h2>
+            <p className="mt-1 text-sm text-gray-500">
+              Cortados automaticamente de cada jogo analisado — prontos para extração de pose e treino do TCN.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(status.shot_clips!.by_type)
+              .sort(([, a], [, b]) => b - a)
+              .map(([type, count]) => (
+                <div key={type} className="flex items-center gap-1.5 rounded-full bg-gray-800 px-3 py-1 text-xs">
+                  <span className="font-semibold text-gray-200">{count}</span>
+                  <span className="text-gray-500">{type}</span>
+                </div>
+              ))}
+          </div>
+          <div className="text-xs text-gray-500">
+            Total: <span className="font-semibold text-gray-300">{status.shot_clips!.total}</span> clips em{" "}
+            <code className="bg-gray-800 px-1 rounded text-[10px]">data/dataset/hits/</code>
+          </div>
+        </section>
+      )}
+
       {/* Test section */}
       <section className="card p-6 space-y-4">
         <div>
