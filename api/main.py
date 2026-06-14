@@ -10,6 +10,7 @@ Docs:
 
 from __future__ import annotations
 import sys
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -25,10 +26,19 @@ from api.routers import (
 # Bumped whenever the dashboard starts depending on new API endpoints
 API_BUILD = 6
 
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    from api.db import prune_jobs
+    prune_jobs("report", max_age_s=7200.0)
+    yield
+
+
 app = FastAPI(
     title="PadelPro Vision API",
     description="Padel match analysis — detection, tracking, pose, analytics, clips.",
     version="0.1.0",
+    lifespan=_lifespan,
 )
 
 app.add_middleware(

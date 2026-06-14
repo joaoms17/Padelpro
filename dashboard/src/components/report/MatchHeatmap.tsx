@@ -16,25 +16,43 @@ const SVG_H = COURT_H + PAD * 2;
 
 type PlayerPosition = MatchReport["player_positions"][number];
 
+const GAUSS_SIGMA = 1.8; // Gaussian spread in cells — makes sparse data render as blobs
+
 /** Build a COLS×ROWS density grid (0..1) for a single player's positions. */
 function buildGrid(positions: PlayerPosition[]): number[][] {
   const grid: number[][] = Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
-  let max = 0;
+
   for (const p of positions) {
     const cx = Math.min(0.999, Math.max(0, p.court_x));
     const cy = Math.min(0.999, Math.max(0, p.court_y));
-    const col = Math.floor(cx * COLS);
-    const row = Math.floor(cy * ROWS);
-    grid[row][col] += 1;
-    if (grid[row][col] > max) max = grid[row][col];
-  }
-  if (max > 0) {
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        grid[r][c] = grid[r][c] / max;
+    const gc = cx * COLS; // fractional column
+    const gr = cy * ROWS; // fractional row
+
+    const radius = Math.ceil(GAUSS_SIGMA * 3);
+    const r0 = Math.max(0, Math.floor(gr) - radius);
+    const r1 = Math.min(ROWS - 1, Math.floor(gr) + radius);
+    const c0 = Math.max(0, Math.floor(gc) - radius);
+    const c1 = Math.min(COLS - 1, Math.floor(gc) + radius);
+
+    for (let r = r0; r <= r1; r++) {
+      for (let c = c0; c <= c1; c++) {
+        const dr = r + 0.5 - gr;
+        const dc = c + 0.5 - gc;
+        grid[r][c] += Math.exp(-(dr * dr + dc * dc) / (2 * GAUSS_SIGMA * GAUSS_SIGMA));
       }
     }
   }
+
+  let max = 0;
+  for (let r = 0; r < ROWS; r++)
+    for (let c = 0; c < COLS; c++)
+      if (grid[r][c] > max) max = grid[r][c];
+
+  if (max > 0)
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++)
+        grid[r][c] /= max;
+
   return grid;
 }
 

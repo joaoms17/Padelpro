@@ -40,51 +40,99 @@ SHOT_TYPES = ("forehand", "backhand", "volley", "smash", "bandeja",
 FORMATIONS = ("both_net", "both_back", "split_near_net", "split_far_net", "mixed")
 
 _MATCH_PROMPT = """
-You are an expert padel analyst. Watch this ENTIRE padel match video carefully.
-Padel is 2v2 on an enclosed glass court. Players 1 and 2 are the NEAR team (the
-side closest to the camera); players 3 and 4 are the FAR team.
+You are an expert padel coach analysing a match video. Watch the ENTIRE video from
+start to finish before answering. Be precise and count carefully.
 
-Return ONLY a valid JSON object (no markdown, no prose) with EXACTLY this schema:
+PADEL BASICS:
+- 2v2 sport on an enclosed glass court (10m wide × 20m long)
+- Players 1 & 2 = NEAR team (the pair on the half closest to the camera, court_y 0.0-0.5)
+- Players 3 & 4 = FAR team (the pair on the far half, court_y 0.5-1.0)
+- Within each team: player 1 and 3 are on the LEFT side, 2 and 4 on the RIGHT side
+- Each SET has multiple GAMES; each GAME has multiple POINTS; each POINT = one RALLY
+- A typical padel match has 50-200 individual rallies across 2-3 sets
+
+COORDINATE SYSTEM (all values 0.0–1.0):
+  court_x: 0.0 = left edge, 1.0 = right edge (as seen from camera)
+  court_y: 0.0 = near baseline (camera side), 0.5 = net, 1.0 = far baseline
+
+Return ONLY a single valid JSON object — NO markdown fences, NO text before or after.
 
 {
-  "duration_s": <float total video duration in seconds>,
+  "duration_s": <total video length in seconds, float>,
+
   "player_positions": [
-    {"t_s": <float>, "player": <1|2|3|4>, "court_x": <0.0-1.0>, "court_y": <0.0-1.0>}
+    // MANDATORY: record ALL 4 players EVERY 5 SECONDS throughout the video.
+    // Total entries MUST be at least ceil(duration_s / 5) * 4.
+    // For a 5-minute video that is at least 240 entries.
+    // If a player is briefly off-screen, estimate their most likely position.
+    // Players 1 & 2 are always in the court_y 0.0-0.5 half; 3 & 4 in 0.5-1.0.
+    {"t_s": <float>, "player": <1|2|3|4>, "court_x": <0.0-1.0>, "court_y": <0.0-1.0>},
+    ...
   ],
+
   "shots": [
+    // Every single racket-ball contact = 1 shot entry (serves, volleys, groundstrokes…).
+    // Attribute to the player whose racket touched the ball.
+    // ALL 4 players should have shots if they played the whole match.
     {"t_s": <float>, "player": <1|2|3|4>,
      "type": "<forehand|backhand|volley|smash|bandeja|vibora|serve|lob|other>",
-     "outcome": "<winner|unforced_error|forced_error|let|continuation>"}
+     "outcome": "<winner|unforced_error|forced_error|let|continuation>"},
+    ...
   ],
+
   "formation_samples": [
-    {"t_s": <float>, "type": "<both_net|both_back|split_near_net|split_far_net|mixed>"}
+    // MANDATORY: record the formation EVERY 5 SECONDS.
+    // Total entries MUST be at least ceil(duration_s / 5).
+    // Formation describes the NEAR team (players 1 & 2) relative to the net (court_y=0.5):
+    //   "both_net"        — both near-team players are within 2m of the net (attacking)
+    //   "both_back"       — both near-team players are near their own baseline (defending)
+    //   "split_near_net"  — one near player at net, one at back (transition)
+    //   "split_far_net"   — far team has one up, one back (near team both at baseline)
+    //   "mixed"           — other configurations
+    // NOTE: in padel, "both_net" for the attacking team is VERY COMMON (not rare).
+    //       A healthy match typically has 30-50% "both_net" samples.
+    {"t_s": <float>, "type": "<both_net|both_back|split_near_net|split_far_net|mixed>"},
+    ...
   ],
+
   "score_timeline": [
-    {"t_s": <float>, "team1_games": <int>, "team2_games": <int>}
+    // Record score after each game (not every point — too many).
+    {"t_s": <float>, "team1_games": <int>, "team2_games": <int>},
+    ...
   ],
+
   "key_frames": [
-    {"t_s": <float>, "n_players": <0-4>, "ball_visible": <true|false>,
-     "description": "<short pt-PT description>"}
+    // 8-12 moments where ALL 4 players AND the ball are clearly visible simultaneously.
+    {"t_s": <float>, "n_players": <0-4>, "ball_visible": <bool>,
+     "description": "<one-sentence description in Portuguese>"},
+    ...
   ],
+
   "rallies": [
-    {"start_s": <float>, "end_s": <float>, "num_shots": <int>, "winner_team": <1|2|null>}
+    // One entry PER POINT PLAYED (not per game or set).
+    // start_s = the moment the server's racket hits the ball.
+    // end_s   = the moment the point ends (ball hits wall/floor twice/net/out).
+    // A single padel game of 5 points has 5 rally entries.
+    // Typical rally duration: 5-25 seconds. Very short rallies (<3s) may be service errors.
+    {"start_s": <float>, "end_s": <float>, "num_shots": <int>, "winner_team": <1|2|null>},
+    ...
   ],
-  "final_score": {"team1_sets": <int>, "team2_sets": <int>, "detail": "<e.g. 6-3 4-6 7-5>"},
-  "match_summary": "<2-3 sentence pt-PT summary>",
-  "confidence": <0.0-1.0 your confidence in this analysis>
+
+  "final_score": {
+    "team1_sets": <int>,
+    "team2_sets": <int>,
+    "detail": "<e.g. '6-3 4-6 7-5' or '6-2 6-1'>"
+  },
+  "match_summary": "<2-3 sentences in Portuguese summarising the match and who won>",
+  "confidence": <0.0-1.0 overall confidence in this analysis>
 }
 
-RULES:
-- player_positions: sample ALL 4 players every ~5 seconds. court_x/court_y in 0..1.
-- formation_samples: every ~5 seconds. "both_net" = both players of BOTH teams at
-  the net is impossible; classify EACH sample by the configuration of the team that
-  is RECEIVING/attacking — use "both_net" when the controlling pair is both at net,
-  "both_back" when both at the baseline, "split_near_net"/"split_far_net" when one up
-  one back, "mixed" otherwise.
-- key_frames: pick 8-12 moments where all 4 players AND the ball are clearly visible.
-- rallies: one entry per point. start_s = serve contact, end_s = point ends.
-- final_score: your best guess even if uncertain (the user validates it).
-- Return ONLY the JSON object.
+CRITICAL — read before answering:
+1. player_positions MUST have ≥ ceil(duration_s/5) × 4 entries. Do NOT skip intervals.
+2. formation_samples MUST have ≥ ceil(duration_s/5) entries. Do NOT skip intervals.
+3. Every player who touched the ball MUST appear in shots with a non-zero count.
+4. rallies must cover the actual points played — count them from the video carefully.
+5. Return ONLY the raw JSON object. No explanation, no markdown.
 """.strip()
 
 
