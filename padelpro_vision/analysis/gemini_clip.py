@@ -1,5 +1,5 @@
 """
-Gemini 1.5 Flash video analysis for padel semantics.
+Gemini 2.5 Flash video analysis for padel semantics.
 
 What Gemini contributes (better than our CV pipeline today):
   - Stroke type per hit: forehand, backhand, bandeja, vibora, smash, serve
@@ -25,7 +25,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 MATCH_WINDOW_S = 2.5   # max gap to accept a Gemini stroke as a CV-hit match
-GEMINI_MODEL   = "gemini-1.5-flash"
+GEMINI_MODEL   = "gemini-2.5-flash"
 
 _STROKE_PROMPT = """
 You are an expert padel analyst. Watch this padel match clip carefully.
