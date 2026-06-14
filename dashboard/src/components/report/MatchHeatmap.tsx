@@ -4,22 +4,22 @@ import { useMemo } from "react";
 import type { MatchReport } from "@/lib/api";
 
 // Players 1,2 = Equipa A (near / camera side); 3,4 = Equipa B (far side).
-const TEAM_COLORS: Record<number, string> = {
+const PLAYER_COLORS: Record<number, string> = {
   1: "#00E0A4",
   2: "#54A7FF",
   3: "#E8FF3D",
   4: "#FF7A59",
 };
 
-const COLS = 10;
-const ROWS = 16;
-const PAD = 18;
-const COURT_W = 220;
-const COURT_H = 340;
+const COLS = 8;
+const ROWS = 14;
+const PAD = 14;
+const COURT_W = 180;
+const COURT_H = 290;
 const SVG_W = COURT_W + PAD * 2;
 const SVG_H = COURT_H + PAD * 2;
 
-const GAUSS_SIGMA = 1.3; // smaller sigma → tighter blobs, less cross-team bleed
+const GAUSS_SIGMA = 1.2;
 
 type PP = MatchReport["player_positions"][number];
 
@@ -45,14 +45,16 @@ function buildGrid(positions: PP[]): number[][] {
   return grid;
 }
 
-interface MiniCourtProps {
-  title: string;
-  players: { pid: number; label: string }[];
-  grids: (number[][] | null)[];
-  allColors: Record<number, string>;
+interface PlayerCourtProps {
+  pid: number;
+  label: string;
+  team: string;
+  grid: number[][];
+  count: number;
 }
 
-function MiniCourt({ title, players, grids, allColors }: MiniCourtProps) {
+function PlayerCourt({ pid, label, team, grid, count }: PlayerCourtProps) {
+  const color = PLAYER_COLORS[pid];
   const cellW = COURT_W / COLS;
   const cellH = COURT_H / ROWS;
   const netY = PAD + COURT_H / 2;
@@ -61,56 +63,44 @@ function MiniCourt({ title, players, grids, allColors }: MiniCourtProps) {
   const svcBotY = netY + COURT_H * serviceFrac;
 
   return (
-    <div className="flex flex-col items-center gap-2">
-      <div className="text-xs font-semibold text-gray-300 uppercase tracking-wide">{title}</div>
-      <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="w-full max-w-[200px] h-auto" role="img">
-        {/* Court surface */}
-        <rect x={PAD} y={PAD} width={COURT_W} height={COURT_H} rx={8} fill="#0B1B2E" stroke="#173654" strokeWidth={1.5} />
+    <div className="flex flex-col items-center gap-1.5">
+      <div className="text-center">
+        <div className="text-xs font-bold" style={{ color }}>{label}</div>
+        <div className="text-[10px] text-gray-500">{team} · {count} pos.</div>
+      </div>
+      <svg viewBox={`0 0 ${SVG_W} ${SVG_H}`} className="w-full max-w-[140px] h-auto" role="img" aria-label={`Heatmap ${label}`}>
+        {/* Court */}
+        <rect x={PAD} y={PAD} width={COURT_W} height={COURT_H} rx={6} fill="#0B1B2E" stroke="#173654" strokeWidth={1.5} />
 
-        {/* Heat cells for each player */}
-        {players.map(({ pid }) => {
-          const grid = grids[pid - 1];
-          if (!grid) return null;
-          const color = allColors[pid];
-          return grid.map((rowVals, r) =>
-            rowVals.map((v, c) => {
-              if (v <= 0.03) return null;
-              return (
-                <rect
-                  key={`p${pid}-${r}-${c}`}
-                  x={PAD + c * cellW}
-                  y={PAD + r * cellH}
-                  width={cellW}
-                  height={cellH}
-                  fill={color}
-                  opacity={Math.min(0.75, Math.pow(v, 0.6) * 0.75)}
-                />
-              );
-            }),
-          );
-        })}
+        {/* Heat cells */}
+        {grid.map((rowVals, r) =>
+          rowVals.map((v, c) => {
+            if (v <= 0.03) return null;
+            return (
+              <rect
+                key={`${r}-${c}`}
+                x={PAD + c * cellW}
+                y={PAD + r * cellH}
+                width={cellW}
+                height={cellH}
+                fill={color}
+                opacity={Math.min(0.8, Math.pow(v, 0.55) * 0.8)}
+              />
+            );
+          }),
+        )}
 
-        {/* Service lines */}
-        <line x1={PAD} y1={svcTopY} x2={PAD + COURT_W} y2={svcTopY} stroke="rgba(255,255,255,0.35)" strokeWidth={1} />
-        <line x1={PAD} y1={svcBotY} x2={PAD + COURT_W} y2={svcBotY} stroke="rgba(255,255,255,0.35)" strokeWidth={1} />
-        <line x1={PAD + COURT_W / 2} y1={svcTopY} x2={PAD + COURT_W / 2} y2={svcBotY} stroke="rgba(255,255,255,0.35)" strokeWidth={1} />
+        {/* Court lines */}
+        <line x1={PAD} y1={svcTopY} x2={PAD + COURT_W} y2={svcTopY} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+        <line x1={PAD} y1={svcBotY} x2={PAD + COURT_W} y2={svcBotY} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
+        <line x1={PAD + COURT_W / 2} y1={svcTopY} x2={PAD + COURT_W / 2} y2={svcBotY} stroke="rgba(255,255,255,0.3)" strokeWidth={1} />
 
         {/* Net */}
-        <line x1={PAD} y1={netY} x2={PAD + COURT_W} y2={netY} stroke="#54A7FF" strokeWidth={2.5} strokeDasharray="6 4" />
-        <text x={PAD + COURT_W / 2} y={netY - 5} textAnchor="middle" fontSize={9} fontWeight={700} letterSpacing={2} fill="#54A7FF">
+        <line x1={PAD} y1={netY} x2={PAD + COURT_W} y2={netY} stroke="#54A7FF" strokeWidth={2} strokeDasharray="5 4" />
+        <text x={PAD + COURT_W / 2} y={netY - 4} textAnchor="middle" fontSize={7} fontWeight={700} letterSpacing={1.5} fill="#54A7FF">
           REDE
         </text>
       </svg>
-
-      {/* Per-player legend */}
-      <div className="flex gap-3">
-        {players.map(({ pid, label }) => (
-          <div key={pid} className="flex items-center gap-1 text-xs text-gray-400">
-            <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ backgroundColor: allColors[pid] }} />
-            <span>{label}</span>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
@@ -129,29 +119,46 @@ export function MatchHeatmap({ report }: { report: MatchReport }) {
 
   const getLabel = (pid: number) => {
     const p = report.players?.find((pl) => pl.player === pid);
-    return p?.shirt_color ? `J${pid} (${p.shirt_color})` : `J${pid}`;
+    return p?.shirt_color ? `J${pid} · ${p.shirt_color}` : `J${pid}`;
   };
 
+  const TEAM_LABEL: Record<number, string> = { 1: "Equipa A", 2: "Equipa A", 3: "Equipa B", 4: "Equipa B" };
+
   return (
-    <div className="flex flex-col sm:flex-row gap-6 justify-center">
-      <MiniCourt
-        title="Equipa A (câmara)"
-        players={[
-          { pid: 1, label: getLabel(1) },
-          { pid: 2, label: getLabel(2) },
-        ]}
-        grids={grids}
-        allColors={TEAM_COLORS}
-      />
-      <MiniCourt
-        title="Equipa B (fundo)"
-        players={[
-          { pid: 3, label: getLabel(3) },
-          { pid: 4, label: getLabel(4) },
-        ]}
-        grids={grids}
-        allColors={TEAM_COLORS}
-      />
+    <div className="space-y-4">
+      {/* Equipa A: J1 and J2 */}
+      <div>
+        <div className="text-xs text-gray-500 uppercase tracking-wide mb-3">Equipa A — câmara</div>
+        <div className="grid grid-cols-2 gap-4">
+          {[1, 2].map((pid) => (
+            <PlayerCourt
+              key={pid}
+              pid={pid}
+              label={getLabel(pid)}
+              team={TEAM_LABEL[pid]}
+              grid={grids[pid - 1]}
+              count={positions.filter((p) => p.player === pid).length}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* Equipa B: J3 and J4 */}
+      <div>
+        <div className="text-xs text-gray-500 uppercase tracking-wide mb-3">Equipa B — fundo</div>
+        <div className="grid grid-cols-2 gap-4">
+          {[3, 4].map((pid) => (
+            <PlayerCourt
+              key={pid}
+              pid={pid}
+              label={getLabel(pid)}
+              team={TEAM_LABEL[pid]}
+              grid={grids[pid - 1]}
+              count={positions.filter((p) => p.player === pid).length}
+            />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
