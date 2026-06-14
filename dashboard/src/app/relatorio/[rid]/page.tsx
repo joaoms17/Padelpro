@@ -14,6 +14,7 @@ import { ShotCountsTable } from "@/components/report/ShotCountsTable";
 import { FormationDonut } from "@/components/report/FormationDonut";
 import { RallyTimeline } from "@/components/report/RallyTimeline";
 import { KeyFramesGallery } from "@/components/report/KeyFramesGallery";
+import { ScoreTimeline } from "@/components/report/ScoreTimeline";
 
 type View =
   | { state: "loading" }
@@ -113,6 +114,14 @@ function ReportBody({ report, rid }: { report: MatchReport; rid: string }) {
     <div className="space-y-6">
       {/* 2. Score + validation */}
       <ScoreCard report={report} />
+
+      {/* 2b. Score timeline */}
+      {(report.score_timeline?.length ?? 0) > 0 && (
+        <section className="card p-6">
+          <SectionTitle>Resultado jogo a jogo</SectionTitle>
+          <ScoreTimeline report={report} />
+        </section>
+      )}
 
       {/* 3 + 4 — heatmap and shot counts side by side on wide screens */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">

@@ -316,7 +316,7 @@ export interface MatchReport {
   shots: { t_s: number; player: number; type: string; outcome: string }[];
   formation_samples: { t_s: number; type: string }[];
   score_timeline: { t_s: number; team1_games: number; team2_games: number }[];
-  key_frames: { t_s: number; n_players: number; ball_visible: boolean; description: string; ball_x_norm?: number; ball_y_norm?: number; ball_conf?: number }[];
+  key_frames: { t_s: number; n_players: number; ball_visible: boolean; description: string; ball_x_norm?: number | null; ball_y_norm?: number | null; ball_conf?: number | null }[];
   rallies: { start_s: number; end_s: number; num_shots: number; winner_team: 1 | 2 | null }[];
 }
 
