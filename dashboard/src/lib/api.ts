@@ -404,6 +404,7 @@ export interface TrainingStatus {
   overall_next_at: number | null;
   thresholds: number[];
   models: Record<string, { trained: boolean; weights?: string; metrics?: Record<string, unknown> }>;
+  shot_clips?: { total: number; by_type: Record<string, number> };
 }
 
 export interface TrainingTestResult {

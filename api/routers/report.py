@@ -314,6 +314,17 @@ async def _analyze_bg(rid: str, in_path: Path) -> None:
         update_job("report", rid, status="done", phase="concluído", condensed_available=condensed_ok)
         logger.info("Report %s done (condensed=%s).", rid, condensed_ok)
 
+        # Auto-extract shot clips for TCN training dataset
+        shots = report.get("shots", [])
+        if shots and in_path.exists():
+            try:
+                n_clips = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: _extract_shot_clips(in_path, shots))
+                if n_clips:
+                    logger.info("Auto-extracted %d shot clips → %s", n_clips, _HIT_DATASET)
+            except Exception:
+                logger.debug("Shot clip extraction skipped.", exc_info=True)
+
         # Auto-train segmentation classifier from Gemini rally boundaries
         if report.get("rallies") and in_path.exists():
             try:
@@ -417,6 +428,59 @@ def _create_condensed_video(video: Path, rallies: list, output: Path) -> bool:
             logger.warning("Condensed video attempt failed: %s", exc)
 
     return False
+
+
+_HIT_DATASET = Path("data/dataset/hits")
+_CLIP_PAD_S = 1.2   # seconds before/after shot contact to include in clip
+_VALID_SHOT_TYPES = {
+    "forehand", "backhand", "volley", "smash", "bandeja",
+    "vibora", "serve", "lob", "other",
+}
+
+
+def _extract_shot_clips(video: Path, shots: list[dict]) -> int:
+    """Cut a short clip around each Gemini shot and save to data/dataset/hits/<type>/.
+
+    Returns the number of clips successfully written. Skips gracefully if
+    ffmpeg is unavailable or the video is missing.
+    """
+    if not video.exists() or not shots:
+        return 0
+    if not shutil.which("ffmpeg"):
+        logger.debug("_extract_shot_clips: ffmpeg not found, skipping.")
+        return 0
+
+    written = 0
+    for i, s in enumerate(shots):
+        t = float(s.get("t_s", 0.0))
+        raw_type = (s.get("type") or "other").strip().lower()
+        shot_type = raw_type if raw_type in _VALID_SHOT_TYPES else "other"
+
+        out_dir = _HIT_DATASET / shot_type
+        out_dir.mkdir(parents=True, exist_ok=True)
+        player = s.get("player", 0)
+        out_path = out_dir / f"{video.stem}_{i:04d}_p{player}_t{t:.1f}.mp4"
+        if out_path.exists():
+            continue
+
+        start = max(0.0, t - _CLIP_PAD_S)
+        cmd = [
+            "ffmpeg", "-y",
+            "-ss", f"{start:.3f}",
+            "-i", str(video),
+            "-t", f"{_CLIP_PAD_S * 2:.3f}",
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "25",
+            "-an",  # no audio — saves space, clips are for pose extraction
+            str(out_path),
+        ]
+        try:
+            res = subprocess.run(cmd, capture_output=True, timeout=30)
+            if res.returncode == 0:
+                written += 1
+        except Exception as exc:
+            logger.debug("Shot clip extraction failed for shot %d: %s", i, exc)
+
+    return written
 
 
 def _extract_key_frames(rid: str, video: Path, report: dict) -> None:
