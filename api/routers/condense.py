@@ -69,9 +69,9 @@ def _sweep_old() -> None:
 @router.get("/capabilities")
 async def capabilities():
     """What this backend can do. `analyze` requires torch/torchvision;
-    `max_upload_mb` lets the deployment cap uploads (tunnels/free tiers)."""
+    `gemini` requires GEMINI_API_KEY; `max_upload_mb` caps uploads."""
     if os.environ.get("MODAL_ANALYZE_URL", "").strip():
-        analyze = True          # análise delegada na GPU cloud
+        analyze = True
     else:
         try:
             from padelpro_vision.analysis import analysis_available
@@ -79,10 +79,15 @@ async def capabilities():
         except Exception:
             analyze = False
     try:
+        from padelpro_vision.analysis.gemini_clip import gemini_available
+        gemini = gemini_available()
+    except Exception:
+        gemini = False
+    try:
         max_mb = int(os.environ.get("API_MAX_UPLOAD_MB", "150"))
     except ValueError:
         max_mb = 150
-    return {"analyze": analyze, "max_upload_mb": max_mb}
+    return {"analyze": analyze, "gemini": gemini, "max_upload_mb": max_mb}
 
 
 @router.post("/upload")
@@ -92,10 +97,11 @@ async def upload_and_condense(
     analyze: bool = Form(False),
     court_id: str = Form("court1"),
     deep: bool = Form(False),
+    gemini: bool = Form(False),
 ):
     """Upload a video; returns a job_id to poll. The condensed video is produced
-    in the background. With analyze=true (and torch installed) a player report
-    is also computed."""
+    in the background. With analyze=true a CV player report is computed; with
+    gemini=true Gemini semantic analysis (stroke types, tactics) is added."""
     job_id = str(uuid.uuid4())
     _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     _sweep_old()
@@ -103,7 +109,6 @@ async def upload_and_condense(
     in_path = _UPLOAD_DIR / f"{job_id}.mp4"
     out_path = _UPLOAD_DIR / f"{job_id}_useful.mp4"
 
-    # Stream to disk in chunks (don't load the whole video into memory).
     with open(in_path, "wb") as f:
         shutil.copyfileobj(file.file, f, length=1024 * 1024)
 
@@ -115,11 +120,11 @@ async def upload_and_condense(
         "output": str(out_path),
     }
     logger.info(
-        "Condense job %s: uploaded %s (analyze=%s, deep=%s)",
-        job_id, file.filename, analyze, deep,
+        "Condense job %s: uploaded %s (analyze=%s, deep=%s, gemini=%s)",
+        job_id, file.filename, analyze, deep, gemini,
     )
 
-    background_tasks.add_task(_condense_bg, job_id, in_path, out_path, analyze, court_id, deep)
+    background_tasks.add_task(_condense_bg, job_id, in_path, out_path, analyze, court_id, deep, gemini)
     return {"job_id": job_id}
 
 
@@ -155,7 +160,8 @@ async def download_condensed(job_id: str):
 
 def _condense_sync(
     job_id: str, in_path: Path, out_path: Path,
-    analyze: bool = False, court_id: str = "court1", deep: bool = False,
+    analyze: bool = False, court_id: str = "court1",
+    deep: bool = False, gemini: bool = False,
 ) -> None:
     from padelpro_vision.segmentation.segmentation import get_active_segments
     from padelpro_vision.io.condense import condense_video
@@ -201,6 +207,11 @@ def _condense_sync(
                 _jobs[job_id]["report_error"] = f"Análise GPU falhou: {exc}"
         else:
             _run_local_analysis(job_id, in_path, court_id, deep, segs)
+
+    # Gemini semantic analysis — runs on the ORIGINAL video (same timeline as
+    # the CV hits) and must happen before the original is deleted.
+    if gemini:
+        _run_gemini_analysis(job_id, in_path, cv_report=_jobs[job_id].get("report"))
 
     _jobs[job_id]["phase"] = "corte do vídeo"
     condense_video(in_path, segs, out_path)
@@ -306,6 +317,44 @@ def _persist_for_review(job_id: str, report: dict) -> None:
         logger.exception("Could not persist review artifacts for job %s", job_id)
 
 
+def _run_gemini_analysis(job_id: str, video: Path, cv_report: dict | None) -> None:
+    """Run Gemini semantic analysis and merge into the existing CV report."""
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    try:
+        from padelpro_vision.analysis.gemini_clip import analyze_with_gemini, gemini_available
+        if not gemini_available(api_key):
+            _jobs[job_id]["gemini_error"] = (
+                "GEMINI_API_KEY não configurada ou google-generativeai não instalado."
+            )
+            return
+        _jobs[job_id]["phase"] = "análise Gemini (semântica)"
+        cv_hits = cv_report.get("shots") if cv_report else None
+        result = analyze_with_gemini(video, api_key, cv_hits=cv_hits)
+
+        gemini_meta = {
+            "tactics":       result.get("tactics", ""),
+            "summary":       result.get("summary", ""),
+            "dominant_side": result.get("dominant_side"),
+            "n_rallies":     result.get("n_rallies"),
+            "n_strokes":     len(result.get("gemini_strokes", [])),
+        }
+        if cv_report is not None:
+            if "merged_hits" in result:
+                cv_report["shots"] = result["merged_hits"]
+            cv_report["gemini"] = gemini_meta
+            _jobs[job_id]["report"] = cv_report
+        else:
+            # Gemini-only (no CV analysis requested)
+            _jobs[job_id]["gemini_report"] = {
+                **gemini_meta,
+                "strokes": result.get("gemini_strokes", []),
+            }
+        logger.info("Gemini analysis done for job %s (%d strokes)", job_id, gemini_meta["n_strokes"])
+    except Exception as exc:
+        logger.exception("Gemini analysis failed for job %s", job_id)
+        _jobs[job_id]["gemini_error"] = f"Gemini falhou: {exc}"
+
+
 def _run_local_analysis(
     job_id: str, in_path: Path, court_id: str, deep: bool, segs: list
 ) -> None:
@@ -339,11 +388,12 @@ def _run_local_analysis(
 
 async def _condense_bg(
     job_id: str, in_path: Path, out_path: Path,
-    analyze: bool = False, court_id: str = "court1", deep: bool = False,
+    analyze: bool = False, court_id: str = "court1",
+    deep: bool = False, gemini: bool = False,
 ) -> None:
     try:
         await asyncio.get_event_loop().run_in_executor(
-            None, lambda: _condense_sync(job_id, in_path, out_path, analyze, court_id, deep)
+            None, lambda: _condense_sync(job_id, in_path, out_path, analyze, court_id, deep, gemini)
         )
         _jobs[job_id]["status"] = "done"
         logger.info("Condense job %s done.", job_id)

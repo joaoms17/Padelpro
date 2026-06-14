@@ -238,8 +238,24 @@ export interface ClipReport {
   };
   players: PlayerReport[];
   rallies: { i: number; start_s: number; dur_s: number; hits: number }[];
-  shots: { t_s: number; rally: number; player_id: number; pos: [number, number] | null; type: string }[];
+  shots: { t_s: number; rally: number; player_id: number; pos: [number, number] | null; type: string; outcome?: string; gemini_matched?: boolean }[];
   timings_s: Record<string, number>;
+  gemini?: {
+    tactics: string;
+    summary: string;
+    dominant_side: string | null;
+    n_rallies: number | null;
+    n_strokes: number;
+  };
+}
+
+export interface GeminiReport {
+  tactics: string;
+  summary: string;
+  dominant_side: string | null;
+  n_rallies: number | null;
+  n_strokes: number;
+  strokes: { t_s: number; player_pos: string; type: string; outcome: string }[];
 }
 
 export interface CondenseStatus {
@@ -255,9 +271,11 @@ export interface CondenseStatus {
   error?: string;
   report?: ClipReport;
   report_error?: string;
+  gemini_report?: GeminiReport;
+  gemini_error?: string;
 }
 
-export async function getCondenseCapabilities(): Promise<{ analyze: boolean; max_upload_mb?: number }> {
+export async function getCondenseCapabilities(): Promise<{ analyze: boolean; gemini: boolean; max_upload_mb?: number }> {
   const r = await apiFetch(`${BASE}/condense/capabilities`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
@@ -265,7 +283,7 @@ export async function getCondenseCapabilities(): Promise<{ analyze: boolean; max
 
 export async function uploadForCondense(
   file: File,
-  opts?: { analyze?: boolean; courtId?: string; deep?: boolean },
+  opts?: { analyze?: boolean; courtId?: string; deep?: boolean; gemini?: boolean },
 ): Promise<{ job_id: string }> {
   const fd = new FormData();
   fd.append("file", file);
@@ -274,6 +292,7 @@ export async function uploadForCondense(
     fd.append("court_id", opts.courtId || "court1");
     if (opts.deep) fd.append("deep", "true");
   }
+  if (opts?.gemini) fd.append("gemini", "true");
   const r = await apiFetch(`${BASE}/condense/upload`, { method: "POST", body: fd });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
@@ -474,6 +493,84 @@ export async function saveCalibration(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ court_id, points, frame_width, frame_height }),
   });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+// ---- Annotation (training data collection) ----
+
+export interface AnnotationData {
+  rid: string;
+  shots: {
+    ts_ms: number;
+    player_id: number;
+    stroke_type: string;
+    pos?: [number, number] | null;
+  }[];
+  video_available: boolean;
+  n_ball_annotations: number;
+}
+
+export interface AnnotationSubmission {
+  balls: {
+    ts_ms: number;
+    x_norm: number;
+    y_norm: number;
+    radius_norm: number;
+    frame_w: number;
+    frame_h: number;
+    court_x?: number | null;
+    court_y?: number | null;
+  }[];
+  outcomes: { ts_ms: number; player_id: number; outcome: string }[];
+  player_ids: { ts_ms: number; original_player_id: number; corrected_player_id: number }[];
+}
+
+export async function getAnnotationData(rid: string): Promise<AnnotationData> {
+  const r = await apiFetch(`${BASE}/annotate/${rid}`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function getAnnotationFrame(
+  rid: string,
+  ts_ms: number
+): Promise<{ blob: Blob; width: number; height: number }> {
+  const r = await apiFetch(`${BASE}/annotate/${rid}/frame?ts_ms=${ts_ms}`);
+  if (!r.ok) throw new Error(await r.text());
+  const blob = await r.blob();
+  const width = Number(r.headers.get("X-Frame-Width")) || 0;
+  const height = Number(r.headers.get("X-Frame-Height")) || 0;
+  return { blob, width, height };
+}
+
+export async function submitAnnotations(
+  rid: string,
+  body: AnnotationSubmission
+): Promise<{ balls: number; outcomes: number; player_ids: number }> {
+  const r = await apiFetch(`${BASE}/annotate/${rid}/submit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function triggerBallRetrain(): Promise<{ status: string }> {
+  const r = await apiFetch(`${BASE}/annotate/retrain/ball`, { method: "POST" });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function triggerPlayerRetrain(): Promise<{ status: string }> {
+  const r = await apiFetch(`${BASE}/annotate/retrain/player`, { method: "POST" });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function getAnnotateRetrainStatus(): Promise<Record<string, { status: string; detail?: string; n_samples?: number }>> {
+  const r = await apiFetch(`${BASE}/annotate/retrain/status`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }

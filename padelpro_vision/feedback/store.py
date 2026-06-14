@@ -127,3 +127,79 @@ def corrections_to_golden_hits(corrections: list[Correction]) -> list[dict]:
             hit["stroke_type"] = label
         hits.append(hit)
     return hits
+
+
+# ---- New annotation types (training data beyond stroke classification) ----
+
+OUTCOMES = ("winner", "unforced_error", "forced_error", "let", "continuation")
+
+
+@dataclass
+class OutcomeAnnotation:
+    ts_ms: float
+    player_id: int
+    outcome: str  # one of OUTCOMES
+
+
+@dataclass
+class PlayerIdAnnotation:
+    ts_ms: float
+    original_player_id: int
+    corrected_player_id: int
+
+
+@dataclass
+class BallAnnotation:
+    ts_ms: float
+    x_norm: float           # centre x, 0-1 relative to frame width
+    y_norm: float           # centre y, 0-1 relative to frame height
+    radius_norm: float      # radius relative to min(frame_w, frame_h)
+    frame_w: int
+    frame_h: int
+    court_x: float | None = None
+    court_y: float | None = None
+    frame_path: str | None = None  # relative path under data/dataset/ball/
+
+
+def save_outcomes(rid: str, items: list[OutcomeAnnotation], feedback_dir: Path) -> Path:
+    feedback_dir = Path(feedback_dir)
+    feedback_dir.mkdir(parents=True, exist_ok=True)
+    path = feedback_dir / f"{rid}_outcomes.json"
+    with open(path, "w") as f:
+        json.dump([asdict(a) for a in items], f, indent=2)
+    return path
+
+
+def load_outcomes(rid: str, feedback_dir: Path) -> list[dict]:
+    path = Path(feedback_dir) / f"{rid}_outcomes.json"
+    if not path.exists():
+        return []
+    with open(path) as f:
+        return json.load(f)
+
+
+def save_player_id_annotations(rid: str, items: list[PlayerIdAnnotation], feedback_dir: Path) -> Path:
+    feedback_dir = Path(feedback_dir)
+    feedback_dir.mkdir(parents=True, exist_ok=True)
+    path = feedback_dir / f"{rid}_player_ids.json"
+    with open(path, "w") as f:
+        json.dump([asdict(a) for a in items], f, indent=2)
+    return path
+
+
+def save_ball_annotations(rid: str, items: list[BallAnnotation], feedback_dir: Path) -> Path:
+    feedback_dir = Path(feedback_dir)
+    feedback_dir.mkdir(parents=True, exist_ok=True)
+    path = feedback_dir / f"{rid}_ball.json"
+    with open(path, "w") as f:
+        json.dump([asdict(a) for a in items], f, indent=2)
+    return path
+
+
+def load_all_ball_annotations(feedback_dir: Path) -> list[dict]:
+    """Load ball annotations across ALL rids for training."""
+    result: list[dict] = []
+    for p in Path(feedback_dir).glob("*_ball.json"):
+        with open(p) as f:
+            result.extend(json.load(f))
+    return result

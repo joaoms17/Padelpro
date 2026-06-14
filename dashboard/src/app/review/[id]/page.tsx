@@ -34,6 +34,8 @@ type Verdict = Correction["verdict"];
 interface RowState {
   verdict: Verdict | null;
   correctedType: string;
+  outcome: string;
+  correctedPlayerId: number | null;
 }
 
 export default function ReviewPage({ params }: { params: { id: string } }) {
@@ -57,6 +59,8 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
         setRows(d.items.map((item) => ({
           verdict: null,
           correctedType: d.stroke_classes.find((c) => c !== item.stroke_type) ?? "smash",
+          outcome: "",
+          correctedPlayerId: null,
         })));
       })
       .catch((e) => setError(String(e)));
@@ -130,6 +134,12 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
   const setCorrectedType = (i: number, t: string) =>
     setRows((r) => r.map((row, j) => (j === i ? { ...row, correctedType: t } : row)));
 
+  const setOutcome = (i: number, v: string) =>
+    setRows((r) => r.map((row, j) => (j === i ? { ...row, outcome: v } : row)));
+
+  const setCorrectPlayer = (i: number, p: number, originalId: number) =>
+    setRows((r) => r.map((row, j) => (j === i ? { ...row, correctedPlayerId: p === originalId ? null : p } : row)));
+
   const addMissed = () => {
     const v = videoRef.current;
     if (!v) return;
@@ -202,6 +212,9 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
           {reviewed + missed.length}/{data.items.length} revistas
           {data.items.some((i) => i.trainable) ? " · alimenta o treino do modelo" : " · só avaliação (sem pose guardada)"}
         </span>
+        <Link href={`/annotate/${rid}`} className="ml-auto text-xs text-blue-400 hover:text-blue-300 border border-blue-800 rounded-lg px-3 py-1">
+          🎯 Anotar para treino
+        </Link>
       </div>
 
       <p className="text-sm text-gray-400">
@@ -295,9 +308,14 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
               row={rows[i]}
               isSelected={i === selected}
               strokeClasses={data.stroke_classes}
+              outcome={rows[i]?.outcome ?? ""}
+              correctedPlayerId={rows[i]?.correctedPlayerId ?? null}
+              originalPlayerId={item.player_id}
               onSeek={() => { setSelected(i); seekTo(item.ts_ms); }}
               onVerdict={(v) => setVerdict(i, v)}
               onType={(t) => setCorrectedType(i, t)}
+              onOutcome={(v) => setOutcome(i, v)}
+              onPlayer={(p) => setCorrectPlayer(i, p, item.player_id)}
             />
           ))}
         </div>
@@ -348,17 +366,27 @@ function StrokeRow({
   row,
   isSelected,
   strokeClasses,
+  outcome,
+  correctedPlayerId,
+  originalPlayerId,
   onSeek,
   onVerdict,
   onType,
+  onOutcome,
+  onPlayer,
 }: {
   item: ReviewItem;
   row: RowState;
   isSelected: boolean;
   strokeClasses: string[];
+  outcome: string;
+  correctedPlayerId: number | null;
+  originalPlayerId: number;
   onSeek: () => void;
   onVerdict: (v: Verdict) => void;
   onType: (t: string) => void;
+  onOutcome: (v: string) => void;
+  onPlayer: (p: number) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -401,6 +429,27 @@ function StrokeRow({
           {verdictBtn("correct", "✓", "bg-green-700 text-white", "bg-gray-800 text-green-400 hover:bg-gray-700")}
           {verdictBtn("wrong_class", "✎", "bg-yellow-600 text-white", "bg-gray-800 text-yellow-400 hover:bg-gray-700")}
           {verdictBtn("not_a_shot", "✗", "bg-red-700 text-white", "bg-gray-800 text-red-400 hover:bg-gray-700")}
+        </div>
+        <div className="flex items-center gap-1.5 ml-1" onClick={(e) => e.stopPropagation()}>
+          <select
+            value={outcome}
+            onChange={(e) => onOutcome(e.target.value)}
+            className="bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-xs text-gray-400 max-w-[110px]"
+          >
+            <option value="">resultado?</option>
+            <option value="winner">Winner</option>
+            <option value="unforced_error">Erro n.f.</option>
+            <option value="forced_error">Erro f.</option>
+            <option value="let">Let</option>
+            <option value="continuation">Continua</option>
+          </select>
+          <select
+            value={correctedPlayerId ?? originalPlayerId}
+            onChange={(e) => onPlayer(Number(e.target.value))}
+            className={`bg-gray-800 border rounded px-1.5 py-0.5 text-xs max-w-[50px] ${correctedPlayerId !== null ? "border-yellow-600 text-yellow-300" : "border-gray-700 text-gray-500"}`}
+          >
+            {[1, 2, 3, 4].map((p) => <option key={p} value={p}>J{p}</option>)}
+          </select>
         </div>
       </div>
 

@@ -8,6 +8,7 @@ import {
   getCondenseCapabilities,
   condenseDownloadUrl,
   type CondenseStatus,
+  type GeminiReport,
 } from "@/lib/api";
 import { ClipReportView } from "@/components/ClipReport";
 
@@ -33,8 +34,10 @@ export function CondenseForm() {
   const [fileMB, setFileMB] = useState<number | null>(null);
   const [error, setError] = useState("");
   const [canAnalyze, setCanAnalyze] = useState(false);
+  const [canGemini, setCanGemini] = useState(false);
   const [analyze, setAnalyze] = useState(false);
   const [deep, setDeep] = useState(false);
+  const [gemini, setGemini] = useState(false);
   const [courtId, setCourtId] = useState("court1");
   const [maxMB, setMaxMB] = useState(DEFAULT_MAX_MB);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -43,9 +46,10 @@ export function CondenseForm() {
     getCondenseCapabilities()
       .then((c) => {
         setCanAnalyze(!!c.analyze);
+        setCanGemini(!!c.gemini);
         if (c.max_upload_mb && c.max_upload_mb > 0) setMaxMB(c.max_upload_mb);
       })
-      .catch(() => setCanAnalyze(false));
+      .catch(() => { setCanAnalyze(false); setCanGemini(false); });
   }, []);
 
   const poll = useCallback(async () => {
@@ -93,7 +97,7 @@ export function CondenseForm() {
     setJobId(null);
     setUploading(true);
     try {
-      const { job_id } = await uploadForCondense(file, { analyze, courtId, deep });
+      const { job_id } = await uploadForCondense(file, { analyze, courtId, deep, gemini });
       setJobId(job_id);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -135,21 +139,23 @@ export function CondenseForm() {
         )}
       </div>
 
-      {canAnalyze && (
+      {(canAnalyze || canGemini) && (
         <div className="bg-gray-900 border border-gray-800 rounded-lg p-3 space-y-2">
-          <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={analyze}
-              disabled={busy}
-              onChange={(e) => setAnalyze(e.target.checked)}
-              className="accent-emerald-500 w-4 h-4"
-            />
-            <span>
-              📊 Analisar jogadores <span className="text-gray-500">(beta — distâncias, zonas, heatmap, pancadas)</span>
-            </span>
-          </label>
-          {analyze && (
+          {canAnalyze && (
+            <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={analyze}
+                disabled={busy}
+                onChange={(e) => setAnalyze(e.target.checked)}
+                className="accent-emerald-500 w-4 h-4"
+              />
+              <span>
+                📊 Analisar jogadores <span className="text-gray-500">(distâncias, zonas, heatmap)</span>
+              </span>
+            </label>
+          )}
+          {analyze && canAnalyze && (
             <>
               <div className="flex items-center gap-2 text-xs text-gray-400 pl-6">
                 <span>Campo:</span>
@@ -177,6 +183,21 @@ export function CondenseForm() {
                 </span>
               </label>
             </>
+          )}
+          {canGemini && (
+            <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={gemini}
+                disabled={busy}
+                onChange={(e) => setGemini(e.target.checked)}
+                className="accent-blue-500 w-4 h-4"
+              />
+              <span>
+                🤖 Análise Gemini{" "}
+                <span className="text-gray-500">(tipos de pancada, tática — ~€0.01/jogo)</span>
+              </span>
+            </label>
           )}
         </div>
       )}
@@ -234,8 +255,14 @@ export function CondenseForm() {
           {job.report_error && (
             <p className="text-sm text-yellow-400">{job.report_error}</p>
           )}
+          {job.gemini_error && (
+            <p className="text-sm text-yellow-400">Gemini: {job.gemini_error}</p>
+          )}
           {job.report && <ClipReportView report={job.report} />}
-          {job.report && (
+          {(job.report?.gemini || job.gemini_report) && (
+            <GeminiInsights gemini={job.report?.gemini ?? job.gemini_report!} />
+          )}
+          {(job.report || job.gemini_report) && (
             <a
               href={`/review/${job.job_id}`}
               className="block w-full text-center py-2.5 bg-green-800 hover:bg-green-700 text-white rounded-lg font-medium text-sm transition-colors"
@@ -258,6 +285,27 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div className="bg-gray-800 border border-gray-700 rounded-lg py-3">
       <div className="text-lg font-bold text-white">{value}</div>
       <div className="text-xs text-gray-500">{label}</div>
+    </div>
+  );
+}
+
+function GeminiInsights({ gemini }: { gemini: { tactics: string; summary: string; dominant_side: string | null; n_rallies: number | null; n_strokes: number } }) {
+  const sideLabel: Record<string, string> = {
+    near: "lado próximo domina a rede",
+    far: "lado longe domina a rede",
+    balanced: "equilíbrio na rede",
+  };
+  return (
+    <div className="bg-blue-950/40 border border-blue-800/50 rounded-xl p-4 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium text-blue-300">🤖 Gemini</span>
+        <span className="text-xs text-blue-700">
+          {gemini.n_strokes} pancadas · {gemini.n_rallies != null ? `${gemini.n_rallies} rallies` : ""}
+          {gemini.dominant_side ? ` · ${sideLabel[gemini.dominant_side] ?? gemini.dominant_side}` : ""}
+        </span>
+      </div>
+      {gemini.summary && <p className="text-sm text-gray-300 font-medium">{gemini.summary}</p>}
+      {gemini.tactics && <p className="text-sm text-gray-400">{gemini.tactics}</p>}
     </div>
   );
 }
