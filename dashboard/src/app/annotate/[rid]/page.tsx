@@ -252,10 +252,10 @@ export default function AnnotatePage({ params }: { params: { rid: string } }) {
       <div className="py-20 text-center space-y-3">
         <p className="text-red-400">Não foi possível carregar este ID.</p>
         <Link
-          href="/matches"
+          href="/"
           className="text-sm text-gray-500 hover:text-gray-300"
         >
-          ← Voltar
+          ← Início
         </Link>
       </div>
     );
@@ -279,10 +279,10 @@ export default function AnnotatePage({ params }: { params: { rid: string } }) {
               o modelo.
             </p>
             <Link
-              href="/matches"
+              href="/"
               className="btn-ghost mt-3 inline-block px-4 py-2 text-sm"
             >
-              Ver análises
+              Analisar jogo
             </Link>
           </div>
         </div>

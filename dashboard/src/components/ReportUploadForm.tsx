@@ -1,53 +1,108 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { uploadForReport, uploadUrlForReport } from "@/lib/api";
+import { getApiHealth, uploadForReport, uploadUrlForReport } from "@/lib/api";
 
 type Source = "file" | "url";
+type Phase = "idle" | "waking" | "uploading" | "queued";
 
-/**
- * Primary entry point: upload a whole match (file or link) → Gemini analyses
- * the full video → navigate to the report page that polls for the result.
- */
+const MAX_MB_DEFAULT = 500;
+
 export function ReportUploadForm() {
   const router = useRouter();
   const [source, setSource] = useState<Source>("file");
   const [url, setUrl] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState<Phase>("idle");
   const [error, setError] = useState("");
+  const [fileMB, setFileMB] = useState<number | null>(null);
+  const [maxMB, setMaxMB] = useState(MAX_MB_DEFAULT);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Probe the server on mount so it wakes from sleep early.
+  useEffect(() => {
+    getApiHealth().then(() => {
+      // try to get the reported upload limit
+      fetch(`${process.env.NEXT_PUBLIC_API_URL || "/api/pipeline"}/report/capabilities`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((d) => { if (d?.max_upload_mb) setMaxMB(d.max_upload_mb); })
+        .catch(() => {});
+    }).catch(() => {});
+  }, []);
+
+  const busy = phase !== "idle";
+  const oversize = fileMB != null && fileMB > maxMB;
+
+  function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    setError("");
+    setFileMB(f ? f.size / (1024 * 1024) : null);
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
 
     try {
-      setBusy(true);
+      // Wake-up ping — if the server is sleeping this gives it a head start
+      // and surfaces a clear error instead of a generic "Load failed".
+      setPhase("waking");
+      try {
+        await getApiHealth();
+      } catch {
+        throw new Error(
+          "Servidor indisponível. Aguarda 30 segundos e tenta de novo — o servidor pode estar a iniciar."
+        );
+      }
+
+      setPhase("uploading");
+
       if (source === "url") {
         const link = url.trim();
         if (!/^https?:\/\//.test(link)) {
           setError("Cola um link válido (começa por http).");
-          setBusy(false);
+          setPhase("idle");
           return;
         }
         const { rid } = await uploadUrlForReport(link);
+        setPhase("queued");
         router.push(`/relatorio/${rid}`);
       } else {
         const file = fileRef.current?.files?.[0];
         if (!file) {
           setError("Seleciona um ficheiro de vídeo.");
-          setBusy(false);
+          setPhase("idle");
+          return;
+        }
+        if (file.size > maxMB * 1024 * 1024) {
+          setError(
+            `Ficheiro demasiado grande (${Math.round(file.size / (1024 * 1024))} MB). ` +
+            `Máximo: ${maxMB} MB. Exporta em 720p e tenta de novo.`
+          );
+          setPhase("idle");
           return;
         }
         const { rid } = await uploadForReport(file);
+        setPhase("queued");
         router.push(`/relatorio/${rid}`);
       }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
-      setBusy(false);
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(
+        msg.toLowerCase().includes("load failed") || msg.toLowerCase().includes("failed to fetch")
+          ? "Não foi possível chegar ao servidor. Verifica a ligação e tenta de novo — o servidor pode demorar ~30 s a iniciar."
+          : msg
+      );
+      setPhase("idle");
     }
   }
+
+  const phaseLabel: Record<Phase, string> = {
+    idle: "⚡ Analisar jogo",
+    waking: "A verificar servidor…",
+    uploading: "A enviar vídeo…",
+    queued: "Na fila…",
+  };
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
@@ -69,22 +124,29 @@ export function ReportUploadForm() {
 
       {source === "file" ? (
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Vídeo do jogo
-          </label>
+          <div className="flex items-baseline justify-between mb-2">
+            <label className="block text-sm font-medium text-gray-300">Vídeo do jogo</label>
+            <span className={`text-xs ${oversize ? "text-red-400" : "text-gray-500"}`}>
+              máx. {maxMB} MB
+            </span>
+          </div>
           <input
             ref={fileRef}
             type="file"
             accept="video/*"
             disabled={busy}
+            onChange={onPick}
             className="w-full text-sm text-gray-400 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-brand file:text-navy-950 file:text-sm file:font-bold hover:file:bg-brand-dark cursor-pointer disabled:opacity-50"
           />
+          {fileMB != null && (
+            <p className={`text-xs mt-1 ${oversize ? "text-red-400" : "text-gray-500"}`}>
+              {Math.round(fileMB)} MB {oversize ? "— acima do limite, exporta em 720p" : ""}
+            </p>
+          )}
         </div>
       ) : (
         <div>
-          <label className="block text-sm font-medium text-gray-300 mb-2">
-            Link do vídeo
-          </label>
+          <label className="block text-sm font-medium text-gray-300 mb-2">Link do vídeo</label>
           <input
             type="url"
             inputMode="url"
@@ -102,17 +164,13 @@ export function ReportUploadForm() {
 
       <button
         type="submit"
-        disabled={busy}
-        className="btn-primary w-full py-3 flex items-center justify-center gap-2"
+        disabled={busy || oversize}
+        className="btn-primary w-full py-3 flex items-center justify-center gap-2 disabled:opacity-50"
       >
-        {busy ? (
-          <>
-            <span className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-            A enviar…
-          </>
-        ) : (
-          "⚡ Analisar jogo"
+        {busy && (
+          <span className="inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
         )}
+        {phaseLabel[phase]}
       </button>
 
       {error && <p className="text-sm text-red-400">{error}</p>}

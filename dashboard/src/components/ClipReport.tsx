@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import type { ClipReport, PlayerReport } from "@/lib/api";
 import { HeatmapGrid } from "./HeatmapGrid";
 import { ClipGeminiInsights } from "./GeminiInsights";
@@ -92,9 +91,7 @@ export function ClipReportView({ report }: { report: ClipReport }) {
 
       {!report.calibrated && (
         <div className="text-sm text-yellow-300 bg-yellow-900/20 border border-yellow-800 rounded-lg p-3">
-          Campo não calibrado — posições, zonas e velocidades indisponíveis.{" "}
-          <Link href="/calibrate" className="underline">Calibrar campo &quot;{report.court_id}&quot;</Link>{" "}
-          e volta a analisar.
+          Campo não calibrado — posições, zonas e velocidades indisponíveis.
         </div>
       )}
 

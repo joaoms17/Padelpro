@@ -9,50 +9,8 @@ const BASE = process.env.NEXT_PUBLIC_API_URL?.trim()
   ? process.env.NEXT_PUBLIC_API_URL.trim().replace(/\/$/, "")
   : "/api/pipeline";
 
-// ---- Shared access code (set on the API via PADELPRO_ACCESS_CODE) ----
-// Stored in localStorage after the first prompt; sent as a header on fetches
-// and as ?code= on media URLs (<video src> can't send headers).
-
-const CODE_KEY = "padelpro_access_code";
-
-function getAccessCode(): string {
-  if (typeof window === "undefined") return "";
-  return localStorage.getItem(CODE_KEY) ?? "";
-}
-
-export function setAccessCode(code: string): void {
-  localStorage.setItem(CODE_KEY, code);
-}
-
-export function withCode(url: string): string {
-  const code = getAccessCode();
-  if (!code) return url;
-  return `${url}${url.includes("?") ? "&" : "?"}code=${encodeURIComponent(code)}`;
-}
-
-// Set when a request hits 401, so the AccessCodeModal can open even if it
-// mounts slightly after the failing request resolved.
-let _needsCode = false;
-export function consumeNeedsCode(): boolean {
-  const v = _needsCode;
-  _needsCode = false;
-  return v;
-}
-
 async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
-  const doFetch = () => {
-    const headers = new Headers(init?.headers);
-    const code = getAccessCode();
-    if (code) headers.set("X-Access-Code", code);
-    return fetch(url, { ...init, headers });
-  };
-
-  const r = await doFetch();
-  if (r.status === 401 && typeof window !== "undefined") {
-    _needsCode = true;
-    window.dispatchEvent(new CustomEvent("padelpro-needs-code"));
-  }
-  return r;
+  return fetch(url, init);
 }
 
 // ---- API version handshake (ApiBanner) ----
@@ -64,142 +22,6 @@ export async function getApiHealth(): Promise<{ status: string; api_build?: numb
   const r = await fetch(`${BASE}/health`);   // /health is unauthenticated
   if (!r.ok) throw new Error(await r.text());
   return r.json();
-}
-
-export interface MatchStatus {
-  match_id: string;
-  status: string;
-  error_message?: string | null;
-}
-
-export interface PlayerStats {
-  player_id: number;
-  distance_m: number;
-  avg_speed_ms: number;
-  max_speed_ms: number;
-  attack_pct: number;
-  defense_pct: number;
-  transition_pct: number;
-  shots: Record<string, number>;
-  sync_score: number;
-}
-
-export interface Clip {
-  clip_id: number;
-  player_id: number;
-  stroke_type: string;
-  zone: string;
-  rally_phase: string;
-  t_start_ms: number;
-  t_end_ms: number;
-  thumbnail_url: string | null;
-}
-
-export async function createMatch(court_id: string): Promise<MatchStatus> {
-  const r = await apiFetch(`${BASE}/matches/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ court_id }),
-  });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export async function uploadVideo(match_id: string, file: File): Promise<void> {
-  const fd = new FormData();
-  fd.append("file", file);
-  const r = await apiFetch(`${BASE}/matches/${match_id}/upload`, {
-    method: "POST",
-    body: fd,
-  });
-  if (!r.ok) throw new Error(await r.text());
-}
-
-export async function runPipeline(
-  match_id: string,
-  opts: { segment?: boolean; condense?: boolean; pose?: boolean; analytics?: boolean; supabase?: boolean }
-): Promise<MatchStatus> {
-  const r = await apiFetch(`${BASE}/matches/${match_id}/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ match_id, ...opts }),
-  });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export async function deleteMatch(match_id: string): Promise<void> {
-  const r = await apiFetch(`${BASE}/matches/${match_id}`, { method: "DELETE" });
-  if (!r.ok) throw new Error(await r.text());
-}
-
-export async function retryAnalysis(match_id: string): Promise<MatchStatus> {
-  const r = await apiFetch(`${BASE}/matches/${match_id}/retry`, { method: "POST" });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export async function getStatus(match_id: string): Promise<MatchStatus> {
-  const r = await apiFetch(`${BASE}/matches/${match_id}/status`);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export async function listMatches(): Promise<MatchStatus[]> {
-  const r = await apiFetch(`${BASE}/matches/`);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export async function getPlayerStats(match_id: string): Promise<PlayerStats[]> {
-  const r = await apiFetch(`${BASE}/analytics/matches/${match_id}/stats`);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export async function getHeatmap(match_id: string, player_id: number): Promise<number[][]> {
-  const r = await apiFetch(`${BASE}/analytics/matches/${match_id}/heatmap/${player_id}`);
-  if (!r.ok) throw new Error(await r.text());
-  const data = await r.json();
-  return data.heatmap;
-}
-
-export async function queryClips(
-  match_id: string,
-  filters: { player_id?: number; stroke?: string; zone?: string; rally_phase?: string }
-): Promise<Clip[]> {
-  const params = new URLSearchParams();
-  if (filters.player_id != null) params.set("player_id", String(filters.player_id));
-  if (filters.stroke)      params.set("stroke",    filters.stroke);
-  if (filters.zone)        params.set("zone",       filters.zone);
-  if (filters.rally_phase) params.set("rally_phase", filters.rally_phase);
-  const r = await apiFetch(`${BASE}/clips/matches/${match_id}?${params}`);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export async function requestMontage(
-  match_id: string,
-  filters: { player_id?: number; stroke?: string; zone?: string; rally_phase?: string },
-  output_name = "montage.mp4"
-): Promise<{ job_id: string; clips: number }> {
-  const r = await apiFetch(`${BASE}/clips/matches/${match_id}/montage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ match_id, ...filters, output_name }),
-  });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export async function getMontageStatus(job_id: string): Promise<{ status: string; output?: string; error?: string }> {
-  const r = await apiFetch(`${BASE}/clips/montage/${job_id}/status`);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export function montageDownloadUrl(job_id: string): string {
-  return withCode(`${BASE}/clips/montage/${job_id}/download`);
 }
 
 // ---- Condense ("useful time") ----
@@ -323,7 +145,7 @@ export async function getCondenseStatus(job_id: string): Promise<CondenseStatus>
 }
 
 export function condenseDownloadUrl(job_id: string): string {
-  return withCode(`${BASE}/condense/${job_id}/download`);
+  return `${BASE}/condense/${job_id}/download`;
 }
 
 // ---- Review & feedback (human-in-the-loop training) ----
@@ -363,6 +185,7 @@ export interface Correction {
 }
 
 export async function getReviewData(rid: string): Promise<ReviewData> {
+
   const r = await apiFetch(`${BASE}/review/${rid}`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
@@ -382,96 +205,7 @@ export async function submitReview(
 }
 
 export function reviewVideoUrl(rid: string): string {
-  return withCode(`${BASE}/review/${rid}/video`);
-}
-
-// ---- Fleet quality ----
-
-export interface QualityReport {
-  match_id: string;
-  generated_at: number;
-  detection?: {
-    frames_processed: number;
-    mean_detection_confidence: number;
-    mean_players_per_frame: number;
-    pct_frames_with_expected_players: number;
-    pct_frames_with_zero_players: number;
-  };
-  tracking?: {
-    n_tracks: number;
-    tracks_per_minute: number;
-    avg_track_duration_s: number;
-    pct_time_with_expected_players: number;
-  };
-  physics?: {
-    pct_implausible_speed: number;
-    max_observed_speed_ms: number;
-    teleport_count: number;
-    pct_out_of_court: number;
-  } | null;
-  strokes?: {
-    n_events: number;
-    mean_confidence: number;
-    pct_with_audio_onset: number;
-  };
-  performance?: {
-    elapsed_s: number;
-    realtime_factor: number;
-  };
-  homography_quality?: { rating: string; reprojection_error_px: number | null } | null;
-}
-
-export interface FleetQuality {
-  n_matches: number;
-  summary: Record<string, number>;
-  reports: QualityReport[];
-}
-
-export async function getFleetQuality(): Promise<FleetQuality> {
-  const r = await apiFetch(`${BASE}/quality/`);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-// ---- Court calibration ----
-
-export async function autoDetectCorners(
-  image: Blob
-): Promise<{ points: number[][]; quality: { rating: string; reprojection_error_px: number | null } }> {
-  const fd = new FormData();
-  fd.append("file", image, "frame.jpg");
-  const r = await apiFetch(`${BASE}/calibrate/auto`, { method: "POST", body: fd });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-/** Server-side frame extraction — handles HEVC/H.265 the browser can't decode. */
-export async function extractCalibrationFrame(
-  video: File
-): Promise<{ blob: Blob; width: number; height: number }> {
-  const fd = new FormData();
-  fd.append("file", video);
-  const r = await apiFetch(`${BASE}/calibrate/extract-frame`, { method: "POST", body: fd });
-  if (!r.ok) throw new Error(await r.text());
-  const blob = await r.blob();
-  const width = Number(r.headers.get("X-Frame-Width")) || 0;
-  const height = Number(r.headers.get("X-Frame-Height")) || 0;
-  return { blob, width, height };
-}
-
-export async function saveCalibration(
-  court_id: string,
-  points: number[][],
-  frame_width: number,
-  frame_height: number,
-): Promise<{ court_id: string; saved: boolean }> {
-  const r = await apiFetch(`${BASE}/calibrate/save`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ court_id, points, frame_width, frame_height }),
-  });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  return `${BASE}/review/${rid}/video`;
 }
 
 // ---- Annotation (training data collection) ----
@@ -560,10 +294,12 @@ export interface ReportStatus {
   phase?: string;
   filename?: string;
   error?: string;
+  condensed_available?: boolean;
 }
 
 export interface MatchReport {
   rid: string;
+  condensed_available?: boolean;
   duration_s: number;
   final_score: { team1_sets: number; team2_sets: number; detail: string };
   match_summary: string;
@@ -613,11 +349,15 @@ export async function getReport(rid: string): Promise<MatchReport> {
 }
 
 export function reportFrameUrl(rid: string, idx: number): string {
-  return withCode(`${BASE}/report/${rid}/frames/${idx}`);
+  return `${BASE}/report/${rid}/frames/${idx}`;
 }
 
 export function reportTrainingDataUrl(rid: string): string {
-  return withCode(`${BASE}/report/${rid}/training-data`);
+  return `${BASE}/report/${rid}/training-data`;
+}
+
+export function reportCondensedUrl(rid: string): string {
+  return `${BASE}/report/${rid}/condensed`;
 }
 
 // ---- Model progression / levels (Part 2) ----
