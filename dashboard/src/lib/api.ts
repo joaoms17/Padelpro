@@ -288,6 +288,75 @@ export async function getAnnotateRetrainStatus(): Promise<Record<string, { statu
 
 // ---- Full-match Gemini report (Part 1) ----
 
+export interface MatchPlayer {
+  player: 1 | 2 | 3 | 4;
+  shirt_color: string;
+  team: "near" | "far";
+  side: "left" | "right";
+}
+
+export interface MatchJogador {
+  id: "A1" | "A2" | "B1" | "B2";
+  equipa: "A" | "B";
+  descricao_visual: string;
+}
+
+export interface MatchPancada {
+  timestamp: string; // "HH:MM:SS"
+  jogador: "A1" | "A2" | "B1" | "B2";
+  tipo: "volley" | "forehand" | "backhand" | "smash" | "overhead" | "saida_vidro" | "serve" | "indefinido";
+  zona: string;
+  segunda_bola?: boolean;
+}
+
+export interface MatchFase {
+  fase: "ATAQUE" | "TRANSIÇÃO" | "DEFESA";
+  equipa: "A" | "B";
+  inicio: string;
+  fim: string;
+  momento?: "servico";
+  timestamp_servico?: string;
+  posicao_A1?: string;
+  posicao_A2?: string;
+  posicao_B1?: string;
+  posicao_B2?: string;
+}
+
+export interface MatchRallyV2 {
+  id: number;
+  inicio: string;
+  fim: string;
+  servidor: string;
+  servico_valido: boolean;
+  equipa_ganha_ponto: "A" | "B" | null;
+  fases: MatchFase[];
+  pancadas: MatchPancada[];
+}
+
+export interface MatchPausa {
+  id: number;
+  inicio: string;
+  fim: string;
+  duracao_segundos: number;
+  tipo_pausa: "troca_de_campo" | "discussao" | "lesao" | "indefinido";
+}
+
+export interface MatchResumo {
+  total_rallies: number;
+  trocas_de_campo: number;
+  primeiro_servidor: string | null;
+  duracao_total_jogo: string;
+  duracao_util: string;
+  pontuacao_final: string;
+  resumo_jogo: string;
+  tempo_por_fase: {
+    A: { ATAQUE: string; TRANSIÇÃO: string; DEFESA: string };
+    B: { ATAQUE: string; TRANSIÇÃO: string; DEFESA: string };
+  };
+  eventos_incomuns: string[];
+  confianca: number;
+}
+
 export interface ReportStatus {
   rid: string;
   status: string;            // processing | done | error
@@ -295,13 +364,6 @@ export interface ReportStatus {
   filename?: string;
   error?: string;
   condensed_available?: boolean;
-}
-
-export interface MatchPlayer {
-  player: 1 | 2 | 3 | 4;
-  shirt_color: string;
-  team: "near" | "far";
-  side: "left" | "right";
 }
 
 export interface MatchReport {
@@ -328,6 +390,11 @@ export interface MatchReport {
   rallies: { start_s: number; end_s: number; num_shots: number; winner_team: 1 | 2 | null }[];
   ball_trajectory?: { t_s: number; x: number; y: number; vx: number; vy: number; conf: number; predicted?: boolean }[];
   ball_trajectory_source?: "kalman" | "interpolated";
+  // v2 schema fields (new prompt)
+  jogadores?: MatchJogador[];
+  resumo?: MatchResumo;
+  pausas?: MatchPausa[];
+  // Note: rallies field is overloaded — v2 reports use MatchRallyV2[], v1 used old format
 }
 
 export interface ReportHistoryEntry {

@@ -5,12 +5,14 @@ Unlike `gemini_clip.py` (which only extracts stroke type/outcome and merges
 them onto CV-detected hits), this module asks Gemini to read the ENTIRE match
 and return a self-contained report:
 
-  - player_positions over time      → court heatmap
+  - jogadores (player identification with visual description)
+  - rallies with fases (phases) and pancadas (shots)
+  - resumo (summary with durations, score, phase time breakdown)
+  - pausas (breaks and side changes)
+  - player_positions over time      → court heatmap (derived from zones)
   - final_score (Gemini's guess)     → user validates the model's accuracy
   - shot_counts per player and type  → who hit what, how often
-  - formation_samples over time      → % time in each net/back configuration
-  - key_frames (4 players + ball)    → example frames we can show and reuse
-  - rallies (active-play segments)   → useful-time stats and training segments
+  - rallies_compat (active-play segments) → useful-time stats
 
 Everything here runs with NO torch — only google-genai + ffmpeg/cv2 — so it
 works on the light Render image. The outputs double as labels for training our
@@ -32,7 +34,7 @@ GEMINI_MODEL = "gemini-2.5-flash"
 # How the report's normalised court coordinates are oriented:
 #   court_x: 0.0 = left edge, 1.0 = right edge (as seen from the camera)
 #   court_y: 0.0 = near baseline (closest to camera), 1.0 = far baseline
-# Players 1 & 2 are the near team; players 3 & 4 are the far team.
+# Players 1 & 2 are the near team (Equipa A); players 3 & 4 are the far team (Equipa B).
 
 SHOT_TYPES = ("forehand", "backhand", "volley", "smash", "bandeja",
               "vibora", "serve", "lob", "other")
@@ -40,183 +42,163 @@ SHOT_TYPES = ("forehand", "backhand", "volley", "smash", "bandeja",
 FORMATIONS = ("both_net", "both_back", "split_near_net", "split_far_net", "mixed")
 
 _MATCH_PROMPT = """
-You are an expert padel coach with 20 years of experience. You are analysing a match
-video filmed from behind the near baseline. Be methodical — never guess or average data.
+Analisa este vídeo de padel. Antes de gerar qualquer JSON, escreve um bloco de raciocínio entre <raciocinio> e </raciocinio> onde:
+1. Identificas os 4 jogadores e descreves os seus elementos visuais
+2. Confirmas a posição inicial (esquerda/direita) de cada equipa
+3. Verificas as tuas deteções antes de as confirmar no JSON
+4. Para cada rally, rastreias as mudanças de posição coletiva de cada equipa e registas o timestamp exacto de cada transição de fase
+5. Cada vez que a posição coletiva de uma equipa muda claramente, fechas a fase anterior e abres uma nova. Só registas uma mudança de fase quando a mudança é visualmente confirmada
+6. No resumo do JSON incluis: duracao_util (duração total menos todas as pausas) e tempo_por_fase com o total acumulado por fase (ATAQUE / TRANSIÇÃO / DEFESA) para cada equipa
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 1 — PLAYER IDENTIFICATION (first 10 seconds)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Pause on the opening seconds. Note each player's shirt colour:
-  Player 1 = NEAR team, LEFT side   court_x ≈ 0.15-0.45, court_y < 0.5
-  Player 2 = NEAR team, RIGHT side  court_x ≈ 0.55-0.85, court_y < 0.5
-  Player 3 = FAR  team, LEFT side   court_x ≈ 0.15-0.45, court_y > 0.5
-  Player 4 = FAR  team, RIGHT side  court_x ≈ 0.55-0.85, court_y > 0.5
+## 1. IDENTIFICAÇÃO DOS JOGADORES
+No início do vídeo, identifica os 4 jogadores com base nos seguintes elementos visuais:
+- Cor e padrão da camisola
+- Cor dos calções
+- Cor e padrão das meias
+- Cor e modelo dos ténis
+- Modelo e cor da raquete
 
-NEAR team = closer to the camera. FAR team = far end of the court.
-For the rest of the video, identify each hitter by shirt colour — NOT by position.
-If teammates swap sides, follow the COLOUR.
+Se dois jogadores tiverem elementos similares, usa a combinação dos restantes fatores para os distinguir.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 2 — COURT AND PHYSICS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Padel court: 10 m wide × 20 m long, enclosed by glass back walls and metal side mesh.
-The net divides at y = 0.5. Glass back wall: y = 0.0 (near) and y = 1.0 (far).
+A referência de posição é sempre a parte inferior do bounding box — não a cabeça nem o tronco.
 
-IMPORTANT: The ball CAN and DOES bounce off the glass walls — this is legal and common.
-A ball hitting the back glass and rebounding is NOT a new shot.
-Shot count increments ONLY when a RACKET contacts the ball.
+Atribui as seguintes IDs:
+- Equipa A: A1 (lado esquerdo) e A2 (lado direito)
+- Equipa B: B1 (lado esquerdo) e B2 (lado direito)
 
-Coordinate system (all 0.0–1.0):
-  court_x: 0.0 = left edge  → 1.0 = right edge  (as seen from camera)
-  court_y: 0.0 = near baseline → 0.5 = net → 1.0 = far baseline
+Esquerda/direita serve apenas para identificação inicial — a posição muda ao longo do jogo.
 
-Typical positions by role:
-  Back-left player (P1 or P3):   court_x ≈ 0.25, court_y ≈ 0.10 (near) / 0.90 (far)
-  Back-right player (P2 or P4):  court_x ≈ 0.75, court_y ≈ 0.10 (near) / 0.90 (far)
-  Net-left player:                court_x ≈ 0.25, court_y ≈ 0.38 (near) / 0.62 (far)
-  Net-right player:               court_x ≈ 0.75, court_y ≈ 0.38 (near) / 0.62 (far)
-  Defending deep:                 court_y ≈ 0.05-0.18 (near) / 0.82-0.95 (far)
-  Attacking at net:               court_y ≈ 0.32-0.45 (near) / 0.55-0.68 (far)
+## 2. SISTEMA DE ZONAS DO CAMPO
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 3 — SHOT TYPE VISUAL GUIDE
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Identify EACH racket-ball contact:
+Zonas do campo, da rede para o fundo:
+- ML1: 1ª malha (junto à rede) — ATAQUE
+- ML2: 2ª malha — ATAQUE
+- ML3: 3ª malha + espaço até à linha de serviço — TRANSIÇÃO
+- VL1: 1º vidro lateral (da linha de serviço até ao VL2) — DEFESA
+- VL2: 2º vidro lateral — DEFESA
+- VF1 a VF5: Vidro de fundo da direita (VF1) para a esquerda (VF5) — DEFESA
 
-serve    — underarm swing; the ball bounces in the diagonal service box. Always the
-           FIRST shot of a point. Hitter is near the back glass.
-forehand — swing with dominant arm on the dominant side of body, at low-to-mid height.
-           Player faces the ball, weight transfers forward.
-backhand — swing crossing the body to the non-dominant side, at low-to-mid height.
-           Compact rotation, often two-handed.
-volley   — player is at the net (court_y ≈ 0.33-0.45 or 0.55-0.67).
-           Ball hit WITHOUT letting it bounce. Short, punching motion.
-smash    — overhead hit with full arm extension, ball above shoulder level.
-           Aggressive power shot — intended winner or to force the opponent back.
-bandeja  — defensive overhead at shoulder height with slice, pushing the ball
-           deep and cross-court. Player stays near the net after hitting.
-           Less arm extension than smash. Ball goes high and soft.
-vibora   — offensive overhead with sharp wrist snap/topspin, aimed at the side glass.
-           Player moves FORWARD after hitting. Generates spin, low bounce.
-lob      — high, slow, arching shot aimed to pass OVER the net players.
-           Trajectory: very high arc, lands deep near the far baseline.
-other    — any contact that doesn't fit the above categories.
+A linha de serviço é a fronteira entre ML3 (TRANSIÇÃO) e VL1 (DEFESA).
 
-Outcome of each shot:
-  winner        — opponent team cannot return the ball legally (point won directly).
-  unforced_error — hitter makes a mistake NOT caused by opponent's pressure.
-                   e.g. easy ball sent into the net or out.
-  forced_error  — hitter makes a mistake BECAUSE of opponent's difficult shot.
-  continuation  — the rally continues normally after this shot.
-  let           — serve clips the net and lands correctly in service box (redo serve).
+## 3. FASES DE JOGO
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-STEP 4 — SCAN METHODOLOGY (do this before writing JSON)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Scan the video in 30-second segments. For EACH segment mentally note:
-  a) How many shots occurred and WHO hit each one (identify by shirt colour).
-  b) Position of each player at the midpoint of the segment.
-  c) Formation (both teams at net? both back? split?).
+As fases são determinadas pela posição coletiva da equipa:
+- ATAQUE: Ambos os jogadores da equipa em ML1 ou ML2
+- TRANSIÇÃO: Um ou ambos os jogadores na zona ML3
+- DEFESA: Ambos os jogadores em VL1, VL2 ou VF1-VF5
 
-This segment-by-segment method prevents you from estimating totals.
-Count each segment precisely, then sum.
+NOTA — SERVIÇO: O serviço não é uma fase separada. É um momento (momento: "servico") registado dentro da fase ATAQUE da equipa que serve. O parceiro já está em ML1/ML2; o servidor executa a partir de VL1/VL2/VF mas a equipa mantém a fase ATAQUE. Regista o timestamp_servico na fase.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FORBIDDEN PATTERNS — ALWAYS WRONG
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-❌ All 4 players with equal or near-equal shot counts.
-   Real padel is UNEVEN: the dominant player hits 25-40% of their team's shots.
-   WRONG example: P1=25, P2=25, P3=25, P4=25 — this is always a hallucination.
-   RIGHT example: P1=38, P2=19, P3=31, P4=22 — uneven counts are normal.
+NOTA — 2ª BOLA: A primeira pancada da equipa receptora após o serviço é a "2ª bola". Regista "segunda_bola": true na pancada correspondente.
 
-❌ Two teammates at the same court_x (or within 0.20 of each other).
-   Teammates always maintain ≥0.25 horizontal (court_x) separation.
+Regras obrigatórias:
+- A fase só muda quando o bounding box ou os pés do(s) jogador(es) mudam claramente de zona
+- Em caso de dúvida, mantém a fase anterior
+- Uma equipa não pode passar directamente de DEFESA para ATAQUE sem TRANSIÇÃO (excepção: transição demasiado rápida para captar)
 
-❌ Two consecutive shots by the SAME TEAM without an opponent shot between them.
-   Teams MUST alternate: near→far→near→far…
-   (Exception: serve followed by a let is re-served by the same team.)
+## 4. DETECÇÃO DO SERVIÇO
 
-❌ Near-team players (1&2) with court_y ≥ 0.5, or far-team (3&4) with court_y ≤ 0.5.
-   Teams NEVER cross the net in normal play.
+O servidor está atrás da linha de serviço (zona VL1/VL2/VF1-VF5); o parceiro está junto à rede (ML1/ML2).
+A bola cai da mão do servidor, bate no chão, e o servidor bate-a com a raquete.
+A bola vai cruzada para o quadrado de serviço diagonal do adversário.
 
-❌ Attributing a shot to a player who is clearly far from the ball.
-   Always use shirt colour to identify the hitter — check it matches their location.
+Validade:
+- Válido se a bola bate dentro do quadrado de serviço cruzado e não toca na malha
+- Repetição (let): a bola toca na tela da rede mas cai dentro do quadrado cruzado
+- Falta: a bola toca na malha e não entra; ou o receptor não jogou
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SELF-CHECK BEFORE WRITING JSON
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Before writing the JSON, verify:
-  □ All 4 players have DIFFERENT shirt_color values?
-  □ Shot counts across 4 players are DIFFERENT (not all equal or similar)?
-  □ Every player_position for P1 & P2 has court_y < 0.5?
-  □ Every player_position for P3 & P4 has court_y > 0.5?
-  □ P1 & P2 always differ in court_x by ≥0.25?
-  □ P3 & P4 always differ in court_x by ≥0.25?
-  □ No two consecutive shots belong to the same team?
-If any check fails, fix the data before outputting.
+## 5. FIM DE RALLY
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OUTPUT — single raw JSON object, NO markdown, NO text before or after
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Um rally termina quando:
+1. A bola saiu do campo; ou está na mão de um jogador; ou tocou duas vezes no chão; ou a mesma equipa tocou nela duas vezes seguidas
+2. Mais de 6 segundos sem nenhuma pancada de nenhum jogador
+3. Dois jogadores cumprimentam-se
+4. Um jogador toca na rede com a raquete ou o corpo durante o rally
+
+## 6. PAUSAS E TROCA DE CAMPO
+
+Uma pausa superior a 45 segundos pode indicar:
+- troca_de_campo: Jogadores estão no lado oposto ao que estavam
+- discussao: Jogadores continuam no mesmo lado
+- lesao: Jogadores dispersos
+- indefinido
+
+Em qualquer pausa > 45 segundos: regista timestamps, duração e tipo.
+
+## 7. TIPOS DE PANCADA
+
+- volley: Pancada sem deixar a bola tocar no chão. Geralmente em ML1/ML2
+- forehand: Pancada após a bola tocar no chão (ou no vidro), executada pelo lado dominante
+- backhand: Pancada após a bola tocar no chão (ou no vidro), executada pelo lado não-dominante
+- smash: Após balão do adversário — força máxima, acima da cabeça. Equipa tipicamente em ataque
+- overhead: Após balão do adversário — executada ao lado da cabeça, com efeito lateral, pulso alto e movimento lateral (inclui víbora, bandeja, kick)
+- saida_vidro: Equipa recua após balão, deixa a bola bater alto no vidro de fundo, executa quando ressalta
+- serve: Serviço (ver secção 4)
+- indefinido: Tipo não identificável com certeza
+
+## 8. PADRÕES PROIBIDOS — SEMPRE ERRADO
+
+- Todos os 4 jogadores com contagem de pancadas igual ou muito similar
+- Dois jogadores da mesma equipa na mesma zona ao mesmo tempo
+- Dois pontos seguidos atribuídos à mesma equipa sem ponto intercalado da equipa adversária (excepção: dupla falta dá 2 pontos ao mesmo tempo)
+- Qualquer jogador da Equipa A do lado da Equipa B no campo (e vice-versa) — as equipas nunca cruzam a rede em jogo normal
+
+## 9. OUTPUT JSON
+
+Retorna um bloco <raciocinio>...</raciocinio> seguido de um único objeto JSON válido, sem markdown, sem texto antes ou depois do JSON.
+
 {
-  "duration_s": <total video length in seconds, float>,
-
-  "players": [
-    {"player": 1, "shirt_color": "<cor em português, e.g. branco, azul, vermelho, preto>",
-     "team": "near", "side": "left"},
-    {"player": 2, "shirt_color": "<cor>", "team": "near", "side": "right"},
-    {"player": 3, "shirt_color": "<cor>", "team": "far",  "side": "left"},
-    {"player": 4, "shirt_color": "<cor>", "team": "far",  "side": "right"}
+  "jogadores": [
+    { "id": "A1", "equipa": "A", "descricao_visual": "Camisola azul escura, calções pretos, meias brancas, ténis brancos Nike, raquete Head vermelha" },
+    { "id": "A2", "equipa": "A", "descricao_visual": "..." },
+    { "id": "B1", "equipa": "B", "descricao_visual": "..." },
+    { "id": "B2", "equipa": "B", "descricao_visual": "..." }
   ],
-
-  "player_positions": [
-    // ALL 4 players every 5 seconds. MANDATORY: ≥ ceil(duration_s/5) × 4 entries.
-    // court_y: P1&P2 < 0.5, P3&P4 > 0.5. P1&P2 court_x differ ≥0.25. Same for P3&P4.
-    {"t_s": <float>, "player": <1|2|3|4>, "court_x": <0.0-1.0>, "court_y": <0.0-1.0>},
-    ...
-  ],
-
-  "shots": [
-    // Every racket-ball contact. Counts MUST be uneven. Teams MUST alternate.
-    {"t_s": <float>, "player": <1|2|3|4>,
-     "type": "<forehand|backhand|volley|smash|bandeja|vibora|serve|lob|other>",
-     "outcome": "<winner|unforced_error|forced_error|let|continuation>"},
-    ...
-  ],
-
-  "formation_samples": [
-    // MANDATORY: ≥ ceil(duration_s/5) entries, one every 5 seconds.
-    // both_net | both_back | split_near_net | split_far_net | mixed
-    // "both_net" (both near players at net) is COMMON in padel: expect 30-50%.
-    {"t_s": <float>, "type": "<formation>"},
-    ...
-  ],
-
-  "score_timeline": [
-    {"t_s": <float>, "team1_games": <int>, "team2_games": <int>},
-    ...
-  ],
-
-  "key_frames": [
-    // 8-12 moments where all 4 players AND ball are clearly visible.
-    {"t_s": <float>, "n_players": <0-4>, "ball_visible": <bool>,
-     "description": "<one sentence in Portuguese>"},
-    ...
-  ],
-
-  "rallies": [
-    // One entry PER POINT. start_s = serve contact. end_s = point ends (ball dead).
-    {"start_s": <float>, "end_s": <float>, "num_shots": <int>, "winner_team": <1|2|null>},
-    ...
-  ],
-
-  "final_score": {
-    "team1_sets": <int>, "team2_sets": <int>,
-    "detail": "<e.g. '6-3 4-6 7-5'>"
+  "resumo": {
+    "total_rallies": 0,
+    "trocas_de_campo": 0,
+    "primeiro_servidor": "A1",
+    "duracao_total_jogo": "00:00:00",
+    "duracao_util": "00:00:00",
+    "pontuacao_final": "6-3 4-6 7-5",
+    "resumo_jogo": "2-3 frases em português a resumir o jogo e o vencedor",
+    "tempo_por_fase": {
+      "A": { "ATAQUE": "00:00:00", "TRANSIÇÃO": "00:00:00", "DEFESA": "00:00:00" },
+      "B": { "ATAQUE": "00:00:00", "TRANSIÇÃO": "00:00:00", "DEFESA": "00:00:00" }
+    },
+    "eventos_incomuns": [],
+    "confianca": 0.8
   },
-  "match_summary": "<2-3 sentences in Portuguese summarising the match and who won>",
-  "confidence": <0.0-1.0>
+  "pausas": [
+    { "id": 1, "inicio": "00:00:00", "fim": "00:00:00", "duracao_segundos": 0, "tipo_pausa": "troca_de_campo" }
+  ],
+  "rallies": [
+    {
+      "id": 1,
+      "inicio": "00:00:00",
+      "fim": "00:00:08",
+      "servidor": "A1",
+      "servico_valido": true,
+      "equipa_ganha_ponto": "A",
+      "fases": [
+        { "fase": "ATAQUE", "momento": "servico", "timestamp_servico": "00:00:01", "equipa": "A", "inicio": "00:00:00", "fim": "00:00:02", "posicao_A1": "VL2", "posicao_A2": "ML1", "posicao_B1": "VL1", "posicao_B2": "VL1" },
+        { "fase": "DEFESA", "equipa": "B", "inicio": "00:00:00", "fim": "00:00:05", "posicao_A1": "VL2", "posicao_A2": "ML1", "posicao_B1": "VL1", "posicao_B2": "VL1" },
+        { "fase": "TRANSIÇÃO", "equipa": "A", "inicio": "00:00:02", "fim": "00:00:04", "posicao_A1": "ML3", "posicao_A2": "ML2", "posicao_B1": "VL1", "posicao_B2": "VL2" },
+        { "fase": "ATAQUE", "equipa": "A", "inicio": "00:00:04", "fim": "00:00:08", "posicao_A1": "ML1", "posicao_A2": "ML2", "posicao_B1": "VF3", "posicao_B2": "VF1" },
+        { "fase": "DEFESA", "equipa": "B", "inicio": "00:00:05", "fim": "00:00:08", "posicao_A1": "ML1", "posicao_A2": "ML2", "posicao_B1": "VF3", "posicao_B2": "VF1" }
+      ],
+      "pancadas": [
+        { "timestamp": "00:00:01", "jogador": "A1", "tipo": "serve", "zona": "VL2" },
+        { "timestamp": "00:00:03", "jogador": "B2", "tipo": "backhand", "zona": "VL1", "segunda_bola": true }
+      ]
+    }
+  ]
 }
+
+REGRAS DE TIMESTAMP:
+- Ancora timestamps apenas em eventos visuais claros
+- Arredonda ao segundo mais próximo
+- Não inventas timestamps por estimativa — se não consegues ancorar, omite o evento
 """.strip()
 
 
@@ -262,7 +244,6 @@ def analyze_full_match(video_path: str | Path, api_key: str | None = None) -> di
     logger.info("Gemini file ready (%.1fs)", time.time() - t0)
 
     cfg_kwargs: dict = dict(
-        response_mime_type="application/json",
         temperature=0.1,
         max_output_tokens=65536,
     )
@@ -291,22 +272,19 @@ def analyze_full_match(video_path: str | Path, api_key: str | None = None) -> di
     n_shots = len(report.get("shots", []))
     n_rallies = len(report.get("rallies", []))
     dur = report.get("duration_s", 0.0)
-    min_pos = max(4, int(dur / 5) * 4) if dur else 4
-    if n_pos < min_pos:
-        logger.warning(
-            "Gemini returned only %d positions for %.0fs video (expected ≥%d) — "
-            "heatmap will be sparse. Consider re-analysing.",
-            n_pos, dur, min_pos,
-        )
+    is_v2 = bool(report.get("jogadores"))
     logger.info(
-        "Gemini full-match: %d positions, %d shots, %d rallies (duration=%.0fs)",
-        n_pos, n_shots, n_rallies, dur,
+        "Gemini full-match (schema=%s): %d positions, %d shots, %d rallies (duration=%.0fs)",
+        "v2" if is_v2 else "v1", n_pos, n_shots, n_rallies, dur,
     )
     return report
 
 
 def _parse_match_json(text: str) -> dict:
     """Parse the full-match report JSON with robust truncation recovery.
+
+    Handles the new v2 schema which starts with a <raciocinio>...</raciocinio>
+    reasoning block before the JSON object.
 
     When Gemini truncates mid-array, standard json.loads fails.  We try
     a series of progressively more aggressive recovery strategies:
@@ -316,33 +294,46 @@ def _parse_match_json(text: str) -> dict:
     """
     import json, re
 
+    # Extract and log reasoning block
+    reasoning_match = re.search(r'<raciocinio>(.*?)</raciocinio>', text, re.DOTALL | re.IGNORECASE)
+    if reasoning_match:
+        logger.info("Gemini reasoning (first 1000 chars): %s", reasoning_match.group(1).strip()[:1000])
+        text = text[text.lower().find('</raciocinio>') + len('</raciocinio>'):]
+
+    # Find the start of the JSON object
+    json_start = text.find('{')
+    if json_start == -1:
+        logger.warning("No JSON object found in Gemini response")
+        data: dict = {}
+        _fill_defaults(data)
+        _derive_compat_fields(data)
+        return data
+    text = text[json_start:]
+
     data: dict = {}
 
     # Strategy 1: clean parse
     try:
         data = json.loads(text)
         _fill_defaults(data)
+        _derive_compat_fields(data)
         return data
     except json.JSONDecodeError:
         logger.warning("Match JSON truncated (%d chars) — attempting recovery", len(text))
 
     # Strategy 2: close unclosed brackets then retry
     repaired = text.rstrip()
-    # Count open vs close brackets/braces
-    opens  = repaired.count("[") - repaired.count("]")
-    opens_b = repaired.count("{") - repaired.count("}")
-    # Trim to the last complete top-level comma-separated entry if inside an array
-    # by backing up to the last '},' boundary
     last_obj = repaired.rfind("},")
     if last_obj > len(repaired) // 2:
         repaired = repaired[: last_obj + 1]
-        opens   = repaired.count("[") - repaired.count("]")
-        opens_b = repaired.count("{") - repaired.count("}")
+    opens   = repaired.count("[") - repaired.count("]")
+    opens_b = repaired.count("{") - repaired.count("}")
     repaired += "]" * max(0, opens) + "}" * max(0, opens_b)
     try:
         data = json.loads(repaired)
         logger.info("Recovery strategy 2 succeeded (%d chars)", len(repaired))
         _fill_defaults(data)
+        _derive_compat_fields(data)
         return data
     except json.JSONDecodeError:
         pass
@@ -351,7 +342,6 @@ def _parse_match_json(text: str) -> dict:
     for key_match in re.finditer(r'"(\w+)"\s*:\s*', text):
         key = key_match.group(1)
         rest = text[key_match.end():]
-        # Try scalars first (numbers, strings, booleans)
         scalar = re.match(r'(-?\d+(?:\.\d+)?|"[^"]*"|true|false|null)', rest)
         if scalar:
             try:
@@ -359,7 +349,6 @@ def _parse_match_json(text: str) -> dict:
             except Exception:
                 pass
         elif rest.startswith("["):
-            # Try to parse the array up to first failure
             objs: list = []
             for m in re.finditer(r'\{[^{}]*\}', rest):
                 try:
@@ -372,162 +361,206 @@ def _parse_match_json(text: str) -> dict:
     if data:
         logger.info("Recovery strategy 3: extracted keys %s", list(data.keys()))
     _fill_defaults(data)
+    _derive_compat_fields(data)
     return data
 
 
 def _fill_defaults(data: dict) -> None:
+    # v2 schema fields
+    data.setdefault("jogadores", [])
+    resumo = data.setdefault("resumo", {})
+    resumo.setdefault("total_rallies", 0)
+    resumo.setdefault("trocas_de_campo", 0)
+    resumo.setdefault("primeiro_servidor", None)
+    resumo.setdefault("duracao_total_jogo", "00:00:00")
+    resumo.setdefault("duracao_util", "00:00:00")
+    resumo.setdefault("pontuacao_final", "")
+    resumo.setdefault("resumo_jogo", "")
+    resumo.setdefault("tempo_por_fase", {
+        "A": {"ATAQUE": "00:00:00", "TRANSIÇÃO": "00:00:00", "DEFESA": "00:00:00"},
+        "B": {"ATAQUE": "00:00:00", "TRANSIÇÃO": "00:00:00", "DEFESA": "00:00:00"},
+    })
+    resumo.setdefault("eventos_incomuns", [])
+    resumo.setdefault("confianca", 0.0)
+    data.setdefault("pausas", [])
+    data.setdefault("rallies", [])
+
+    # v1 schema backward-compatibility defaults (harmless if v2 schema)
     data.setdefault("duration_s", 0.0)
     data.setdefault("players", [])
     for key in ("player_positions", "shots", "formation_samples",
-                "score_timeline", "key_frames", "rallies"):
+                "score_timeline", "key_frames"):
         data.setdefault(key, [])
     data.setdefault("final_score", {"team1_sets": 0, "team2_sets": 0, "detail": ""})
     data.setdefault("match_summary", "")
     data.setdefault("confidence", 0.0)
 
 
-# ── Position quality fixes ───────────────────────────────────────────────────
+# ── Zone → court coordinate mapping ─────────────────────────────────────────
+_ZONE_Y_NEAR = {
+    "ML1": 0.38, "ML2": 0.41, "ML3": 0.44,
+    "VL1": 0.27, "VL2": 0.15,
+    "VF1": 0.05, "VF2": 0.05, "VF3": 0.05, "VF4": 0.05, "VF5": 0.05,
+}
+_ZONE_Y_FAR = {
+    "ML1": 0.62, "ML2": 0.59, "ML3": 0.56,
+    "VL1": 0.73, "VL2": 0.85,
+    "VF1": 0.95, "VF2": 0.95, "VF3": 0.95, "VF4": 0.95, "VF5": 0.95,
+}
+_ZONE_X_VF = {"VF1": 0.90, "VF2": 0.70, "VF3": 0.50, "VF4": 0.30, "VF5": 0.10}
+_PLAYER_DEFAULT_X = {"A1": 0.25, "A2": 0.75, "B1": 0.25, "B2": 0.75}
+_PLAYER_NUM = {"A1": 1, "A2": 2, "B1": 3, "B2": 4}
+_PLAYER_TEAM_FAR = {"B1", "B2"}
 
-# Default side for each player (court_x) when Gemini collapses them together.
-_DEFAULT_X = {1: 0.25, 2: 0.75, 3: 0.25, 4: 0.75}
-_DEFAULT_Y = {1: 0.25, 2: 0.25, 3: 0.75, 4: 0.75}
-_MIN_X_SPREAD = 0.20   # minimum court_x difference between teammates
-
-
-def fix_collapsed_positions(positions: list[dict]) -> list[dict]:
-    """
-    Detect and repair timestamps where Gemini put two players on the same
-    team at identical (or nearly identical) court_x coordinates.
-
-    Common failure mode: Gemini outputs (0.5, 0.25) for both player 1 and
-    player 2 at every timestamp → heatmap shows one blob per team instead
-    of two individual player zones.
-
-    Fix: when teammates are within _MIN_X_SPREAD of each other in court_x,
-    nudge them apart to their canonical sides (left: 0.25, right: 0.75).
-    The y-coordinate is kept as-is (it encodes attack/defend depth).
-    """
-    from copy import deepcopy
-    fixed = deepcopy(positions)
-    n_fixed = 0
-
-    # Group by timestamp
-    by_t: dict[float, list[dict]] = {}
-    for p in fixed:
-        t = float(p.get("t_s", 0.0))
-        by_t.setdefault(t, []).append(p)
-
-    for t, pts in by_t.items():
-        by_player = {p["player"]: p for p in pts if p.get("player") in (1, 2, 3, 4)}
-
-        # Check each team pair
-        for left, right in ((1, 2), (3, 4)):
-            p1 = by_player.get(left)
-            p2 = by_player.get(right)
-            if p1 is None or p2 is None:
-                continue
-            x1 = float(p1.get("court_x", _DEFAULT_X[left]))
-            x2 = float(p2.get("court_x", _DEFAULT_X[right]))
-            if abs(x1 - x2) < _MIN_X_SPREAD:
-                # Too close — force to canonical sides
-                p1["court_x"] = _DEFAULT_X[left]
-                p2["court_x"] = _DEFAULT_X[right]
-                n_fixed += 1
-
-    if n_fixed:
-        logger.info(
-            "fix_collapsed_positions: spread %d timestamp(s) where teammates were too close",
-            n_fixed,
-        )
-    return fixed
+# Map new shot types to old schema types
+_SHOT_TYPE_MAP = {
+    "volley": "volley",
+    "forehand": "forehand",
+    "backhand": "backhand",
+    "smash": "smash",
+    "overhead": "bandeja",   # closest old equivalent
+    "saida_vidro": "lob",    # closest old equivalent
+    "serve": "serve",
+    "indefinido": "other",
+}
 
 
-# ── Position gap filling ─────────────────────────────────────────────────────
+def _hhmmss_to_s(t: str) -> float:
+    """Convert HH:MM:SS string to float seconds."""
+    try:
+        parts = t.split(":")
+        if len(parts) == 3:
+            return int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+    except Exception:
+        pass
+    return 0.0
 
-def interpolate_positions(
-    positions: list[dict],
-    duration_s: float,
-    target_interval_s: float = 5.0,
-) -> list[dict]:
-    """
-    Fill temporal gaps in Gemini's player_positions with linear interpolation.
 
-    Gemini sometimes samples only every 10-30s instead of the requested 5s,
-    leaving the heatmap with bare patches.  This function adds synthetic
-    entries between existing samples so the heatmap looks continuous.
+def _zone_to_xy(zone: str, pid: str) -> tuple[float, float]:
+    """Convert a zone name + player ID to normalised (court_x, court_y)."""
+    is_far = pid in _PLAYER_TEAM_FAR
+    zy = _ZONE_Y_FAR if is_far else _ZONE_Y_NEAR
+    y = zy.get(zone, 0.75 if is_far else 0.25)
+    x = _ZONE_X_VF.get(zone, _PLAYER_DEFAULT_X.get(pid, 0.5))
+    return x, y
 
-    Only adds entries where the gap is > 1.5 × target_interval_s (i.e. not
-    already dense enough).  Marks added entries with `_interpolated: True`.
-    """
-    if not positions:
-        return positions
 
-    # Sort and group by player
-    by_player: dict[int, list[dict]] = {}
-    for p in positions:
-        pid = p.get("player")
-        if pid not in (1, 2, 3, 4):
-            continue
-        by_player.setdefault(pid, []).append(p)
+def _derive_compat_fields(data: dict) -> None:
+    """Derive backward-compatible fields from the new Gemini v2 schema."""
 
-    result: list[dict] = list(positions)
-    gap_threshold = target_interval_s * 1.5
+    resumo = data.get("resumo", {})
+    is_v2 = bool(data.get("jogadores"))
 
-    for pid, pts in by_player.items():
-        pts_sorted = sorted(pts, key=lambda p: p.get("t_s", 0.0))
+    # duration_s — prefer existing value (v1 schema has it directly),
+    # derive from resumo only for v2 schema
+    if is_v2 or not data.get("duration_s"):
+        derived_dur = _hhmmss_to_s(resumo.get("duracao_total_jogo", "00:00:00"))
+        if derived_dur > 0 or is_v2:
+            data["duration_s"] = derived_dur
 
-        # Fill gap at the start (if first sample is late)
-        if pts_sorted and pts_sorted[0].get("t_s", 0.0) > gap_threshold:
-            first = pts_sorted[0]
-            t = 0.0
-            while t < first.get("t_s", 0.0) - target_interval_s / 2:
-                result.append({
-                    "t_s": round(t, 1),
-                    "player": pid,
-                    "court_x": first["court_x"],
-                    "court_y": first["court_y"],
-                    "_interpolated": True,
+    # match_summary and final_score (old field names, derived from new schema)
+    # For v1 schema, match_summary is already set directly; only derive for v2
+    if is_v2 or not data.get("match_summary"):
+        data["match_summary"] = resumo.get("resumo_jogo", "")
+
+    pf = resumo.get("pontuacao_final", "")
+    # Parse e.g. "6-3 4-6 7-5" → team1_sets / team2_sets
+    t1_sets, t2_sets = 0, 0
+    for game in pf.split():
+        parts = game.split("-")
+        if len(parts) == 2:
+            try:
+                if int(parts[0]) > int(parts[1]):
+                    t1_sets += 1
+                else:
+                    t2_sets += 1
+            except ValueError:
+                pass
+    if is_v2 or not data.get("final_score", {}).get("detail"):
+        data["final_score"] = {"team1_sets": t1_sets, "team2_sets": t2_sets, "detail": pf}
+
+    # confidence: prefer existing value from v1 schema; use confianca for v2
+    if is_v2 or not data.get("confidence"):
+        data["confidence"] = resumo.get("confianca", 0.0)
+
+    # players[] (old format: player=1..4, shirt_color, team, side)
+    id_to_team = {"A1": "near", "A2": "near", "B1": "far", "B2": "far"}
+    id_to_side = {"A1": "left", "A2": "right", "B1": "left", "B2": "right"}
+    if is_v2:
+        players = []
+        for j in data.get("jogadores", []):
+            pid = j.get("id", "")
+            desc = j.get("descricao_visual", "")
+            # Extract shirt colour: first element of comma-separated description
+            shirt = desc.split(",")[0].strip() if desc else ""
+            # Remove leading "Camisola " prefix if present
+            shirt = shirt.replace("Camisola ", "").replace("camisola ", "").strip()
+            players.append({
+                "player": _PLAYER_NUM.get(pid, 0),
+                "shirt_color": shirt,
+                "team": id_to_team.get(pid, "near"),
+                "side": id_to_side.get(pid, "left"),
+            })
+        data["players"] = players
+
+    # shots[] flat array (old format) + shot_counts (v2 schema only)
+    if is_v2:
+        shots: list = []
+        shot_counts: dict = {}
+        for rally in data.get("rallies", []):
+            for p in rally.get("pancadas", []):
+                pid = p.get("jogador", "")
+                pnum = _PLAYER_NUM.get(pid, 0)
+                t_s = _hhmmss_to_s(p.get("timestamp", "00:00:00"))
+                new_type = p.get("tipo", "indefinido")
+                old_type = _SHOT_TYPE_MAP.get(new_type, "other")
+                shots.append({
+                    "t_s": t_s,
+                    "player": pnum,
+                    "type": old_type,
+                    "outcome": "continuation",  # new schema has no per-shot outcome
                 })
-                t += target_interval_s
+                pk = f"player_{pnum}"
+                shot_counts.setdefault(pk, {})
+                shot_counts[pk][old_type] = shot_counts[pk].get(old_type, 0) + 1
 
-        # Fill gaps between samples
-        for i in range(len(pts_sorted) - 1):
-            a, b = pts_sorted[i], pts_sorted[i + 1]
-            t_a, t_b = float(a.get("t_s", 0)), float(b.get("t_s", 0))
-            if t_b - t_a <= gap_threshold:
-                continue
-            x_a, y_a = float(a.get("court_x", 0.5)), float(a.get("court_y", 0.25 if pid <= 2 else 0.75))
-            x_b, y_b = float(b.get("court_x", 0.5)), float(b.get("court_y", 0.25 if pid <= 2 else 0.75))
-            t = t_a + target_interval_s
-            while t < t_b - target_interval_s / 2:
-                frac = (t - t_a) / (t_b - t_a)
-                result.append({
-                    "t_s": round(t, 1),
-                    "player": pid,
-                    "court_x": round(x_a + frac * (x_b - x_a), 3),
-                    "court_y": round(y_a + frac * (y_b - y_a), 3),
-                    "_interpolated": True,
-                })
-                t += target_interval_s
+        data["shots"] = shots
+        data["shot_counts"] = shot_counts
 
-        # Fill gap at the end
-        if duration_s > 0 and pts_sorted:
-            last = pts_sorted[-1]
-            t = float(last.get("t_s", 0.0)) + target_interval_s
-            while t <= duration_s:
-                result.append({
-                    "t_s": round(t, 1),
-                    "player": pid,
-                    "court_x": last["court_x"],
-                    "court_y": last["court_y"],
-                    "_interpolated": True,
-                })
-                t += target_interval_s
+        # player_positions[] from fases (zone → coordinates)
+        positions: list = []
+        seen: set = set()
+        for rally in data.get("rallies", []):
+            for fase in rally.get("fases", []):
+                t_s = _hhmmss_to_s(fase.get("inicio", "00:00:00"))
+                for pid in ("A1", "A2", "B1", "B2"):
+                    zone = fase.get(f"posicao_{pid}")
+                    if not zone:
+                        continue
+                    key = (round(t_s), pid)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    x, y = _zone_to_xy(zone, pid)
+                    positions.append({
+                        "t_s": t_s,
+                        "player": _PLAYER_NUM[pid],
+                        "court_x": x,
+                        "court_y": y,
+                    })
+        data["player_positions"] = positions
 
-    added = len(result) - len(positions)
-    if added:
-        logger.info("interpolate_positions: added %d synthetic entries (was %d)", added, len(positions))
-    return result
+        # rallies_compat[] in old format (start_s/end_s/num_shots/winner_team)
+        old_rallies = []
+        for rally in data.get("rallies", []):
+            winner = rally.get("equipa_ganha_ponto")
+            old_rallies.append({
+                "start_s": _hhmmss_to_s(rally.get("inicio", "00:00:00")),
+                "end_s": _hhmmss_to_s(rally.get("fim", "00:00:00")),
+                "num_shots": len(rally.get("pancadas", [])),
+                "winner_team": 1 if winner == "A" else (2 if winner == "B" else None),
+            })
+        data["rallies_compat"] = old_rallies
 
 
 # ── Derived metrics ──────────────────────────────────────────────────────────
@@ -565,7 +598,10 @@ def compute_rally_stats(rallies: list[dict], duration_s: float) -> dict:
     """Aggregate rally stats: count, average length, total/percentage play time."""
     durations = []
     for r in rallies:
-        d = r.get("end_s", 0.0) - r.get("start_s", 0.0)
+        # Support both old format (start_s/end_s) and new compat format
+        start = r.get("start_s", 0.0)
+        end = r.get("end_s", 0.0)
+        d = end - start
         if d > 0:
             durations.append(d)
     total_play = sum(durations)
@@ -578,41 +614,18 @@ def compute_rally_stats(rallies: list[dict], duration_s: float) -> dict:
 
 
 def enrich_report(report: dict) -> dict:
-    """Add derived fields the frontend consumes, then apply game-rule fixes."""
-    # Fix collapsed positions first (teammates at same x), then fill gaps.
-    try:
-        report["player_positions"] = fix_collapsed_positions(
-            report.get("player_positions", [])
-        )
-    except Exception:
-        logger.exception("Position collapse fix failed — using raw positions")
+    """Add derived fields the frontend consumes."""
+    is_v2 = bool(report.get("jogadores"))  # new schema from updated prompt
 
-    try:
-        report["player_positions"] = interpolate_positions(
-            report.get("player_positions", []),
-            duration_s=report.get("duration_s", 0.0),
-        )
-    except Exception:
-        logger.exception("Position interpolation failed — using raw positions")
-
-    # Apply game-rule validator: fix team-side violations, infer rally boundaries
-    try:
-        from padelpro_vision.analysis.game_rules import apply_game_rules
-        corrections = apply_game_rules(
-            shots=report.get("shots", []),
-            positions=report.get("player_positions", []),
-            existing_rallies=report.get("rallies"),
-        )
-        report["shots"]   = corrections["shots"]
-        report["rallies"] = corrections["rallies"]
-        if corrections["n_fixes"]:
-            logger.info("Game-rules validator applied %d corrections.", corrections["n_fixes"])
-    except Exception:
-        logger.exception("Game-rules validation failed — using raw Gemini output")
+    # For v2 schema, ensure compat fields are derived if not already present
+    if is_v2 and "shot_counts" not in report:
+        _derive_compat_fields(report)
 
     report["shot_counts"] = compute_shot_counts(report.get("shots", []))
     report["formation_pct"] = compute_formation_pct(report.get("formation_samples", []))
+    # Use rallies_compat for stats in v2 schema
+    rallies_for_stats = report.get("rallies_compat", []) if is_v2 else report.get("rallies", [])
     report["rally_stats"] = compute_rally_stats(
-        report.get("rallies", []), report.get("duration_s", 0.0)
+        rallies_for_stats, report.get("duration_s", 0.0)
     )
     return report

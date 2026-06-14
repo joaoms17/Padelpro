@@ -16,6 +16,7 @@ import { RallyTimeline } from "@/components/report/RallyTimeline";
 import { KeyFramesGallery } from "@/components/report/KeyFramesGallery";
 import { ScoreTimeline } from "@/components/report/ScoreTimeline";
 import { PlayerOutcomeCards } from "@/components/report/PlayerOutcomeCards";
+import { PhaseBreakdown } from "@/components/report/PhaseBreakdown";
 
 type View =
   | { state: "loading" }
@@ -139,6 +140,14 @@ function ReportBody({ report, rid }: { report: MatchReport; rid: string }) {
         <section className="card p-6">
           <SectionTitle>Qualidade por jogador</SectionTitle>
           <PlayerOutcomeCards report={report} />
+        </section>
+      )}
+
+      {/* 3b. Phase breakdown (v2 schema only) */}
+      {report.resumo?.tempo_por_fase && (
+        <section className="card p-6">
+          <SectionTitle>Tempo por fase</SectionTitle>
+          <PhaseBreakdown report={report} />
         </section>
       )}
 
