@@ -65,8 +65,8 @@ def _items_from_pipeline(rid: str) -> list[dict] | None:
 
 
 def _items_from_condense(rid: str) -> list[dict] | None:
-    from api.routers.condense import _jobs as condense_jobs
-    job = condense_jobs.get(rid)
+    from api.db import get_job
+    job = get_job("condense", rid)
     report = (job or {}).get("report")
     if not report or "shots" not in report:
         return None
@@ -88,8 +88,8 @@ def _gemini_block(rid: str) -> dict | None:
     """The Gemini semantic block (summary, tactics, outcomes) for this analysis,
     from the live job if still in memory, else the persisted gemini.json."""
     try:
-        from api.routers.condense import _jobs as condense_jobs
-        job = condense_jobs.get(rid) or {}
+        from api.db import get_job
+        job = get_job("condense", rid) or {}
         report = job.get("report")
         if report and report.get("gemini"):
             return report["gemini"]

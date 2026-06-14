@@ -18,3 +18,4 @@ checkpoints/
 runs/
 .pytest_cache/
 .padelpro_access_code
+.claude/
