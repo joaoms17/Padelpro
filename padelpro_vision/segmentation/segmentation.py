@@ -359,6 +359,18 @@ def get_active_segments(
     motion_energy = _motion_energy_per_second(video_path)
     play_score    = _compute_play_score(audio_energy, motion_energy, audio_weight)
 
+    try:
+        from padelpro_vision.segmentation.learned import load_classifier, predict_play_score as _predict
+        clf = load_classifier()
+        if clf is not None:
+            play_score = _predict(clf, audio_energy, motion_energy)
+            # Classifier output is well-calibrated: 0.5 = decision boundary
+            enter_thresh = 0.5
+            exit_thresh = 0.4
+            logger.info("Using learned segmentation classifier.")
+    except Exception:
+        pass  # fall back to the original play_score + thresholds
+
     segments = _state_machine(
         play_score,
         enter_thresh=enter_thresh,
