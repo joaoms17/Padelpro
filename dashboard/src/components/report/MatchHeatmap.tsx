@@ -172,12 +172,20 @@ export function MatchHeatmap({ report }: { report: MatchReport }) {
 
       {/* Legend */}
       <div className="flex flex-wrap justify-center gap-x-4 gap-y-2">
-        {PLAYER_COLORS.map((color, i) => (
-          <div key={i} className="flex items-center gap-1.5 text-xs text-gray-400">
-            <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
-            Jogador {i + 1}
-          </div>
-        ))}
+        {PLAYER_COLORS.map((color, i) => {
+          const playerInfo = report.players?.find((p) => p.player === i + 1);
+          return (
+            <div key={i} className="flex items-center gap-1.5 text-xs text-gray-400">
+              <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: color }} />
+              <span>
+                J{i + 1}
+                {playerInfo?.shirt_color && (
+                  <span className="text-gray-500 ml-1">({playerInfo.shirt_color})</span>
+                )}
+              </span>
+            </div>
+          );
+        })}
         {ballPoints && (
           <div className="flex items-center gap-1.5 text-xs text-gray-400">
             <span className="inline-block w-5 h-0 border-t-2 border-dashed border-white/50" />

@@ -297,10 +297,18 @@ export interface ReportStatus {
   condensed_available?: boolean;
 }
 
+export interface MatchPlayer {
+  player: 1 | 2 | 3 | 4;
+  shirt_color: string;
+  team: "near" | "far";
+  side: "left" | "right";
+}
+
 export interface MatchReport {
   rid: string;
   condensed_available?: boolean;
   duration_s: number;
+  players?: MatchPlayer[];
   final_score: { team1_sets: number; team2_sets: number; detail: string };
   match_summary: string;
   confidence: number;
