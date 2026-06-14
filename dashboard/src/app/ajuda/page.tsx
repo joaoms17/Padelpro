@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 export const metadata = {
-  title: "Como funciona — PadelPro Vision",
+  title: "Como funciona — PadelPro",
 };
 
 export default function AjudaPage() {
@@ -10,99 +10,100 @@ export default function AjudaPage() {
       {/* Intro */}
       <header className="space-y-3 text-center pt-4">
         <h1 className="text-3xl font-bold text-white">Como funciona</h1>
-        <p className="text-gray-400 max-w-xl mx-auto">
-          O PadelPro analisa vídeos de jogos de padel: corta o tempo morto, mostra
-          estatísticas por jogador (distâncias, zonas, heatmap) e usa IA para ler as
-          pancadas — tipo, winner/erro e tática. Cada correção que fazes afina essa
-          leitura e cria um conjunto de referência. Este guia explica tudo, passo a passo.
+        <p className="text-gray-400 max-w-xl mx-auto leading-relaxed">
+          O PadelPro tem duas partes. <b className="text-gray-200">Parte 1:</b> carregas
+          um vídeo e a IA (Gemini) lê o jogo todo — heatmap, resultado, pancadas e
+          formações. <b className="text-gray-200">Parte 2:</b> esses resultados, e os
+          frames que confirmas, viram dados para treinar o <b>nosso próprio modelo</b>,
+          para deixarmos de depender do Gemini. Este guia explica cada passo e cada página.
         </p>
       </header>
 
       {/* Steps */}
       <Step n={1} title="Filmar o jogo" icon="🎥">
         <ul className="list-disc pl-5 space-y-1.5">
-          <li>Coloca o telemóvel <b>atrás do campo, elevado</b> (em cima do vidro de fundo ou numa bancada), a apanhar o campo inteiro.</li>
-          <li>Usa um <b>tripé ou apoio fixo</b> — a câmara não deve mexer durante o jogo.</li>
-          <li>Filma na horizontal, 1080p chega. <b>Com som</b> — o som dos impactos ajuda a detetar as pancadas.</li>
-          <li>Vídeos grandes: se passar o limite de upload, exporta em 720p ou corta em partes.</li>
+          <li>Coloca o telemóvel <b>atrás do campo, elevado</b>, a apanhar o campo inteiro.</li>
+          <li>Usa um <b>apoio fixo</b> — a câmara não deve mexer durante o jogo.</li>
+          <li>Filma na horizontal, 1080p chega. Se o ficheiro for grande, exporta em 720p.</li>
         </ul>
       </Step>
 
-      <Step n={2} title="Analisar" icon="⚡">
+      <Step n={2} title="Analisar (Parte 1)" icon="⚡">
         <ul className="list-disc pl-5 space-y-1.5">
-          <li>Na página <Link href="/" className="text-brand hover:underline">⚡ Analisar</Link>, escolhe o vídeo e carrega em <b>Analisar jogo</b>.</li>
-          <li>Marca <b>📊 Analisar jogadores</b> para receberes as estatísticas (distâncias, zonas, heatmap, pancadas) além do vídeo cortado.</li>
-          <li>A opção <b>🎯 Deteção da bola</b> melhora a atribuição das pancadas, mas demora mais uns minutos.</li>
-          <li>Demora normal: alguns minutos por jogo. Deixa a página aberta.</li>
+          <li>Na página <Link href="/" className="text-brand hover:underline">⚡ Analisar</Link>, escolhe o vídeo do PC ou cola um link/YouTube.</li>
+          <li>Carrega em <b>Analisar jogo</b>. A IA lê o vídeo todo — demora alguns minutos. Deixa a página aberta.</li>
         </ul>
       </Step>
 
       <Step n={3} title="Ler o relatório" icon="📊">
+        <p className="mb-2">O relatório do jogo mostra:</p>
         <ul className="list-disc pl-5 space-y-1.5">
-          <li><b>Tempo útil</b> — quanto do vídeo foi mesmo jogo (o resto é apanhar bolas e discutir o ponto 😄).</li>
-          <li><b>Zonas</b> — % do tempo de cada jogador na rede, meio e fundo. Em padel, quem domina a rede normalmente ganha.</li>
-          <li><b>Heatmap</b> — onde cada jogador passou mais tempo no campo.</li>
-          <li><b>Pancadas</b> — quantas batidas deu cada jogador e de que tipo.</li>
-          <li>Para posições em metros reais, o campo precisa de estar <Link href="/calibrate" className="text-brand hover:underline">calibrado</Link> (uma vez por câmara — clicas os 4 cantos e está).</li>
+          <li><b>Heatmap</b> — onde cada um dos 4 jogadores passou mais tempo no campo.</li>
+          <li><b>Resultado</b> — a previsão da IA (com botões para validares se acertou).</li>
+          <li><b>Pancadas</b> — quantas e de que tipo cada jogador bateu.</li>
+          <li><b>Formações</b> — % de tempo em cada configuração (ambos na rede, ambos no fundo, um sobe um atrás).</li>
+          <li><b>Frames de exemplo</b> — momentos com os 4 jogadores e a bola visíveis.</li>
+          <li><b>Tempo útil</b> — quanto do vídeo foi mesmo jogo (rallies).</li>
         </ul>
       </Step>
 
-      <Step n={4} title="Rever as pancadas (corriges o que a IA leu)" icon="✓">
+      <Step n={4} title="Contribuir para o treino (Parte 2)" icon="✋">
         <p className="mb-2">
-          No fim de uma análise aparece o botão <b>✓ Rever batidas</b>. O vídeo salta
-          para cada pancada detetada e tu confirmas ou corriges o tipo/resultado. As
-          correções afinam a leitura da IA e ficam guardadas como referência.
+          No relatório, carrega em <b>Contribuir para treino</b>. Abre um ecrã simples,
+          <b> uma imagem de cada vez</b>, onde confirmas tudo no mesmo sítio:
         </p>
+        <ul className="list-disc pl-5 space-y-1.5">
+          <li>marcas a <b>bola</b> (clicas onde ela está),</li>
+          <li>confirmas <b>quem</b> deu a pancada,</li>
+          <li>e o <b>tipo/resultado</b> da jogada.</li>
+        </ul>
         <KeyTable
           rows={[
-            ["1", "a pancada está certa"],
-            ["2", "é pancada, mas o tipo está errado (escolhes o certo)"],
-            ["3", "não foi pancada nenhuma (falso alarme)"],
-            ["j / k", "pancada seguinte / anterior"],
-            ["espaço", "repetir o replay"],
+            ["← / →", "frame anterior / seguinte"],
+            ["Enter", "confirmar e avançar"],
           ]}
         />
         <p className="mt-2 text-gray-500">
-          Marca também pancadas que não foram detetadas: pausa o vídeo no impacto e usa
-          “+ Adicionar aqui”. No fim, <b>Submeter</b> — as tuas correções ficam guardadas.
-        </p>
-        <p className="mt-2 text-gray-500">
-          Na página <b>🎯 Anotar</b> podes ainda clicar na posição da bola e corrigir
-          quem deu a pancada — isso sim treina os detetores de bola e jogadores (a parte
-          de visão do sistema).
+          Cada imagem que confirmas é uma amostra de treino para o nosso modelo.
         </p>
       </Step>
 
-      <Step n={5} title="O que acontece ao teu trabalho" icon="🔁">
+      <Step n={5} title="O teu modelo" icon="📈">
         <p>
-          A leitura das pancadas (tipo, winner/erro, tática) vem de uma <b>IA</b>; as
-          tuas correções afinam-na e formam um <b>conjunto de referência</b> que usamos
-          para <b>medir</b> se está a ler bem. A parte espacial (jogadores, distâncias,
-          zonas) tem os seus próprios <b>modelos de visão</b>, melhorados na página
-          Anotar. Ciclo completo:
+          Na página <Link href="/modelo" className="text-brand hover:underline">O teu modelo</Link> vês
+          a tua <b>evolução por níveis</b> (1 a 5) por cada modelo — detetor de bola, de
+          jogadores e classificador de pancadas. Quando tiveres amostras suficientes,
+          treinas o modelo e podes <b>testá-lo contra o Gemini</b>. O objetivo é
+          construíres um modelo teu, melhor e sem custo por jogo.
         </p>
         <div className="mt-3 card px-4 py-3 text-sm text-gray-300 text-center font-mono">
-          jogar → analisar (IA + tracking) → rever/corrigir → afinar → repetir
+          jogar → analisar (Gemini) → confirmar frames → subir de nível → treinar o teu modelo
         </div>
       </Step>
+
+      {/* What each page does */}
+      <section className="space-y-3">
+        <h2 className="text-xl font-bold text-white">O que cada página faz</h2>
+        <PageRow href="/" name="Analisar" desc="Carregas o vídeo e geras o relatório completo da IA." />
+        <PageRow href="/modelo" name="O teu modelo" desc="Evolução por níveis e teste do teu modelo vs Gemini." />
+        <PageRow href="/tempo-util" name="Tempo útil" desc="Recebes o vídeo só com o jogo ativo, sem o tempo morto." />
+        <PageRow href="/ajuda" name="Como funciona" desc="Este guia." />
+      </section>
 
       {/* FAQ */}
       <section className="space-y-4">
         <h2 className="text-xl font-bold text-white">Dúvidas rápidas</h2>
-        <Faq q="Enganei-me numa correção. E agora?">
-          Na revisão de pancadas, basta voltar a submeter — a versão nova substitui a antiga.
+        <Faq q="Quanto tempo demora a análise?">
+          Alguns minutos, conforme o tamanho do vídeo. Corre tudo na cloud — não precisas do PC ligado.
         </Faq>
-        <Faq q="A IA enganou-se imenso no meu jogo. Vale a pena rever?">
-          Vale mesmo: corriges o relatório do teu jogo e, ao mesmo tempo, esses casos
-          difíceis são os mais úteis para verificar e afinar a leitura da IA.
+        <Faq q="O link do YouTube não funciona.">
+          O YouTube por vezes bloqueia downloads a partir de servidores. Nesse caso, descarrega o vídeo e carrega o ficheiro do PC.
         </Faq>
-        <Faq q="Preciso de calibrar o campo sempre?">
-          Não — uma vez por câmara/posição. Se a câmara mudar de sítio, recalibra
-          (são 4 cliques).
+        <Faq q="Para que serve confirmar os frames?">
+          Cada frame confirmado é uma amostra de treino. Quantos mais confirmas, mais sobes de nível e mais perto ficas de um modelo teu.
         </Faq>
         <Faq q="Os meus vídeos ficam guardados?">
-          Os vídeos são processados no servidor da equipa e os ficheiros temporários são
-          limpos periodicamente. As estatísticas e correções ficam guardadas.
+          São processados no servidor e os ficheiros temporários são limpos periodicamente. Os relatórios e anotações ficam guardados.
         </Faq>
       </section>
 
@@ -136,9 +137,18 @@ function Step({ n, title, icon, children }: {
   );
 }
 
+function PageRow({ href, name, desc }: { href: string; name: string; desc: string }) {
+  return (
+    <Link href={href} className="card card-hover flex items-center gap-4 px-5 py-3">
+      <span className="font-semibold text-white min-w-[8rem]">{name}</span>
+      <span className="text-sm text-gray-500">{desc}</span>
+    </Link>
+  );
+}
+
 function KeyTable({ rows }: { rows: [string, string][] }) {
   return (
-    <div className="card divide-y divide-gray-800 text-sm">
+    <div className="card divide-y divide-gray-800 text-sm mt-2">
       {rows.map(([key, desc]) => (
         <div key={key} className="flex items-center gap-4 px-4 py-2">
           <span className="kbd min-w-[3.5rem] text-center">{key}</span>

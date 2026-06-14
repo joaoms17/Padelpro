@@ -20,10 +20,13 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routers import matches, analytics, clips, condense, calibrate, review, quality, annotate
+from api.routers import (
+    matches, analytics, clips, condense, calibrate, review, quality, annotate,
+    report, training,
+)
 
 # Bumped whenever the dashboard starts depending on new API endpoints
-API_BUILD = 5
+API_BUILD = 6
 
 app = FastAPI(
     title="PadelPro Vision API",
@@ -72,6 +75,8 @@ app.include_router(calibrate.router)
 app.include_router(review.router)
 app.include_router(quality.router)
 app.include_router(annotate.router)
+app.include_router(report.router)
+app.include_router(training.router)
 
 
 @app.get("/health")

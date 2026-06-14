@@ -58,7 +58,7 @@ async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
 // ---- API version handshake (ApiBanner) ----
 // Bump together with API_BUILD in api/main.py when the dashboard starts
 // depending on new endpoints.
-export const EXPECTED_API_BUILD = 3;
+export const EXPECTED_API_BUILD = 6;
 
 export async function getApiHealth(): Promise<{ status: string; api_build?: number }> {
   const r = await fetch(`${BASE}/health`);   // /health is unauthenticated
@@ -548,6 +548,123 @@ export async function triggerPlayerRetrain(): Promise<{ status: string }> {
 
 export async function getAnnotateRetrainStatus(): Promise<Record<string, { status: string; detail?: string; n_samples?: number }>> {
   const r = await apiFetch(`${BASE}/annotate/retrain/status`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+// ---- Full-match Gemini report (Part 1) ----
+
+export interface ReportStatus {
+  rid: string;
+  status: string;            // processing | done | error
+  phase?: string;
+  filename?: string;
+  error?: string;
+}
+
+export interface MatchReport {
+  rid: string;
+  duration_s: number;
+  final_score: { team1_sets: number; team2_sets: number; detail: string };
+  match_summary: string;
+  confidence: number;
+  shot_counts: Record<string, Record<string, number>>;
+  formation_pct: Record<string, number>;
+  rally_stats: {
+    total_rallies: number;
+    avg_duration_s: number;
+    total_play_time_s: number;
+    play_time_pct: number;
+  };
+  player_positions: { t_s: number; player: number; court_x: number; court_y: number }[];
+  shots: { t_s: number; player: number; type: string; outcome: string }[];
+  formation_samples: { t_s: number; type: string }[];
+  score_timeline: { t_s: number; team1_games: number; team2_games: number }[];
+  key_frames: { t_s: number; n_players: number; ball_visible: boolean; description: string }[];
+  rallies: { start_s: number; end_s: number; num_shots: number; winner_team: 1 | 2 | null }[];
+}
+
+export async function uploadForReport(file: File): Promise<{ rid: string }> {
+  const fd = new FormData();
+  fd.append("file", file);
+  const r = await apiFetch(`${BASE}/report/upload`, { method: "POST", body: fd });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function uploadUrlForReport(url: string): Promise<{ rid: string }> {
+  const fd = new FormData();
+  fd.append("url", url);
+  const r = await apiFetch(`${BASE}/report/upload-url`, { method: "POST", body: fd });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function getReportStatus(rid: string): Promise<ReportStatus> {
+  const r = await apiFetch(`${BASE}/report/${rid}/status`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function getReport(rid: string): Promise<MatchReport> {
+  const r = await apiFetch(`${BASE}/report/${rid}`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export function reportFrameUrl(rid: string, idx: number): string {
+  return withCode(`${BASE}/report/${rid}/frames/${idx}`);
+}
+
+export function reportTrainingDataUrl(rid: string): string {
+  return withCode(`${BASE}/report/${rid}/training-data`);
+}
+
+// ---- Model progression / levels (Part 2) ----
+
+export interface TrainingTrack {
+  key: string;
+  label: string;
+  count: number;
+  level: number;
+  max_level: number;
+  next_at: number | null;
+  min_to_train: number | null;
+  can_train: boolean;
+  thresholds: number[];
+  model?: { trained: boolean; weights?: string; metrics?: Record<string, unknown> };
+}
+
+export interface TrainingStatus {
+  tracks: TrainingTrack[];
+  total_images: number;
+  match_frames: number;
+  overall_count: number;
+  overall_level: number;
+  max_level: number;
+  overall_next_at: number | null;
+  thresholds: number[];
+  models: Record<string, { trained: boolean; weights?: string; metrics?: Record<string, unknown> }>;
+}
+
+export interface TrainingTestResult {
+  key: string;
+  label: string;
+  status: "ready" | "trainable" | "collecting";
+  message: string;
+  count: number;
+  min_to_train: number;
+  trained: boolean;
+}
+
+export async function getTrainingStatus(): Promise<TrainingStatus> {
+  const r = await apiFetch(`${BASE}/training/status`);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+export async function getTrainingTest(): Promise<{ results: TrainingTestResult[] }> {
+  const r = await apiFetch(`${BASE}/training/test`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
