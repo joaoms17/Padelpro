@@ -5,6 +5,7 @@ import {
   getReportStatus,
   getReport,
   reportTrainingDataUrl,
+  reportCondensedUrl,
   type MatchReport,
 } from "@/lib/api";
 import { ScoreCard } from "@/components/report/ScoreCard";
@@ -150,6 +151,11 @@ function ReportBody({ report, rid }: { report: MatchReport; rid: string }) {
           <a className="btn-primary px-4 py-2" href={`/annotate/${rid}`}>
             ✋ Contribuir para treino
           </a>
+          {report.condensed_available && (
+            <a className="btn-ghost px-4 py-2" href={reportCondensedUrl(rid)} download>
+              ✂️ Descarregar tempo útil
+            </a>
+          )}
           <a className="btn-ghost px-4 py-2" href="/modelo">
             📈 Evolução do modelo
           </a>

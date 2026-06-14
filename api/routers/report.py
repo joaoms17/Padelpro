@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import shutil
+import subprocess
 import uuid
 import zipfile
 from pathlib import Path
@@ -108,13 +109,20 @@ async def upload_url_for_report(
     return {"rid": rid}
 
 
+def _condensed_path(rid: str) -> Path:
+    return _OUTPUT_DIR / rid / "condensed.mp4"
+
+
 @router.get("/{rid}/status")
 async def report_status(rid: str):
     if rid in _jobs:
-        return _jobs[rid]
-    # Job left memory but the report persisted — report it as done.
+        job = dict(_jobs[rid])
+        if job.get("status") == "done" and "condensed_available" not in job:
+            job["condensed_available"] = _condensed_path(rid).exists()
+        return job
     if _report_path(rid).exists():
-        return {"rid": rid, "status": "done", "phase": "concluído"}
+        return {"rid": rid, "status": "done", "phase": "concluído",
+                "condensed_available": _condensed_path(rid).exists()}
     raise HTTPException(status_code=404, detail="Relatório não encontrado.")
 
 
@@ -127,7 +135,31 @@ async def get_report(rid: str):
     with open(path) as f:
         report = json.load(f)
     report["rid"] = rid
+    report["condensed_available"] = _condensed_path(rid).exists()
     return report
+
+
+@router.get("/{rid}/condensed")
+async def get_condensed_video(rid: str):
+    """Download the Gemini-cut tempo útil — only the rally segments, dead time removed."""
+    cpath = _condensed_path(rid)
+    if not cpath.exists():
+        raise HTTPException(status_code=404, detail="Vídeo de tempo útil ainda não disponível.")
+
+    def iterfile():
+        with open(cpath, "rb") as f:
+            while chunk := f.read(1024 * 1024):
+                yield chunk
+
+    size = cpath.stat().st_size
+    return StreamingResponse(
+        iterfile(),
+        media_type="video/mp4",
+        headers={
+            "Content-Disposition": f"attachment; filename=tempo_util_{rid[:8]}.mp4",
+            "Content-Length": str(size),
+        },
+    )
 
 
 @router.get("/{rid}/frames/{idx}")
@@ -215,8 +247,13 @@ async def _analyze_bg(rid: str, in_path: Path) -> None:
         await asyncio.get_event_loop().run_in_executor(
             None, lambda: _extract_key_frames(rid, in_path, report))
 
-        _jobs[rid].update(status="done", phase="concluído")
-        logger.info("Report %s done.", rid)
+        _jobs[rid]["phase"] = "a cortar tempo útil"
+        condensed_ok = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: _create_condensed_video(
+                in_path, report.get("rallies", []), _condensed_path(rid)))
+
+        _jobs[rid].update(status="done", phase="concluído", condensed_available=condensed_ok)
+        logger.info("Report %s done (condensed=%s).", rid, condensed_ok)
     except Exception as exc:
         logger.exception("Report analysis failed for %s", rid)
         _jobs[rid].update(status="error", error=str(exc))
@@ -236,6 +273,54 @@ def _run_analysis(in_path: Path, api_key: str) -> dict:
     from padelpro_vision.analysis.gemini_match import analyze_full_match, enrich_report
     raw = analyze_full_match(in_path, api_key)
     return enrich_report(raw)
+
+
+def _create_condensed_video(video: Path, rallies: list, output: Path) -> bool:
+    """Cut the rally segments out of the original video using ffmpeg's select filter.
+    Returns True if the condensed file was created successfully."""
+    segments = [
+        (float(r["start_s"]), float(r["end_s"]))
+        for r in rallies
+        if float(r.get("end_s", 0)) - float(r.get("start_s", 0)) > 1.0
+    ]
+    if not segments or not video.exists():
+        return False
+
+    # Build a single select expression covering all rally windows
+    expr = "+".join(f"between(t,{s},{e})" for s, e in segments)
+
+    # Try with audio; fall back to video-only (some recordings lack audio)
+    for maps, fc in [
+        (
+            ["-map", "[outv]", "-map", "[outa]"],
+            f"[0:v]select='{expr}',setpts=N/FRAME_RATE/TB[outv];"
+            f"[0:a]aselect='{expr}',asetpts=N/SR/TB[outa]",
+        ),
+        (
+            ["-map", "[outv]"],
+            f"[0:v]select='{expr}',setpts=N/FRAME_RATE/TB[outv]",
+        ),
+    ]:
+        cmd = [
+            "ffmpeg", "-y", "-i", str(video),
+            "-filter_complex", fc,
+            *maps,
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-c:a", "aac",
+            str(output),
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, timeout=600)
+            if result.returncode == 0 and output.exists() and output.stat().st_size > 1000:
+                logger.info("Condensed video created: %s", output)
+                return True
+        except subprocess.TimeoutExpired:
+            logger.warning("Condensed video timed out for %s", video)
+            return False
+        except Exception as exc:
+            logger.warning("Condensed video attempt failed: %s", exc)
+
+    return False
 
 
 def _extract_key_frames(rid: str, video: Path, report: dict) -> None:

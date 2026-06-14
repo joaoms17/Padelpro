@@ -9,50 +9,8 @@ const BASE = process.env.NEXT_PUBLIC_API_URL?.trim()
   ? process.env.NEXT_PUBLIC_API_URL.trim().replace(/\/$/, "")
   : "/api/pipeline";
 
-// ---- Shared access code (set on the API via PADELPRO_ACCESS_CODE) ----
-// Stored in localStorage after the first prompt; sent as a header on fetches
-// and as ?code= on media URLs (<video src> can't send headers).
-
-const CODE_KEY = "padelpro_access_code";
-
-function getAccessCode(): string {
-  if (typeof window === "undefined") return "";
-  return localStorage.getItem(CODE_KEY) ?? "";
-}
-
-export function setAccessCode(code: string): void {
-  localStorage.setItem(CODE_KEY, code);
-}
-
-export function withCode(url: string): string {
-  const code = getAccessCode();
-  if (!code) return url;
-  return `${url}${url.includes("?") ? "&" : "?"}code=${encodeURIComponent(code)}`;
-}
-
-// Set when a request hits 401, so the AccessCodeModal can open even if it
-// mounts slightly after the failing request resolved.
-let _needsCode = false;
-export function consumeNeedsCode(): boolean {
-  const v = _needsCode;
-  _needsCode = false;
-  return v;
-}
-
 async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
-  const doFetch = () => {
-    const headers = new Headers(init?.headers);
-    const code = getAccessCode();
-    if (code) headers.set("X-Access-Code", code);
-    return fetch(url, { ...init, headers });
-  };
-
-  const r = await doFetch();
-  if (r.status === 401 && typeof window !== "undefined") {
-    _needsCode = true;
-    window.dispatchEvent(new CustomEvent("padelpro-needs-code"));
-  }
-  return r;
+  return fetch(url, init);
 }
 
 // ---- API version handshake (ApiBanner) ----
@@ -187,7 +145,7 @@ export async function getCondenseStatus(job_id: string): Promise<CondenseStatus>
 }
 
 export function condenseDownloadUrl(job_id: string): string {
-  return withCode(`${BASE}/condense/${job_id}/download`);
+  return `${BASE}/condense/${job_id}/download`;
 }
 
 // ---- Review & feedback (human-in-the-loop training) ----
@@ -227,6 +185,7 @@ export interface Correction {
 }
 
 export async function getReviewData(rid: string): Promise<ReviewData> {
+
   const r = await apiFetch(`${BASE}/review/${rid}`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
@@ -246,7 +205,7 @@ export async function submitReview(
 }
 
 export function reviewVideoUrl(rid: string): string {
-  return withCode(`${BASE}/review/${rid}/video`);
+  return `${BASE}/review/${rid}/video`;
 }
 
 // ---- Annotation (training data collection) ----
@@ -335,10 +294,12 @@ export interface ReportStatus {
   phase?: string;
   filename?: string;
   error?: string;
+  condensed_available?: boolean;
 }
 
 export interface MatchReport {
   rid: string;
+  condensed_available?: boolean;
   duration_s: number;
   final_score: { team1_sets: number; team2_sets: number; detail: string };
   match_summary: string;
@@ -388,11 +349,15 @@ export async function getReport(rid: string): Promise<MatchReport> {
 }
 
 export function reportFrameUrl(rid: string, idx: number): string {
-  return withCode(`${BASE}/report/${rid}/frames/${idx}`);
+  return `${BASE}/report/${rid}/frames/${idx}`;
 }
 
 export function reportTrainingDataUrl(rid: string): string {
-  return withCode(`${BASE}/report/${rid}/training-data`);
+  return `${BASE}/report/${rid}/training-data`;
+}
+
+export function reportCondensedUrl(rid: string): string {
+  return `${BASE}/report/${rid}/condensed`;
 }
 
 // ---- Model progression / levels (Part 2) ----
