@@ -23,13 +23,13 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Uploa
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
+from api.db import save_job, get_job, update_job, prune_jobs
+
 # Keep disk usage minimal: anything in data/uploads older than this is swept.
 _MAX_AGE_S = 3600  # 1 hour
 
 router = APIRouter(prefix="/condense", tags=["condense"])
 logger = logging.getLogger(__name__)
-
-_jobs: dict[str, dict] = {}
 
 _UPLOAD_DIR = Path("data/uploads")
 
@@ -117,13 +117,13 @@ async def upload_and_condense(
     with open(in_path, "wb") as f:
         shutil.copyfileobj(file.file, f, length=1024 * 1024)
 
-    _jobs[job_id] = {
+    save_job("condense", job_id, {
         "job_id": job_id,
         "status": "processing",
         "phase": "segmentação",
         "filename": file.filename,
         "output": str(out_path),
-    }
+    })
     logger.info(
         "Condense job %s: uploaded %s (analyze=%s, deep=%s, gemini=%s)",
         job_id, file.filename, analyze, deep, gemini,
@@ -162,13 +162,13 @@ async def condense_from_url(
     in_path = _UPLOAD_DIR / f"{job_id}.mp4"
     out_path = _UPLOAD_DIR / f"{job_id}_useful.mp4"
 
-    _jobs[job_id] = {
+    save_job("condense", job_id, {
         "job_id": job_id,
         "status": "processing",
         "phase": "a descarregar do link",
         "filename": url,
         "output": str(out_path),
-    }
+    })
     logger.info("Condense job %s: from URL %s (analyze=%s, deep=%s, gemini=%s)",
                 job_id, url, analyze, deep, gemini)
 
@@ -180,16 +180,17 @@ async def condense_from_url(
 
 @router.get("/{job_id}/status")
 async def condense_status(job_id: str):
-    if job_id not in _jobs:
+    job = get_job("condense", job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
-    return _jobs[job_id]
+    return job
 
 
 @router.get("/{job_id}/download")
 async def download_condensed(job_id: str):
-    if job_id not in _jobs:
+    job = get_job("condense", job_id)
+    if not job:
         raise HTTPException(status_code=404, detail="Job not found.")
-    job = _jobs[job_id]
     if job["status"] != "done":
         raise HTTPException(status_code=409, detail=f"Not ready (status: {job['status']}).")
     path = Path(job["output"])
@@ -199,7 +200,6 @@ async def download_condensed(job_id: str):
     # Delete the output once it has been sent — nothing is kept around.
     def _cleanup():
         _rm(path)
-        _jobs.pop(job_id, None)
 
     return FileResponse(
         str(path), media_type="video/mp4",
@@ -227,12 +227,11 @@ def _condense_sync(
     rallies = [s for s in segs if s.type == "rally"]
     useful_s = sum(s.duration_ms for s in rallies) / 1000.0
 
-    _jobs[job_id].update(
-        total_s=round(total_s, 1),
-        useful_s=round(useful_s, 1),
-        useful_pct=round(100.0 * useful_s / total_s, 1) if total_s else 0.0,
-        rallies=len(rallies),
-    )
+    update_job("condense", job_id,
+               total_s=round(total_s, 1),
+               useful_s=round(useful_s, 1),
+               useful_pct=round(100.0 * useful_s / total_s, 1) if total_s else 0.0,
+               rallies=len(rallies))
 
     if not rallies:
         _rm(in_path)
@@ -248,29 +247,31 @@ def _condense_sync(
         modal_url = os.environ.get("MODAL_ANALYZE_URL", "").strip()
         if modal_url:
             try:
-                _jobs[job_id]["phase"] = "análise na GPU (cloud)"
+                update_job("condense", job_id, phase="análise na GPU (cloud)")
                 report = _analyze_via_modal(modal_url, in_path, court_id, deep)
-                _jobs[job_id]["report"] = report
+                update_job("condense", job_id, report=report)
             except Exception as exc:
                 logger.exception("Modal analysis failed for job %s", job_id)
-                _jobs[job_id]["report_error"] = f"Análise GPU falhou: {exc}"
+                update_job("condense", job_id, report_error=f"Análise GPU falhou: {exc}")
         else:
             _run_local_analysis(job_id, in_path, court_id, deep, segs)
 
     # Gemini semantic analysis — runs on the ORIGINAL video (same timeline as
     # the CV hits) and must happen before the original is deleted.
     if gemini:
-        _run_gemini_analysis(job_id, in_path, cv_report=_jobs[job_id].get("report"))
+        job = get_job("condense", job_id)
+        _run_gemini_analysis(job_id, in_path, cv_report=(job or {}).get("report"))
 
     # Persist review artifacts AFTER Gemini so the saved report carries the
     # semantic layer (types, outcomes, tactics) when the user revisits later.
+    job = get_job("condense", job_id)
     _persist_for_review(
         job_id,
-        report=_jobs[job_id].get("report"),
-        gemini_report=_jobs[job_id].get("gemini_report"),
+        report=(job or {}).get("report"),
+        gemini_report=(job or {}).get("gemini_report"),
     )
 
-    _jobs[job_id]["phase"] = "corte do vídeo"
+    update_job("condense", job_id, phase="corte do vídeo")
     condense_video(in_path, segs, out_path)
 
     # Keep condensed video in data/videos/ for the review page (video available
@@ -427,11 +428,10 @@ def _run_gemini_analysis(job_id: str, video: Path, cv_report: dict | None) -> No
     try:
         from padelpro_vision.analysis.gemini_clip import analyze_with_gemini, gemini_available
         if not gemini_available(api_key):
-            _jobs[job_id]["gemini_error"] = (
-                "GEMINI_API_KEY não configurada ou google-genai não instalado."
-            )
+            update_job("condense", job_id,
+                       gemini_error="GEMINI_API_KEY não configurada ou google-genai não instalado.")
             return
-        _jobs[job_id]["phase"] = "análise Gemini (semântica)"
+        update_job("condense", job_id, phase="análise Gemini (semântica)")
         cv_hits = cv_report.get("shots") if cv_report else None
         result = analyze_with_gemini(video, api_key, cv_hits=cv_hits)
 
@@ -446,17 +446,17 @@ def _run_gemini_analysis(job_id: str, video: Path, cv_report: dict | None) -> No
             if "merged_hits" in result:
                 cv_report["shots"] = result["merged_hits"]
             cv_report["gemini"] = gemini_meta
-            _jobs[job_id]["report"] = cv_report
+            update_job("condense", job_id, report=cv_report)
         else:
             # Gemini-only (no CV analysis requested)
-            _jobs[job_id]["gemini_report"] = {
+            update_job("condense", job_id, gemini_report={
                 **gemini_meta,
                 "strokes": result.get("gemini_strokes", []),
-            }
+            })
         logger.info("Gemini analysis done for job %s (%d strokes)", job_id, gemini_meta["n_strokes"])
     except Exception as exc:
         logger.exception("Gemini analysis failed for job %s", job_id)
-        _jobs[job_id]["gemini_error"] = f"Gemini falhou: {exc}"
+        update_job("condense", job_id, gemini_error=f"Gemini falhou: {exc}")
 
 
 def _run_local_analysis(
@@ -465,28 +465,26 @@ def _run_local_analysis(
     try:
         from padelpro_vision.analysis import analyze_clip, analysis_available
         if analysis_available():
-            _jobs[job_id]["phase"] = "análise de jogadores"
+            update_job("condense", job_id, phase="análise de jogadores")
 
             def _progress(p: float) -> None:
-                _jobs[job_id]["progress"] = round(p * 100)
+                update_job("condense", job_id, progress=round(p * 100))
 
             def _phase(name: str) -> None:
-                _jobs[job_id]["phase"] = name
-                _jobs[job_id]["progress"] = 0
+                update_job("condense", job_id, phase=name, progress=0)
 
             report = analyze_clip(
                 in_path, _UPLOAD_DIR / job_id, court_id=court_id,
                 segments=segs, deep=deep,
                 progress_cb=_progress, phase_cb=_phase,
             )
-            _jobs[job_id]["report"] = report
+            update_job("condense", job_id, report=report)
         else:
-            _jobs[job_id]["report_error"] = (
-                "Este servidor não tem o motor de análise (torch) instalado."
-            )
+            update_job("condense", job_id,
+                       report_error="Este servidor não tem o motor de análise (torch) instalado.")
     except Exception as exc:
         logger.exception("Analysis failed for job %s", job_id)
-        _jobs[job_id]["report_error"] = f"Análise falhou: {exc}"
+        update_job("condense", job_id, report_error=f"Análise falhou: {exc}")
 
 
 def _download_video(url: str, dest: Path) -> None:
@@ -536,12 +534,11 @@ async def _condense_bg(
         await asyncio.get_event_loop().run_in_executor(
             None, lambda: _condense_sync(job_id, in_path, out_path, analyze, court_id, deep, gemini)
         )
-        _jobs[job_id]["status"] = "done"
+        update_job("condense", job_id, status="done")
         logger.info("Condense job %s done.", job_id)
     except Exception as exc:
         logger.exception("Condense job %s failed", job_id)
-        _jobs[job_id]["status"] = "error"
-        _jobs[job_id]["error"] = str(exc)
+        update_job("condense", job_id, status="error", error=str(exc))
 
 
 async def _condense_from_url_bg(
@@ -555,9 +552,8 @@ async def _condense_from_url_bg(
         await loop.run_in_executor(
             None, lambda: _condense_sync(job_id, in_path, out_path, analyze, court_id, deep, gemini)
         )
-        _jobs[job_id]["status"] = "done"
+        update_job("condense", job_id, status="done")
         logger.info("Condense job %s (url) done.", job_id)
     except Exception as exc:
         logger.exception("Condense job %s (url) failed", job_id)
-        _jobs[job_id]["status"] = "error"
-        _jobs[job_id]["error"] = str(exc)
+        update_job("condense", job_id, status="error", error=str(exc))

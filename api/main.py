@@ -61,6 +61,13 @@ app.include_router(report.router)
 app.include_router(training.router)
 
 
+@app.on_event("startup")
+async def startup():
+    from api.db import prune_jobs
+    prune_jobs("report")
+    prune_jobs("condense")
+
+
 @app.get("/health")
 async def health():
     # api_build: bump when the frontend depends on new endpoints — the

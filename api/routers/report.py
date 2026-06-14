@@ -22,7 +22,7 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response, StreamingResponse
 
-from api.db import get_job, save_job, update_job
+from api.db import save_job, get_job, update_job
 
 router = APIRouter(prefix="/report", tags=["report"])
 logger = logging.getLogger(__name__)
@@ -38,6 +38,10 @@ def _report_path(rid: str) -> Path:
 
 def _frames_dir(rid: str) -> Path:
     return _OUTPUT_DIR / rid / "match_frames"
+
+
+def _condensed_path(rid: str) -> Path:
+    return _OUTPUT_DIR / rid / "condensed.mp4"
 
 
 # ── Create / ingest ──────────────────────────────────────────────────────────
@@ -81,7 +85,7 @@ async def upload_for_report(
             f.write(data)
 
     save_job("report", rid, {"rid": rid, "status": "processing", "phase": "na fila",
-                             "filename": file.filename or ""})
+                             "filename": file.filename})
     background_tasks.add_task(_analyze_bg, rid, in_path)
     return {"rid": rid}
 
@@ -109,14 +113,10 @@ async def upload_url_for_report(
     return {"rid": rid}
 
 
-def _condensed_path(rid: str) -> Path:
-    return _OUTPUT_DIR / rid / "condensed.mp4"
-
-
 @router.get("/{rid}/status")
 async def report_status(rid: str):
     job = get_job("report", rid)
-    if job is not None:
+    if job:
         if job.get("status") == "done" and "condensed_available" not in job:
             job["condensed_available"] = _condensed_path(rid).exists()
         return job
@@ -229,6 +229,50 @@ async def _download_and_analyze_bg(rid: str, url: str, in_path: Path) -> None:
         update_job("report", rid, status="error", error=str(exc))
 
 
+def _detect_ball_in_frames(frames_dir: Path, report: dict) -> None:
+    """Run ball detection on each key frame and store positions in the report.
+
+    Uses the same RetinaNet stub already in the codebase (target_label=37,
+    COCO sports ball). Skips silently if torch is unavailable.
+    """
+    key_frames = report.get("key_frames", [])
+    if not key_frames:
+        return
+    try:
+        import torch
+        import torchvision
+        from padelpro_vision.detection.detector import TorchvisionDetector
+        detector = TorchvisionDetector(
+            model_name="retinanet_resnet50_fpn_v2",
+            target_label=37,  # COCO sports ball
+            score_threshold=0.3,
+        )
+    except Exception:
+        return  # torch not available on light backend
+
+    for idx, kf in enumerate(key_frames):
+        fpath = frames_dir / f"frame_{idx:04d}.jpg"
+        if not fpath.exists():
+            continue
+        try:
+            import cv2
+            img = cv2.imread(str(fpath))
+            if img is None:
+                continue
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            h, w = img.shape[:2]
+            detections = detector.detect(img_rgb)
+            if detections:
+                best = max(detections, key=lambda d: d.get("score", 0))
+                bx = (best["x1"] + best["x2"]) / 2 / w
+                by = (best["y1"] + best["y2"]) / 2 / h
+                kf["ball_x_norm"] = round(bx, 4)
+                kf["ball_y_norm"] = round(by, 4)
+                kf["ball_conf"] = round(best.get("score", 0), 3)
+        except Exception:
+            pass
+
+
 async def _analyze_bg(rid: str, in_path: Path) -> None:
     try:
         update_job("report", rid, status="processing", phase="análise Gemini (vídeo todo)")
@@ -246,6 +290,10 @@ async def _analyze_bg(rid: str, in_path: Path) -> None:
         update_job("report", rid, phase="extração de frames de exemplo")
         await asyncio.get_event_loop().run_in_executor(
             None, lambda: _extract_key_frames(rid, in_path, report))
+
+        update_job("report", rid, phase="deteção de bola nos frames")
+        await asyncio.get_event_loop().run_in_executor(
+            None, lambda: _detect_ball_in_frames(_frames_dir(rid), report))
 
         update_job("report", rid, phase="a cortar tempo útil")
         condensed_ok = await asyncio.get_event_loop().run_in_executor(
