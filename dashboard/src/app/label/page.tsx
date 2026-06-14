@@ -79,7 +79,7 @@ export default function LabelPage() {
           e.preventDefault(); setIdx((i) => Math.max(i - 1, 0)); break;
         case " ": {
           e.preventDefault();
-          const v = document.querySelector("#label-video");
+          const v = document.querySelector<HTMLVideoElement>("#label-video");
           if (v) { v.currentTime = 0; v.play().catch(() => {}); }
           break;
         }
