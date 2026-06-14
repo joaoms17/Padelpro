@@ -355,9 +355,11 @@ def _parse_match_json(text: str) -> dict:
     import json, re
 
     # Extract and log reasoning block
+    reasoning_text = ""
     reasoning_match = re.search(r'<raciocinio>(.*?)</raciocinio>', text, re.DOTALL | re.IGNORECASE)
     if reasoning_match:
-        logger.info("Gemini reasoning (first 1000 chars): %s", reasoning_match.group(1).strip()[:1000])
+        reasoning_text = reasoning_match.group(1).strip()
+        logger.info("Gemini reasoning (first 1000 chars): %s", reasoning_text[:1000])
         text = text[text.lower().find('</raciocinio>') + len('</raciocinio>'):]
 
     # Find the start of the JSON object
@@ -365,6 +367,7 @@ def _parse_match_json(text: str) -> dict:
     if json_start == -1:
         logger.warning("No JSON object found in Gemini response")
         data: dict = {}
+        data["_gemini_reasoning"] = reasoning_text
         _fill_defaults(data)
         _derive_compat_fields(data, is_v2=False)
         return data
@@ -375,6 +378,7 @@ def _parse_match_json(text: str) -> dict:
     # Strategy 1: clean parse
     try:
         data = json.loads(text)
+        data["_gemini_reasoning"] = reasoning_text
         is_v2 = "jogadores" in data
         _fill_defaults(data)
         _derive_compat_fields(data, is_v2=is_v2)
@@ -392,6 +396,7 @@ def _parse_match_json(text: str) -> dict:
     repaired += "]" * max(0, opens) + "}" * max(0, opens_b)
     try:
         data = json.loads(repaired)
+        data["_gemini_reasoning"] = reasoning_text
         is_v2 = "jogadores" in data
         logger.info("Recovery strategy 2 succeeded (%d chars)", len(repaired))
         _fill_defaults(data)
@@ -423,6 +428,7 @@ def _parse_match_json(text: str) -> dict:
     is_v2 = "jogadores" in data
     if data:
         logger.info("Recovery strategy 3: extracted keys %s", list(data.keys()))
+    data["_gemini_reasoning"] = reasoning_text
     _fill_defaults(data)
     _derive_compat_fields(data, is_v2=is_v2)
     return data
@@ -660,7 +666,8 @@ def _derive_compat_fields(data: dict, is_v2: bool | None = None) -> None:
                 "num_shots": len(rally.get("pancadas", [])),
                 "winner_team": 1 if winner == "A" else (2 if winner == "B" else None),
             })
-        data["rallies_compat"] = old_rallies
+        data["rallies_v2"] = data["rallies"]   # keep original v2 for reference
+        data["rallies"] = old_rallies           # replace with compat format for all consumers
 
 
 # ── Derived metrics ──────────────────────────────────────────────────────────
@@ -715,7 +722,9 @@ def compute_rally_stats(rallies: list[dict], duration_s: float) -> dict:
 
 def enrich_report(report: dict) -> dict:
     """Add derived fields the frontend consumes."""
-    is_v2 = bool(report.get("jogadores"))  # new schema from updated prompt
+    is_v2 = bool(report.get("rallies_v2")) or any(
+        "fases" in r or "pancadas" in r for r in report.get("rallies", [])
+    )
 
     # For v2 schema, ensure compat fields are derived if not already present
     if is_v2 and "shot_counts" not in report:
@@ -723,8 +732,8 @@ def enrich_report(report: dict) -> dict:
 
     report["shot_counts"] = compute_shot_counts(report.get("shots", []))
     report["formation_pct"] = compute_formation_pct(report.get("formation_samples", []))
-    # Use rallies_compat for stats in v2 schema
-    rallies_for_stats = report.get("rallies_compat", []) if is_v2 else report.get("rallies", [])
+    # rallies is always in compat format (start_s/end_s) after _derive_compat_fields
+    rallies_for_stats = report.get("rallies", [])
     report["rally_stats"] = compute_rally_stats(
         rallies_for_stats, report.get("duration_s", 0.0)
     )

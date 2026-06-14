@@ -395,6 +395,7 @@ export interface MatchReport {
   resumo?: MatchResumo;
   pausas?: MatchPausa[];
   // Note: rallies field is overloaded — v2 reports use MatchRallyV2[], v1 used old format
+  _gemini_reasoning?: string;
 }
 
 export interface ReportHistoryEntry {
