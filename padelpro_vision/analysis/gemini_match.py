@@ -42,111 +42,165 @@ SHOT_TYPES = ("forehand", "backhand", "volley", "smash", "bandeja",
 FORMATIONS = ("both_net", "both_back", "split_near_net", "split_far_net", "mixed")
 
 _MATCH_PROMPT = """
-Analisa este vídeo de padel. Antes de gerar qualquer JSON, escreve um bloco de raciocínio entre <raciocinio> e </raciocinio> onde:
+# PROMPT GEMINI — ANÁLISE DE VÍDEO DE PADEL
+---
+## INSTRUÇÕES GERAIS
+Analisa este vídeo de padel. Antes de gerar qualquer JSON, escreve um bloco de raciocínio entre `<raciocinio>` e `</raciocinio>` onde:
 1. Identificas os 4 jogadores e descreves os seus elementos visuais
 2. Confirmas a posição inicial (esquerda/direita) de cada equipa
 3. Verificas as tuas deteções antes de as confirmar no JSON
-4. Para cada rally, rastreias as mudanças de posição coletiva de cada equipa e registas o timestamp exacto de cada transição de fase
-5. Cada vez que a posição coletiva de uma equipa muda claramente, fechas a fase anterior e abres uma nova. Só registas uma mudança de fase quando a mudança é visualmente confirmada
-6. No resumo do JSON incluis: duracao_util (duração total menos todas as pausas) e tempo_por_fase com o total acumulado por fase (ATAQUE / TRANSIÇÃO / DEFESA) para cada equipa
+4. Para cada rally, rastreias as mudanças de posição coletiva de cada equipa e registas o timestamp exacto de cada transição de fase — estes dados são usados para cortar o vídeo automaticamente por fase (ATAQUE / TRANSIÇÃO / DEFESA). O serviço é um momento dentro do ATAQUE, não uma fase separada
+5. Cada vez que a posição coletiva de uma equipa muda claramente, fechas a fase anterior (registas o `fim`) e abres uma nova (registas o `inicio`). Só registas uma **mudança de fase** quando a mudança é visualmente confirmada — nunca por estimativa
+6. No `resumo` do JSON incluis: `duracao_util` (duração total menos todas as pausas) e `tempo_por_fase` com o total acumulado por fase (ATAQUE / TRANSIÇÃO / DEFESA) para cada equipa
 
+---
 ## 1. IDENTIFICAÇÃO DOS JOGADORES
 No início do vídeo, identifica os 4 jogadores com base nos seguintes elementos visuais:
-- Cor e padrão da camisola
-- Cor dos calções
-- Cor e padrão das meias
-- Cor e modelo dos ténis
-- Modelo e cor da raquete
+- Cor e padrão da **camisola**
+- Cor dos **calções**
+- Cor e padrão das **meias**
+- Cor e modelo dos **ténis**
+- Modelo e cor da **raquete**
 
 Se dois jogadores tiverem elementos similares, usa a combinação dos restantes fatores para os distinguir.
 
-A referência de posição é sempre a parte inferior do bounding box — não a cabeça nem o tronco.
+**Posição no campo:** o Gemini deteta os jogadores automaticamente (bounding box). A referência de posição é sempre a **parte inferior do bounding box** — não a cabeça nem o tronco. Se o bounding box não for suficiente, usa os ténis/pés como backup.
 
 Atribui as seguintes IDs:
-- Equipa A: A1 (lado esquerdo) e A2 (lado direito)
-- Equipa B: B1 (lado esquerdo) e B2 (lado direito)
+- **Equipa A:** `A1` (lado esquerdo) e `A2` (lado direito)
+- **Equipa B:** `B1` (lado esquerdo) e `B2` (lado direito)
 
-Esquerda/direita serve apenas para identificação inicial — a posição muda ao longo do jogo.
+> **Nota:** Esquerda/direita serve apenas para identificação inicial. Não é usada na análise posterior — a posição muda ao longo do jogo.
 
+---
 ## 2. SISTEMA DE ZONAS DO CAMPO
 
 Zonas do campo, da rede para o fundo:
-- ML1: 1ª malha (junto à rede) — ATAQUE
-- ML2: 2ª malha — ATAQUE
-- ML3: 3ª malha + espaço até à linha de serviço — TRANSIÇÃO
-- VL1: 1º vidro lateral (da linha de serviço até ao VL2) — DEFESA
-- VL2: 2º vidro lateral — DEFESA
-- VF1 a VF5: Vidro de fundo da direita (VF1) para a esquerda (VF5) — DEFESA
 
-A linha de serviço é a fronteira entre ML3 (TRANSIÇÃO) e VL1 (DEFESA).
+| Zona | Localização | Fase |
+|------|-------------|------|
+| `ML1` | 1ª malha (junto à rede) | ATAQUE |
+| `ML2` | 2ª malha | ATAQUE |
+| `ML3` | 3ª malha + espaço até à linha de serviço | TRANSIÇÃO |
+| `VL1` | 1º vidro lateral (da linha de serviço até ao VL2) | DEFESA |
+| `VL2` | 2º vidro lateral | DEFESA |
+| `VF1`–`VF5` | Vidro de fundo — da direita (`VF1`) para a esquerda (`VF5`) | DEFESA |
 
+**Zona ML3:** engloba o painel físico da 3ª malha e todo o espaço de campo aberto até à linha de serviço. A linha de serviço é a fronteira entre ML3 (TRANSIÇÃO) e VL1 (DEFESA) — não existe sobreposição entre zonas.
+
+**VL1:** começa na linha de serviço e estende-se até ao VL2.
+
+**VF1–VF5:** o vidro de fundo divide-se em 5 zonas da direita para a esquerda (perspectiva da câmara). Usa para registar posições precisas no fundo do campo.
+
+---
 ## 3. FASES DE JOGO
 
-As fases são determinadas pela posição coletiva da equipa:
-- ATAQUE: Ambos os jogadores da equipa em ML1 ou ML2
-- TRANSIÇÃO: Um ou ambos os jogadores na zona ML3
-- DEFESA: Ambos os jogadores em VL1, VL2 ou VF1-VF5
+As fases são determinadas pela posição **coletiva da equipa** — nunca pelo jogador individual.
 
-NOTA — SERVIÇO: O serviço não é uma fase separada. É um momento (momento: "servico") registado dentro da fase ATAQUE da equipa que serve. O parceiro já está em ML1/ML2; o servidor executa a partir de VL1/VL2/VF mas a equipa mantém a fase ATAQUE. Regista o timestamp_servico na fase.
+| Fase | Condição |
+|------|----------|
+| `ATAQUE` | Ambos os jogadores da equipa em ML1 ou ML2 — **exceto durante o serviço** (ver nota abaixo) |
+| `TRANSIÇÃO` | Um ou ambos os jogadores na zona ML3 (da 3ª malha até à linha de serviço) |
+| `DEFESA` | Ambos os jogadores em VL1, VL2 ou VF1–VF5 |
 
-NOTA — 2ª BOLA: A primeira pancada da equipa receptora após o serviço é a "2ª bola". Regista "segunda_bola": true na pancada correspondente.
+**Nota — Serviço dentro do ATAQUE:**
+O serviço não é uma fase separada — é um momento (`momento: "servico"`) registado dentro da fase ATAQUE da equipa que serve. O parceiro já está em ML1/ML2; o servidor executa a partir de VL1/VL2/VF mas a equipa mantém a fase ATAQUE. Regista o `timestamp_servico` na fase para permitir cortes isolados no futuro.
 
-Regras obrigatórias:
-- A fase só muda quando o bounding box ou os pés do(s) jogador(es) mudam claramente de zona
-- Em caso de dúvida, mantém a fase anterior
-- Uma equipa não pode passar directamente de DEFESA para ATAQUE sem TRANSIÇÃO (excepção: transição demasiado rápida para captar)
+**Nota — 2ª bola (para uso futuro):**
+A primeira pancada da equipa receptora após o serviço é a "2ª bola". Regista `"segunda_bola": true` na pancada correspondente em `pancadas` — não altera a fase, serve apenas para análise futura.
 
+**Regras obrigatórias:**
+- A fase só muda quando o **bounding box ou os pés** do(s) jogador(es) mudam claramente de zona
+- Em caso de dúvida, **mantém a fase anterior**
+- Uma equipa **não pode** passar directamente de `DEFESA` → `ATAQUE` sem `TRANSIÇÃO`. **Exceção:** se a transição foi demasiado rápida para captar — aceitar o salto sem erro, o rally continua
+
+Cada fase gera um clip independente com timestamps de início e fim.
+
+---
 ## 4. DETECÇÃO DO SERVIÇO
 
-O servidor está atrás da linha de serviço (zona VL1/VL2/VF1-VF5); o parceiro está junto à rede (ML1/ML2).
-A bola cai da mão do servidor, bate no chão, e o servidor bate-a com a raquete.
-A bola vai cruzada para o quadrado de serviço diagonal do adversário.
+O serviço é um **momento dentro da fase ATAQUE** (ver secção 3). Detecta-o para registar `timestamp_servico` e `momento: "servico"` na fase correspondente, e para marcar `"tipo": "serve"` na pancada.
 
-Validade:
-- Válido se a bola bate dentro do quadrado de serviço cruzado e não toca na malha
-- Repetição (let): a bola toca na tela da rede mas cai dentro do quadrado cruzado
-- Falta: a bola toca na malha e não entra; ou o receptor não jogou
+Imediatamente antes do serviço e quando o serviço acontece, verificam-se estas condições:
+- Servidor está **atrás da linha de serviço** (zona VL1/VL2/VF1–VF5)
+- Parceiro do servidor está junto à rede (ML1/ML2)
+- Adversários perto da linha de serviço ou atrás
+- A bola cai da mão do servidor, bate no chão, e o servidor bate-a com a raquete
+- A bola vai cruzada para o **quadrado de serviço diagonal** do adversário
 
+**Validade do serviço:**
+- ✅ Válido se: a bola bate dentro do quadrado de serviço cruzado e não toca na malha; confirmado se o receptor jogou a bola de volta **e** o próximo serviço é feito para o lado oposto (ou muda o servidor)
+- 🔄 Repetição (let): a bola toca na tela da rede mas cai dentro do quadrado cruzado — o serviço repete-se
+- ❌ Falta se: a bola toca na malha e não entra; ou o receptor não jogou (deixou passar, passou a bola sem força ao adversário, ou bateu para a rede); ou muda o servidor
+
+---
 ## 5. FIM DE RALLY
 
-Um rally termina quando:
-1. A bola saiu do campo; ou está na mão de um jogador; ou tocou duas vezes no chão; ou a mesma equipa tocou nela duas vezes seguidas
-2. Mais de 6 segundos sem nenhuma pancada de nenhum jogador
-3. Dois jogadores cumprimentam-se
+Um rally termina quando **uma** destas condições for verdade:
+
+1. **(Primário — deteção de bola)** A bola saiu do campo; ou está na mão de um jogador; ou tocou duas vezes no chão; ou a mesma equipa tocou nela duas vezes seguidas
+2. Mais de **6 segundos** sem nenhuma pancada de nenhum jogador — se o ponto está a durar 6 segundos sem pancada, terminou. Aplica-se sempre, independentemente de a bola ser detetável ou não
+3. Dois jogadores cumprimentam-se (de equipas opostas ou da mesma equipa) — indicador claro de fim de ponto
 4. Um jogador toca na rede com a raquete ou o corpo durante o rally
 
+---
 ## 6. PAUSAS E TROCA DE CAMPO
 
-Uma pausa superior a 45 segundos pode indicar:
-- troca_de_campo: Jogadores estão no lado oposto ao que estavam
-- discussao: Jogadores continuam no mesmo lado
-- lesao: Jogadores dispersos
-- indefinido
+Uma pausa superior a **45 segundos** pode indicar três situações diferentes. Após a pausa, verifica a posição dos jogadores para determinar qual:
 
-Em qualquer pausa > 45 segundos: regista timestamps, duração e tipo.
+| Situação | Indicador |
+|----------|-----------|
+| **Troca de campo** | Jogadores estão no lado oposto ao que estavam antes da pausa |
+| **Discussão / timeout** | Jogadores continuam no mesmo lado, reagrupados junto à rede ou no fundo |
+| **Lesão / interrupção** | Jogadores dispersos, câmara pode focar num jogador específico |
 
+**Em qualquer pausa > 45 segundos:**
+- Regista com timestamps de início e fim
+- Regista a duração em segundos
+- Identifica a situação (`troca_de_campo`, `discussao`, `lesao`, `indefinido`)
+- Se for troca de campo: atualiza as posições dos jogadores para o lado oposto
+- A camisola de um jogador pode mudar durante a pausa, mas não de todos em simultâneo — atualiza só o jogador que mudou
+- Cruza com os dados de posição de cada jogador no resumo individual
+
+**No JSON das pausas**, inclui o campo `tipo_pausa` com um destes valores: `troca_de_campo`, `discussao`, `lesao`, `indefinido`.
+
+---
 ## 7. TIPOS DE PANCADA
 
-- volley: Pancada sem deixar a bola tocar no chão. Geralmente em ML1/ML2
-- forehand: Pancada após a bola tocar no chão (ou no vidro), executada pelo lado dominante
-- backhand: Pancada após a bola tocar no chão (ou no vidro), executada pelo lado não-dominante
-- smash: Após balão do adversário — força máxima, acima da cabeça. Equipa tipicamente em ataque
-- overhead: Após balão do adversário — executada ao lado da cabeça, com efeito lateral, pulso alto e movimento lateral (inclui víbora, bandeja, kick)
-- saida_vidro: Equipa recua após balão, deixa a bola bater alto no vidro de fundo, executa quando ressalta
-- serve: Serviço (ver secção 4)
-- indefinido: Tipo não identificável com certeza
+Para cada pancada, identifica o tipo com base no que vês. Usa `indefinido` se não tiveres certeza.
 
-## 8. PADRÕES PROIBIDOS — SEMPRE ERRADO
+| Tipo | Descrição |
+|------|-----------|
+| `volley` | Pancada sem deixar a bola tocar no chão. Geralmente em ML1/ML2, mas pode ser feita mais atrás |
+| `forehand` | Pancada após a bola tocar no chão (ou no vidro), executada pelo lado dominante |
+| `backhand` | Pancada após a bola tocar no chão (ou no vidro), executada pelo lado não-dominante |
+| `smash` | Após um balão do adversário: pancada com **força máxima**, executada **acima da cabeça**. Equipa tipicamente em ataque |
+| `overhead` | Após um balão do adversário: pancada executada **ao lado da cabeça**, com efeito lateral, pulso alto e movimento lateral. Inclui: víbora (lateral com efeito), bandeja (controlado a recuar), kick (bola mais à esquerda da cabeça, raquete mais alta, tocado para malha ou vidro lateral) |
+| `saida_vidro` | Equipa recua após balão adversário, deixa a bola bater alto no **vidro de fundo**, e executa a pancada quando a bola ressalta |
+| `serve` | Serviço (ver secção 4) |
+| `indefinido` | Tipo não identificável com certeza |
 
-- Todos os 4 jogadores com contagem de pancadas igual ou muito similar
-- Dois jogadores da mesma equipa na mesma zona ao mesmo tempo
-- Dois pontos seguidos atribuídos à mesma equipa sem ponto intercalado da equipa adversária (excepção: dupla falta dá 2 pontos ao mesmo tempo)
-- Qualquer jogador da Equipa A do lado da Equipa B no campo (e vice-versa) — as equipas nunca cruzam a rede em jogo normal
+> **Smash vs. Overhead:** ambos ocorrem após balão adversário. O smash é força máxima acima da cabeça; o overhead tem movimento lateral e efeito.
 
+---
+## 8. RACIOCÍNIO ANTES DO JSON
+
+Antes de gerar o JSON, escreve o bloco de raciocínio:
+
+<raciocinio>
+Jogadores identificados:
+- A1: [descrição visual completa]
+- A2: [descrição visual completa]
+- B1: [descrição visual completa]
+- B2: [descrição visual completa]
+Posição inicial: Equipa A no lado [esquerdo/direito], Equipa B no lado [esquerdo/direito].
+[Descreve o que vês nos primeiros segundos do vídeo antes de confirmar qualquer deteção.]
+</raciocinio>
+
+---
 ## 9. OUTPUT JSON
 
-Retorna um bloco <raciocinio>...</raciocinio> seguido de um único objeto JSON válido, sem markdown, sem texto antes ou depois do JSON.
-
+```json
 {
   "jogadores": [
     { "id": "A1", "equipa": "A", "descricao_visual": "Camisola azul escura, calções pretos, meias brancas, ténis brancos Nike, raquete Head vermelha" },
@@ -181,24 +235,29 @@ Retorna um bloco <raciocinio>...</raciocinio> seguido de um único objeto JSON v
       "servico_valido": true,
       "equipa_ganha_ponto": "A",
       "fases": [
-        { "fase": "ATAQUE", "momento": "servico", "timestamp_servico": "00:00:01", "equipa": "A", "inicio": "00:00:00", "fim": "00:00:02", "posicao_A1": "VL2", "posicao_A2": "ML1", "posicao_B1": "VL1", "posicao_B2": "VL1" },
+        { "fase": "ATAQUE", "momento": "servico", "timestamp_servico": "00:00:00", "equipa": "A", "inicio": "00:00:00", "fim": "00:00:01", "posicao_A1": "VL2", "posicao_A2": "ML1", "posicao_B1": "VL1", "posicao_B2": "VL1" },
         { "fase": "DEFESA", "equipa": "B", "inicio": "00:00:00", "fim": "00:00:05", "posicao_A1": "VL2", "posicao_A2": "ML1", "posicao_B1": "VL1", "posicao_B2": "VL1" },
-        { "fase": "TRANSIÇÃO", "equipa": "A", "inicio": "00:00:02", "fim": "00:00:04", "posicao_A1": "ML3", "posicao_A2": "ML2", "posicao_B1": "VL1", "posicao_B2": "VL2" },
-        { "fase": "ATAQUE", "equipa": "A", "inicio": "00:00:04", "fim": "00:00:08", "posicao_A1": "ML1", "posicao_A2": "ML2", "posicao_B1": "VF3", "posicao_B2": "VF1" },
+        { "fase": "TRANSIÇÃO", "equipa": "A", "inicio": "00:00:01", "fim": "00:00:03", "posicao_A1": "ML3", "posicao_A2": "ML2", "posicao_B1": "VL1", "posicao_B2": "VL2" },
+        { "fase": "ATAQUE", "equipa": "A", "inicio": "00:00:03", "fim": "00:00:08", "posicao_A1": "ML1", "posicao_A2": "ML2", "posicao_B1": "VF3", "posicao_B2": "VF1" },
         { "fase": "DEFESA", "equipa": "B", "inicio": "00:00:05", "fim": "00:00:08", "posicao_A1": "ML1", "posicao_A2": "ML2", "posicao_B1": "VF3", "posicao_B2": "VF1" }
       ],
       "pancadas": [
-        { "timestamp": "00:00:01", "jogador": "A1", "tipo": "serve", "zona": "VL2" },
-        { "timestamp": "00:00:03", "jogador": "B2", "tipo": "backhand", "zona": "VL1", "segunda_bola": true }
+        { "timestamp": "00:00:00", "jogador": "A1", "tipo": "serve", "zona": "VL2" },
+        { "timestamp": "00:00:00", "jogador": "B2", "tipo": "backhand", "zona": "VL1", "segunda_bola": true }
       ]
     }
   ]
 }
+```
 
-REGRAS DE TIMESTAMP:
-- Ancora timestamps apenas em eventos visuais claros
+---
+## REGRAS DE TIMESTAMP
+- Ancora timestamps **apenas** em eventos visuais claros: início de serviço, primeira pancada do rally, bola fora, fim de ponto
 - Arredonda ao segundo mais próximo
-- Não inventas timestamps por estimativa — se não consegues ancorar, omite o evento
+- **Não inventas timestamps por estimativa** — se não consegues ancorar, omite o evento
+
+---
+*Versão: 2026-06-14 v2 — PadelPro Vision*
 """.strip()
 
 
