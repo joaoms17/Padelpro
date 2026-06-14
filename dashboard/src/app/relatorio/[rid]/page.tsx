@@ -188,7 +188,18 @@ function ReportBody({ report, rid }: { report: MatchReport; rid: string }) {
           <details>
             <summary className="cursor-pointer text-sm font-medium text-gray-400 hover:text-gray-200">
               🧠 Raciocínio do Gemini
+              {report._gemini_n_rallies != null && (
+                <span className="ml-2 text-xs text-gray-500">({report._gemini_n_rallies} rallies no JSON)</span>
+              )}
             </summary>
+            {report._gemini_json_preview && (
+              <div className="mt-3">
+                <p className="text-xs text-gray-500 mb-1">Início do JSON gerado:</p>
+                <pre className="text-xs text-gray-400 whitespace-pre-wrap break-words overflow-auto max-h-40 p-3 bg-[#0B1B2E] rounded-lg mb-3">
+                  {report._gemini_json_preview}
+                </pre>
+              </div>
+            )}
             <pre className="text-xs text-gray-400 whitespace-pre-wrap break-words overflow-auto max-h-96 p-4 bg-[#0B1B2E] rounded-lg">
               {report._gemini_reasoning}
             </pre>

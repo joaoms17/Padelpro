@@ -362,12 +362,19 @@ def _parse_match_json(text: str) -> dict:
         logger.info("Gemini reasoning (first 1000 chars): %s", reasoning_text[:1000])
         text = text[text.lower().find('</raciocinio>') + len('</raciocinio>'):]
 
+    # Strip markdown code fences that Gemini adds around JSON (```json ... ```)
+    text = re.sub(r'```(?:json)?\s*\n?', '', text)
+
     # Find the start of the JSON object
     json_start = text.find('{')
+    # Always save a preview of what comes after the reasoning block for debugging
+    _json_preview = text[:800].strip() if text.strip() else "(empty)"
+    logger.info("Gemini post-reasoning text (first 800 chars): %s", _json_preview)
     if json_start == -1:
         logger.warning("No JSON object found in Gemini response")
         data: dict = {}
         data["_gemini_reasoning"] = reasoning_text
+        data["_gemini_json_preview"] = _json_preview
         _fill_defaults(data)
         _derive_compat_fields(data, is_v2=False)
         return data
@@ -379,12 +386,15 @@ def _parse_match_json(text: str) -> dict:
     try:
         data = json.loads(text)
         data["_gemini_reasoning"] = reasoning_text
+        data["_gemini_json_preview"] = _json_preview
+        data["_gemini_n_rallies"] = len(data.get("rallies", []))
         is_v2 = "jogadores" in data
+        logger.info("Strategy 1 OK — is_v2=%s rallies=%d", is_v2, data["_gemini_n_rallies"])
         _fill_defaults(data)
         _derive_compat_fields(data, is_v2=is_v2)
         return data
-    except json.JSONDecodeError:
-        logger.warning("Match JSON truncated (%d chars) — attempting recovery", len(text))
+    except json.JSONDecodeError as e:
+        logger.warning("Match JSON truncated (%d chars) error=%s — attempting recovery", len(text), e)
 
     # Strategy 2: close unclosed brackets then retry
     repaired = text.rstrip()
@@ -397,8 +407,10 @@ def _parse_match_json(text: str) -> dict:
     try:
         data = json.loads(repaired)
         data["_gemini_reasoning"] = reasoning_text
+        data["_gemini_json_preview"] = _json_preview
+        data["_gemini_n_rallies"] = len(data.get("rallies", []))
         is_v2 = "jogadores" in data
-        logger.info("Recovery strategy 2 succeeded (%d chars)", len(repaired))
+        logger.info("Recovery strategy 2 OK — is_v2=%s rallies=%d", is_v2, data["_gemini_n_rallies"])
         _fill_defaults(data)
         _derive_compat_fields(data, is_v2=is_v2)
         return data
@@ -427,8 +439,11 @@ def _parse_match_json(text: str) -> dict:
 
     is_v2 = "jogadores" in data
     if data:
-        logger.info("Recovery strategy 3: extracted keys %s", list(data.keys()))
+        logger.info("Recovery strategy 3: extracted keys %s is_v2=%s rallies=%d",
+                    list(data.keys()), is_v2, len(data.get("rallies", [])))
     data["_gemini_reasoning"] = reasoning_text
+    data["_gemini_json_preview"] = _json_preview
+    data["_gemini_n_rallies"] = len(data.get("rallies", []))
     _fill_defaults(data)
     _derive_compat_fields(data, is_v2=is_v2)
     return data
