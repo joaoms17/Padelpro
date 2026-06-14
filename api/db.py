@@ -71,6 +71,27 @@ def update_job(router: str, job_id: str, **kwargs) -> None:
         conn.close()
 
 
+def list_jobs(router: str, limit: int = 50) -> list[dict]:
+    """Return most recent jobs for a router, newest first."""
+    with _lock:
+        conn = _conn()
+        rows = conn.execute(
+            "SELECT job_id, data, updated_at FROM jobs WHERE router=? ORDER BY updated_at DESC LIMIT ?",
+            (router, limit),
+        ).fetchall()
+        conn.close()
+    result = []
+    for job_id, data_json, updated_at in rows:
+        try:
+            d = json.loads(data_json)
+            d.setdefault("job_id", job_id)
+            d["_updated_at"] = updated_at
+            result.append(d)
+        except Exception:
+            pass
+    return result
+
+
 def prune_jobs(router: str, max_age_s: float = 7200.0) -> None:
     """Delete done/error jobs older than max_age_s."""
     with _lock:
