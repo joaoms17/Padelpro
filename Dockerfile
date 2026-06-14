@@ -12,7 +12,7 @@ WORKDIR /app
 # Install deps first (better layer caching)
 COPY pyproject.toml ./
 COPY padelpro_vision ./padelpro_vision
-RUN pip install --no-cache-dir -e ".[backend]"
+RUN pip install --no-cache-dir -e ".[backend,gemini]"
 
 # App code
 COPY api ./api
