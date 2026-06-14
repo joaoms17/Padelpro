@@ -182,6 +182,20 @@ function ReportBody({ report, rid }: { report: MatchReport; rid: string }) {
         <KeyFramesGallery report={report} />
       </section>
 
+      {/* 7b. Gemini reasoning debug */}
+      {report._gemini_reasoning && (
+        <section className="card p-6">
+          <details>
+            <summary className="cursor-pointer text-sm font-medium text-gray-400 hover:text-gray-200">
+              🧠 Raciocínio do Gemini
+            </summary>
+            <pre className="text-xs text-gray-400 whitespace-pre-wrap break-words overflow-auto max-h-96 p-4 bg-[#0B1B2E] rounded-lg">
+              {report._gemini_reasoning}
+            </pre>
+          </details>
+        </section>
+      )}
+
       {/* 8. Footer CTAs */}
       <section className="card p-6">
         <div className="flex flex-wrap gap-3">

@@ -250,6 +250,7 @@ async def _download_and_analyze_bg(rid: str, url: str, in_path: Path) -> None:
         update_job("report", rid, status="error", error=str(exc))
 
 
+
 def _detect_ball_in_frames(frames_dir: Path, report: dict) -> None:
     """Run ball detection on each extracted key frame.
 
@@ -305,6 +306,7 @@ async def _analyze_bg(rid: str, in_path: Path) -> None:
         update_job("report", rid, phase="deteção de bola nos frames")
         await asyncio.get_event_loop().run_in_executor(
             None, lambda: _detect_ball_in_frames(_frames_dir(rid), report))
+
 
         update_job("report", rid, phase="a cortar tempo útil")
         condensed_ok = await asyncio.get_event_loop().run_in_executor(

@@ -92,6 +92,7 @@ def list_jobs(router: str, limit: int = 50) -> list[dict]:
     return result
 
 
+
 def prune_jobs(router: str, max_age_s: float = 7200.0) -> None:
     """Delete done/error jobs older than max_age_s."""
     with _lock:

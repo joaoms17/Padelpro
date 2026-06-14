@@ -226,6 +226,7 @@ Posição inicial: Equipa A no lado [esquerdo/direito], Equipa B no lado [esquer
   "pausas": [
     { "id": 1, "inicio": "00:00:00", "fim": "00:00:00", "duracao_segundos": 0, "tipo_pausa": "troca_de_campo" }
   ],
+
   "rallies": [
     {
       "id": 1,
@@ -354,9 +355,11 @@ def _parse_match_json(text: str) -> dict:
     import json, re
 
     # Extract and log reasoning block
+    reasoning_text = ""
     reasoning_match = re.search(r'<raciocinio>(.*?)</raciocinio>', text, re.DOTALL | re.IGNORECASE)
     if reasoning_match:
-        logger.info("Gemini reasoning (first 1000 chars): %s", reasoning_match.group(1).strip()[:1000])
+        reasoning_text = reasoning_match.group(1).strip()
+        logger.info("Gemini reasoning (first 1000 chars): %s", reasoning_text[:1000])
         text = text[text.lower().find('</raciocinio>') + len('</raciocinio>'):]
 
     # Find the start of the JSON object
@@ -364,8 +367,9 @@ def _parse_match_json(text: str) -> dict:
     if json_start == -1:
         logger.warning("No JSON object found in Gemini response")
         data: dict = {}
+        data["_gemini_reasoning"] = reasoning_text
         _fill_defaults(data)
-        _derive_compat_fields(data)
+        _derive_compat_fields(data, is_v2=False)
         return data
     text = text[json_start:]
 
@@ -374,8 +378,10 @@ def _parse_match_json(text: str) -> dict:
     # Strategy 1: clean parse
     try:
         data = json.loads(text)
+        data["_gemini_reasoning"] = reasoning_text
+        is_v2 = "jogadores" in data
         _fill_defaults(data)
-        _derive_compat_fields(data)
+        _derive_compat_fields(data, is_v2=is_v2)
         return data
     except json.JSONDecodeError:
         logger.warning("Match JSON truncated (%d chars) — attempting recovery", len(text))
@@ -390,9 +396,11 @@ def _parse_match_json(text: str) -> dict:
     repaired += "]" * max(0, opens) + "}" * max(0, opens_b)
     try:
         data = json.loads(repaired)
+        data["_gemini_reasoning"] = reasoning_text
+        is_v2 = "jogadores" in data
         logger.info("Recovery strategy 2 succeeded (%d chars)", len(repaired))
         _fill_defaults(data)
-        _derive_compat_fields(data)
+        _derive_compat_fields(data, is_v2=is_v2)
         return data
     except json.JSONDecodeError:
         pass
@@ -417,10 +425,12 @@ def _parse_match_json(text: str) -> dict:
             if objs:
                 data[key] = objs
 
+    is_v2 = "jogadores" in data
     if data:
         logger.info("Recovery strategy 3: extracted keys %s", list(data.keys()))
+    data["_gemini_reasoning"] = reasoning_text
     _fill_defaults(data)
-    _derive_compat_fields(data)
+    _derive_compat_fields(data, is_v2=is_v2)
     return data
 
 
@@ -504,11 +514,18 @@ def _zone_to_xy(zone: str, pid: str) -> tuple[float, float]:
     return x, y
 
 
-def _derive_compat_fields(data: dict) -> None:
-    """Derive backward-compatible fields from the new Gemini v2 schema."""
+def _derive_compat_fields(data: dict, is_v2: bool | None = None) -> None:
+    """Derive backward-compatible fields from the new Gemini v2 schema.
+
+    is_v2 must be computed BEFORE _fill_defaults() runs (which always adds
+    "jogadores": [] to every schema, making key-presence checks unreliable).
+    Falls back to rally-structure detection if not provided.
+    """
 
     resumo = data.get("resumo", {})
-    is_v2 = bool(data.get("jogadores"))
+    if is_v2 is None:
+        # Fallback: detect v2 by rally structure (v2 has "fases"/"pancadas"; v1 has "start_s")
+        is_v2 = any("fases" in r or "pancadas" in r for r in data.get("rallies", []))
 
     # duration_s — prefer existing value (v1 schema has it directly),
     # derive from resumo only for v2 schema
@@ -586,6 +603,36 @@ def _derive_compat_fields(data: dict) -> None:
         data["shots"] = shots
         data["shot_counts"] = shot_counts
 
+        # tempo_por_fase — computed from actual fases data (don't trust Gemini's value)
+        phase_totals: dict = {
+            "A": {"ATAQUE": 0.0, "TRANSIÇÃO": 0.0, "DEFESA": 0.0},
+            "B": {"ATAQUE": 0.0, "TRANSIÇÃO": 0.0, "DEFESA": 0.0},
+        }
+        for rally in data.get("rallies", []):
+            for fase in rally.get("fases", []):
+                team = fase.get("equipa")
+                phase = fase.get("fase")
+                if team not in phase_totals or phase not in phase_totals[team]:
+                    continue
+                dur = _hhmmss_to_s(fase.get("fim", "00:00:00")) - _hhmmss_to_s(fase.get("inicio", "00:00:00"))
+                if dur > 0:
+                    phase_totals[team][phase] += dur
+
+        def _s_to_hhmmss(s: float) -> str:
+            s = max(0, int(s))
+            return f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+
+        computed_tpf = {
+            team: {ph: _s_to_hhmmss(v) for ph, v in phases.items()}
+            for team, phases in phase_totals.items()
+        }
+        # Only overwrite if we computed meaningful values; else keep Gemini's value
+        total_computed = sum(
+            v for phases in phase_totals.values() for v in phases.values()
+        )
+        if total_computed > 0 or not resumo.get("tempo_por_fase"):
+            resumo["tempo_por_fase"] = computed_tpf
+
         # player_positions[] from fases (zone → coordinates)
         positions: list = []
         seen: set = set()
@@ -619,7 +666,8 @@ def _derive_compat_fields(data: dict) -> None:
                 "num_shots": len(rally.get("pancadas", [])),
                 "winner_team": 1 if winner == "A" else (2 if winner == "B" else None),
             })
-        data["rallies_compat"] = old_rallies
+        data["rallies_v2"] = data["rallies"]   # keep original v2 for reference
+        data["rallies"] = old_rallies           # replace with compat format for all consumers
 
 
 # ── Derived metrics ──────────────────────────────────────────────────────────
@@ -674,7 +722,9 @@ def compute_rally_stats(rallies: list[dict], duration_s: float) -> dict:
 
 def enrich_report(report: dict) -> dict:
     """Add derived fields the frontend consumes."""
-    is_v2 = bool(report.get("jogadores"))  # new schema from updated prompt
+    is_v2 = bool(report.get("rallies_v2")) or any(
+        "fases" in r or "pancadas" in r for r in report.get("rallies", [])
+    )
 
     # For v2 schema, ensure compat fields are derived if not already present
     if is_v2 and "shot_counts" not in report:
@@ -682,8 +732,8 @@ def enrich_report(report: dict) -> dict:
 
     report["shot_counts"] = compute_shot_counts(report.get("shots", []))
     report["formation_pct"] = compute_formation_pct(report.get("formation_samples", []))
-    # Use rallies_compat for stats in v2 schema
-    rallies_for_stats = report.get("rallies_compat", []) if is_v2 else report.get("rallies", [])
+    # rallies is always in compat format (start_s/end_s) after _derive_compat_fields
+    rallies_for_stats = report.get("rallies", [])
     report["rally_stats"] = compute_rally_stats(
         rallies_for_stats, report.get("duration_s", 0.0)
     )
