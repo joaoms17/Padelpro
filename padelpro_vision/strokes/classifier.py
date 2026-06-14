@@ -1,7 +1,9 @@
 """
 Stroke classifier: TCN over sliding window of pose keypoints + rules-based fallback.
 
-Classes: forehand_volley, backhand_volley, bandeja, vibora, smash, serve, other.
+Classes: forehand_volley, backhand_volley, forehand, backhand,
+         forehand_lob, backhand_lob, bandeja, vibora, kick,
+         smash, serve, saida_vidro, other.
 
 Two modes:
   - "rules"  : geometry heuristics from pose — runs without any trained weights.
@@ -30,12 +32,22 @@ logger = logging.getLogger(__name__)
 
 StrokeType = Literal[
     "forehand_volley", "backhand_volley",
-    "bandeja", "vibora", "smash", "serve", "other",
+    "forehand", "backhand",
+    "forehand_lob", "backhand_lob",
+    "bandeja", "vibora", "kick",
+    "smash", "serve",
+    "saida_vidro",
+    "other",
 ]
 
 STROKE_CLASSES: list[StrokeType] = [
     "forehand_volley", "backhand_volley",
-    "bandeja", "vibora", "smash", "serve", "other",
+    "forehand", "backhand",
+    "forehand_lob", "backhand_lob",
+    "bandeja", "vibora", "kick",
+    "smash", "serve",
+    "saida_vidro",
+    "other",
 ]
 
 WINDOW_SIZE = 16   # frames in the sliding window
@@ -164,17 +176,20 @@ def rules_classify(pose_window: list[Pose]) -> StrokeType:
     """
     Geometry heuristics over a window of poses.
 
-    Heuristics (simplified, padel-specific):
-      - Both wrists high + body upright  → smash or bandeja
-      - Dominant wrist very high + elbow > shoulder → smash; elbow ≈ shoulder → bandeja
-      - Wrist crosses body midline going left  → vibora (left-handed) or backhand side
-      - Wrist crosses body midline going right → forehand side
-      - Low body position + upward wrist motion → serve
+    Heuristics (padel-specific):
+      - Both wrists high + elbow very high         -> smash
+      - Both wrists high + elbow moderate          -> bandeja
+      - Wrist above shoulder + strong horizontal   -> vibora
+      - Wrist at shoulder + low horizontal         -> kick (vibora subtipo baixo)
+      - Wrist above shoulder + upward + slow       -> forehand_lob / backhand_lob
+      - Mid-height wrist + high speed              -> forehand_volley / backhand_volley
+      - Mid-height wrist + low speed               -> forehand / backhand (groundstroke)
+      - Low body + upward wrist motion             -> serve
+      - Default                                    -> forehand_volley / backhand_volley
     """
     if not pose_window:
         return "other"
 
-    # Use the most recent frame for instantaneous geometry
     pose = pose_window[-1]
     kps  = pose.keypoints
     scores = pose.scores
@@ -182,8 +197,8 @@ def rules_classify(pose_window: list[Pose]) -> StrokeType:
     lw_rel, rw_rel = _wrist_height_relative(pose)
 
     # Determine dominant (racket) hand: higher wrist = hitting
-    dom_wrist_kp = KP_RIGHT_WRIST if rw_rel >= lw_rel else KP_LEFT_WRIST
-    dom_elbow_kp = KP_RIGHT_ELBOW if dom_wrist_kp == KP_RIGHT_WRIST else KP_LEFT_ELBOW
+    dom_wrist_kp    = KP_RIGHT_WRIST    if rw_rel >= lw_rel else KP_LEFT_WRIST
+    dom_elbow_kp    = KP_RIGHT_ELBOW    if dom_wrist_kp == KP_RIGHT_WRIST else KP_LEFT_ELBOW
     dom_shoulder_kp = KP_RIGHT_SHOULDER if dom_wrist_kp == KP_RIGHT_WRIST else KP_LEFT_SHOULDER
 
     wrist_y    = kps[dom_wrist_kp, 1]
@@ -193,9 +208,30 @@ def rules_classify(pose_window: list[Pose]) -> StrokeType:
     hip_y      = np.mean([kps[KP_LEFT_HIP, 1], kps[KP_RIGHT_HIP, 1]])
     ref        = max(1.0, abs(hip_y - shoulder_y))
 
-    wrist_above_shoulder  = (shoulder_y - wrist_y) / ref   # >0 = above
+    wrist_above_shoulder  = (shoulder_y - wrist_y) / ref   # >0 = above shoulder
     wrist_above_nose      = (nose_y - wrist_y) / ref
     elbow_above_shoulder  = (shoulder_y - elbow_y) / ref
+
+    # Wrist speed for last few frames
+    speeds = _wrist_speeds(pose_window[-4:]) if len(pose_window) >= 4 else np.array([])
+    avg_speed = float(speeds.mean()) if len(speeds) > 0 else 0.0
+
+    # Horizontal and vertical wrist motion over window
+    horizontal_move = 0.0
+    vertical_move   = 0.0
+    if len(pose_window) >= 4:
+        wx_start = pose_window[-4].keypoints[dom_wrist_kp, 0]
+        wx_end   = pose_window[-1].keypoints[dom_wrist_kp, 0]
+        wy_start = pose_window[-4].keypoints[dom_wrist_kp, 1]
+        wy_end   = pose_window[-1].keypoints[dom_wrist_kp, 1]
+        horizontal_move = abs(wx_end - wx_start)
+        vertical_move   = wy_start - wy_end   # positive = wrist moved up
+
+    # Body centre for forehand/backhand side determination
+    cx = np.mean([kps[KP_LEFT_SHOULDER, 0], kps[KP_RIGHT_SHOULDER, 0]])
+    wrist_x = kps[dom_wrist_kp, 0]
+    is_forehand_side = (dom_wrist_kp == KP_RIGHT_WRIST and wrist_x >= cx) or \
+                       (dom_wrist_kp == KP_LEFT_WRIST  and wrist_x < cx)
 
     # --- Overhead strokes ---
     if wrist_above_nose > 0.3:
@@ -203,25 +239,30 @@ def rules_classify(pose_window: list[Pose]) -> StrokeType:
             return "smash"
         return "bandeja"
 
-    # --- Wrist above shoulder (not overhead) ---
+    # --- Wrist well above shoulder ---
     if wrist_above_shoulder > 0.2:
-        # Motion direction across window for vibora vs overhead
-        if len(pose_window) >= 4:
-            wx_start = pose_window[-4].keypoints[dom_wrist_kp, 0]
-            wx_end   = pose_window[-1].keypoints[dom_wrist_kp, 0]
-            horizontal_move = wx_end - wx_start
-            if abs(horizontal_move) > 20:
-                return "vibora"
+        if horizontal_move > 20:
+            return "vibora"
+        # Upward wrist motion at this height = lob
+        if vertical_move > 15 and avg_speed < 0.15:
+            return "forehand_lob" if is_forehand_side else "backhand_lob"
         return "bandeja"
 
-    # --- Mid-height wrist: volley range ---
-    cx = np.mean([kps[KP_LEFT_SHOULDER, 0], kps[KP_RIGHT_SHOULDER, 0]])
-    wrist_x = kps[dom_wrist_kp, 0]
-    if dom_wrist_kp == KP_RIGHT_WRIST:
-        # Right-handed: forehand = wrist right of body, backhand = wrist left
-        return "forehand_volley" if wrist_x >= cx else "backhand_volley"
+    # --- Wrist at shoulder level: kick range (below vibora, horizontal swing) ---
+    if 0.0 < wrist_above_shoulder <= 0.2 and horizontal_move > 20:
+        return "kick"
+
+    # --- Lob at mid-height (wrist below shoulder, slow upward swing) ---
+    if vertical_move > 20 and avg_speed < 0.12:
+        return "forehand_lob" if is_forehand_side else "backhand_lob"
+
+    # --- Mid-height wrist: volley vs groundstroke ---
+    # High wrist speed -> volley (player at net, compact swing)
+    # Low wrist speed  -> groundstroke (player at baseline, full swing but slow at contact)
+    if avg_speed > 0.18:
+        return "forehand_volley" if is_forehand_side else "backhand_volley"
     else:
-        return "backhand_volley" if wrist_x >= cx else "forehand_volley"
+        return "forehand" if is_forehand_side else "backhand"
 
 
 # ---------------------------------------------------------------------------
@@ -229,7 +270,7 @@ def rules_classify(pose_window: list[Pose]) -> StrokeType:
 # ---------------------------------------------------------------------------
 
 class _TCNBlock(object):
-    """Placeholder — actual nn.Module defined in the torch import block below."""
+    """Placeholder -- actual nn.Module defined in the torch import block below."""
 
 
 def _build_tcn_model(n_classes: int, input_dim: int = FEATURE_DIM) -> object:
@@ -279,8 +320,8 @@ class StrokeClassifier:
     """
     Classifies padel strokes from a sliding window of pose keypoints.
 
-    mode="rules"  — geometry heuristics, no weights needed.
-    mode="tcn"    — trained TCN; falls back to rules if weights absent.
+    mode="rules"  -- geometry heuristics, no weights needed.
+    mode="tcn"    -- trained TCN; falls back to rules if weights absent.
     """
 
     def __init__(
@@ -296,13 +337,13 @@ class StrokeClassifier:
         self.device = device
         self.feature_mode: FeatureMode = feature_mode
         self._model = None
-        self._windows: dict[int, deque[Pose]] = {}  # track_id → pose window
+        self._windows: dict[int, deque[Pose]] = {}  # track_id -> pose window
 
         if mode == "tcn" and weights_path:
             self._try_load_tcn(Path(weights_path))
 
         if self.mode == "tcn" and self._model is None:
-            logger.warning("TCN weights not loaded — falling back to rules mode.")
+            logger.warning("TCN weights not loaded -- falling back to rules mode.")
             self.mode = "rules"
 
     def _try_load_tcn(self, path: Path) -> None:
