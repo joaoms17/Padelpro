@@ -19,6 +19,7 @@ close enough, the hit keeps its CV-derived type.
 from __future__ import annotations
 import json
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -122,13 +123,22 @@ def analyze_with_gemini(
     logger.info("Gemini file ready (upload+process %.1fs)", time.time() - t0)
 
     # ── Inference ────────────────────────────────────────────────────────────
+    cfg_kwargs = dict(
+        response_mime_type="application/json",
+        temperature=0.1,
+        max_output_tokens=65536,   # 2.5-flash max; long matches = many strokes
+    )
+    # 2.5-flash "thinks" by default, which eats the output budget and truncated
+    # our JSON. Structured extraction needs no reasoning — turn it off.
+    try:
+        cfg_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
+    except Exception:
+        pass
+
     response = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=[video_file, _STROKE_PROMPT],
-        config=types.GenerateContentConfig(
-            response_mime_type="application/json",
-            temperature=0.1,
-        ),
+        config=types.GenerateContentConfig(**cfg_kwargs),
     )
 
     # Clean up the uploaded file (we don't need it anymore)
@@ -137,8 +147,8 @@ def analyze_with_gemini(
     except Exception:
         pass
 
-    # ── Parse ────────────────────────────────────────────────────────────────
-    raw = json.loads(response.text)
+    # ── Parse (robust to truncation) ─────────────────────────────────────────
+    raw = _parse_gemini_json(response.text)
     strokes: list[dict] = raw.get("strokes", [])
     logger.info("Gemini returned %d strokes", len(strokes))
 
@@ -155,6 +165,40 @@ def analyze_with_gemini(
         result["merged_hits"] = _merge_hits(cv_hits, strokes)
 
     return result
+
+
+def _parse_gemini_json(text: str) -> dict:
+    """
+    Parse Gemini's JSON response. If the response was truncated (e.g. the model
+    hit the output-token limit mid-array), salvage as many complete stroke
+    objects as possible instead of failing the whole analysis.
+    """
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        logger.warning("Gemini JSON truncated (%d chars) — salvaging strokes", len(text))
+
+    strokes: list[dict] = []
+    for m in re.finditer(r"\{[^{}]*\}", text):
+        try:
+            obj = json.loads(m.group(0))
+        except Exception:
+            continue
+        if "t_s" in obj or "type" in obj:
+            strokes.append(obj)
+
+    # Recover top-level scalar fields if they made it into the text.
+    def _grab(key: str):
+        m = re.search(rf'"{key}"\s*:\s*"([^"]*)"', text)
+        return m.group(1) if m else ""
+
+    return {
+        "strokes": strokes,
+        "n_rallies": None,
+        "dominant_side": _grab("dominant_side") or None,
+        "tactics": _grab("tactics"),
+        "summary": _grab("summary"),
+    }
 
 
 def _merge_hits(cv_hits: list[dict], gemini_strokes: list[dict]) -> list[dict]:
