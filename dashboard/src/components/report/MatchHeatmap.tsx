@@ -178,6 +178,12 @@ export function MatchHeatmap({ report }: { report: MatchReport }) {
             Jogador {i + 1}
           </div>
         ))}
+        {ballPoints && (
+          <div className="flex items-center gap-1.5 text-xs text-gray-400">
+            <span className="inline-block w-5 h-0 border-t-2 border-dashed border-white/50" />
+            {report.ball_trajectory_source === "kalman" ? "Bola (Kalman)" : "Bola (estimada)"}
+          </div>
+        )}
       </div>
     </div>
   );

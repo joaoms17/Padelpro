@@ -230,45 +230,35 @@ async def _download_and_analyze_bg(rid: str, url: str, in_path: Path) -> None:
 
 
 def _detect_ball_in_frames(frames_dir: Path, report: dict) -> None:
-    """Run ball detection on each key frame and store positions in the report.
+    """Run ball detection on each extracted key frame.
 
-    Uses the same RetinaNet stub already in the codebase (target_label=37,
-    COCO sports ball). Skips silently if torch is unavailable.
+    Uses the unified ball detector (WASB → RetinaNet fallback).
+    Skips silently if torch is unavailable (Render light image).
     """
     key_frames = report.get("key_frames", [])
     if not key_frames:
         return
     try:
-        import torch
-        import torchvision
-        from padelpro_vision.detection.detector import TorchvisionDetector
-        detector = TorchvisionDetector(
-            model_name="retinanet_resnet50_fpn_v2",
-            target_label=37,  # COCO sports ball
-            score_threshold=0.3,
-        )
+        from padelpro_vision.ball.detector import detect_ball, detector_available
+        if not detector_available():
+            return
+        import cv2
     except Exception:
-        return  # torch not available on light backend
+        return
 
     for idx, kf in enumerate(key_frames):
         fpath = frames_dir / f"frame_{idx:04d}.jpg"
         if not fpath.exists():
             continue
         try:
-            import cv2
             img = cv2.imread(str(fpath))
             if img is None:
                 continue
-            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            h, w = img.shape[:2]
-            detections = detector.detect(img_rgb)
-            if detections:
-                best = max(detections, key=lambda d: d.get("score", 0))
-                bx = (best["x1"] + best["x2"]) / 2 / w
-                by = (best["y1"] + best["y2"]) / 2 / h
-                kf["ball_x_norm"] = round(bx, 4)
-                kf["ball_y_norm"] = round(by, 4)
-                kf["ball_conf"] = round(best.get("score", 0), 3)
+            result = detect_ball(img, conf_threshold=0.25)
+            if result:
+                kf["ball_x_norm"] = result["x_norm"]
+                kf["ball_y_norm"] = result["y_norm"]
+                kf["ball_conf"]   = result["conf"]
         except Exception:
             pass
 
@@ -328,20 +318,35 @@ async def _analyze_bg(rid: str, in_path: Path) -> None:
 
 def _run_analysis(in_path: Path, api_key: str) -> dict:
     from padelpro_vision.analysis.gemini_match import analyze_full_match, enrich_report
-    from padelpro_vision.tracking.ball_tracker import interpolate_shot_trajectory
     raw = analyze_full_match(in_path, api_key)
     report = enrich_report(raw)
-    # Add sparse ball trajectory from shot timestamps + player positions
+
+    # Ball trajectory: try dense Kalman tracking first, fall back to interpolation
+    traj: list[dict] = []
     try:
-        traj = interpolate_shot_trajectory(
-            report.get("shots", []),
-            report.get("player_positions", []),
-            report.get("duration_s", 0.0),
-            sample_hz=2.0,  # 1 point every 0.5s — enough for heatmap overlay
-        )
-        report["ball_trajectory"] = traj
+        from padelpro_vision.ball.detector import track_ball_in_video, detector_available
+        if detector_available() and in_path.exists():
+            logger.info("Running Kalman ball tracking on %s (2 Hz)", in_path.name)
+            traj = track_ball_in_video(in_path, sample_hz=2.0)
     except Exception:
-        report["ball_trajectory"] = []
+        logger.debug("Dense ball tracking unavailable — using interpolated trajectory")
+
+    if not traj:
+        try:
+            from padelpro_vision.tracking.ball_tracker import interpolate_shot_trajectory
+            traj = interpolate_shot_trajectory(
+                report.get("shots", []),
+                report.get("player_positions", []),
+                report.get("duration_s", 0.0),
+                sample_hz=2.0,
+            )
+        except Exception:
+            traj = []
+
+    report["ball_trajectory"] = traj
+    report["ball_trajectory_source"] = "kalman" if traj and not any(
+        p.get("predicted", True) for p in traj[:10]
+    ) else "interpolated"
     return report
 
 
