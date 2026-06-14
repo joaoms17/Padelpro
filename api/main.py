@@ -1,5 +1,5 @@
 """
-PadelPro Vision — FastAPI backend.
+PadelPro Vision — FastAPI backend (Gemini-powered).
 
 Start:
     uvicorn api.main:app --reload --port 8000
@@ -17,26 +17,25 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routers import matches, analytics, clips
+from api.routers import matches, report
 
 app = FastAPI(
     title="PadelPro Vision API",
-    description="Padel match analysis — detection, tracking, pose, analytics, clips.",
-    version="0.1.0",
+    description="Padel match analysis powered by Gemini AI.",
+    version="2.0.0",
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # tighten in production
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(matches.router)
-app.include_router(analytics.router)
-app.include_router(clips.router)
+app.include_router(report.router)
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "0.1.0"}
+    return {"status": "ok", "version": "2.0.0"}

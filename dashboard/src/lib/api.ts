@@ -8,60 +8,30 @@ export interface MatchStatus {
   match_id: string;
   status: string;
   error_message?: string | null;
+  progress?: string | null;
 }
 
-export interface PlayerStats {
-  player_id: number;
-  distance_m: number;
-  avg_speed_ms: number;
-  max_speed_ms: number;
-  attack_pct: number;
-  defense_pct: number;
-  transition_pct: number;
-  shots: Record<string, number>;
-  sync_score: number;
+export interface AnalysisReport {
+  match_id: string;
+  duration_s: number;
+  final_score: { team1_sets: number; team2_sets: number; detail: string };
+  shot_counts: Record<string, Record<string, number>>;
+  match_summary: string;
+  confidence: number;
+  formation_pct: { both_net: number; both_back: number; t1_net_t2_back: number; t1_back_t2_net: number; mixed: number };
+  player_positions: Array<{ time_s: number; player: number; court_x: number; court_y: number }>;
+  shots: Array<{ time_s: number; player: number; type: string; outcome: string }>;
+  score_timeline: Array<{ time_s: number; team1_games: number; team2_games: number; team1_points: string; team2_points: string }>;
+  key_frames: Array<{ time_s: number; description: string; all_players_visible: boolean; ball_visible: boolean }>;
 }
 
-export interface Clip {
-  clip_id: number;
-  player_id: number;
-  stroke_type: string;
-  zone: string;
-  rally_phase: string;
-  t_start_ms: number;
-  t_end_ms: number;
-  thumbnail_url: string | null;
-}
-
-export interface PlayerSummary {
-  player_id: number;
-  match_count: number;
-  match_id?: string;
-  distance_m?: number;
-  avg_speed_ms?: number;
-  max_speed_ms?: number;
-  attack_pct?: number;
-  defense_pct?: number;
-  transition_pct?: number;
-}
-
-export interface ProgressionPoint {
-  measured_at: string;
-  value: number;
-  match_id: string | null;
-}
-
-export interface ProgressionData {
-  player_id: string;
-  metric: string;
-  history: ProgressionPoint[];
-}
-
-export async function createMatch(court_id: string): Promise<MatchStatus> {
+export async function createMatch(youtube_url?: string): Promise<MatchStatus> {
+  const body: { court_id: string; youtube_url?: string } = { court_id: "default" };
+  if (youtube_url) body.youtube_url = youtube_url;
   const r = await fetch(`${BASE}/matches/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ court_id }),
+    body: JSON.stringify(body),
   });
   if (!r.ok) throw new Error(await r.text());
   return r.json();
@@ -77,19 +47,6 @@ export async function uploadVideo(match_id: string, file: File): Promise<void> {
   if (!r.ok) throw new Error(await r.text());
 }
 
-export async function runPipeline(
-  match_id: string,
-  opts: { segment?: boolean; condense?: boolean; pose?: boolean; analytics?: boolean; supabase?: boolean }
-): Promise<MatchStatus> {
-  const r = await fetch(`${BASE}/matches/${match_id}/run`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ match_id, ...opts }),
-  });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
 export async function getStatus(match_id: string): Promise<MatchStatus> {
   const r = await fetch(`${BASE}/matches/${match_id}/status`);
   if (!r.ok) throw new Error(await r.text());
@@ -102,65 +59,16 @@ export async function listMatches(): Promise<MatchStatus[]> {
   return r.json();
 }
 
-export async function getPlayerStats(match_id: string): Promise<PlayerStats[]> {
-  const r = await fetch(`${BASE}/analytics/matches/${match_id}/stats`);
+export async function getReport(match_id: string): Promise<AnalysisReport> {
+  const r = await fetch(`${BASE}/report/${match_id}`);
   if (!r.ok) throw new Error(await r.text());
   return r.json();
 }
 
-export async function getHeatmap(match_id: string, player_id: number): Promise<number[][]> {
-  const r = await fetch(`${BASE}/analytics/matches/${match_id}/heatmap/${player_id}`);
-  if (!r.ok) throw new Error(await r.text());
-  const data = await r.json();
-  return data.heatmap;
+export function frameUrl(match_id: string, frame_idx: number): string {
+  return `${BASE}/report/${match_id}/frames/${frame_idx}`;
 }
 
-export async function queryClips(
-  match_id: string,
-  filters: { player_id?: number; stroke?: string; zone?: string; rally_phase?: string }
-): Promise<Clip[]> {
-  const params = new URLSearchParams();
-  if (filters.player_id != null) params.set("player_id", String(filters.player_id));
-  if (filters.stroke)      params.set("stroke",    filters.stroke);
-  if (filters.zone)        params.set("zone",       filters.zone);
-  if (filters.rally_phase) params.set("rally_phase", filters.rally_phase);
-  const r = await fetch(`${BASE}/clips/matches/${match_id}?${params}`);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export async function requestMontage(
-  match_id: string,
-  filters: { player_id?: number; stroke?: string; zone?: string; rally_phase?: string },
-  output_name = "montage.mp4"
-): Promise<{ job_id: string; clips: number }> {
-  const r = await fetch(`${BASE}/clips/matches/${match_id}/montage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ match_id, ...filters, output_name }),
-  });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export async function getMontageStatus(job_id: string): Promise<{ status: string; output?: string; error?: string }> {
-  const r = await fetch(`${BASE}/clips/montage/${job_id}/status`);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export function montageDownloadUrl(job_id: string): string {
-  return `${BASE}/clips/montage/${job_id}/download`;
-}
-
-export async function listPlayers(): Promise<PlayerSummary[]> {
-  const r = await fetch(`${BASE}/analytics/players`);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-export async function getProgression(player_id: number, metric: string): Promise<ProgressionData> {
-  const r = await fetch(`${BASE}/analytics/progression/${player_id}/${metric}`);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+export function trainingDataUrl(match_id: string): string {
+  return `${BASE}/report/${match_id}/training-data`;
 }
