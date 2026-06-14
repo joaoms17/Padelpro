@@ -266,16 +266,26 @@ def apply_game_rules(
 
     n_fixes = sum(1 for s in fixed_shots if "_rule_fixed" in s or "_rule_flag" in s)
 
-    # Only re-infer rallies if Gemini returned very few (likely bad detection)
+    # Re-infer rallies from shot timing — more reliable than Gemini's rally count.
+    # Keep Gemini's rallies only when they're at least 60% of what we infer from
+    # shots (i.e. Gemini didn't wildly undercount). If Gemini returned 3 rallies
+    # and we infer 20, Gemini's version is clearly wrong → use inferred.
     inferred_rallies = infer_rallies_from_shots(fixed_shots)
-    if existing_rallies and len(existing_rallies) >= max(1, len(inferred_rallies) // 3):
+    use_gemini = (
+        existing_rallies
+        and len(inferred_rallies) > 0
+        and len(existing_rallies) >= len(inferred_rallies) * 0.6
+    )
+    if use_gemini:
         final_rallies = existing_rallies
     else:
         final_rallies = inferred_rallies
         if existing_rallies:
             logger.info(
-                "Rule rally: replaced Gemini's %d rallies with %d inferred from shots",
+                "Rule rally: replaced Gemini's %d rallies with %d inferred from shots "
+                "(Gemini count was %.0f%% of inferred)",
                 len(existing_rallies), len(final_rallies),
+                100.0 * len(existing_rallies) / max(1, len(inferred_rallies)),
             )
 
     return {
