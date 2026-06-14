@@ -267,7 +267,7 @@ export function CondenseForm() {
               href={`/review/${job.job_id}`}
               className="block w-full text-center py-2.5 bg-green-800 hover:bg-green-700 text-white rounded-lg font-medium text-sm transition-colors"
             >
-              ✓ Rever batidas (ajuda a treinar o modelo)
+              ✓ Rever batidas
             </a>
           )}
         </div>

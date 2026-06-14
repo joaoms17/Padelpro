@@ -5,13 +5,10 @@ import Link from "next/link";
 import {
   getReviewData,
   submitReview,
-  triggerRetrain,
-  getRetrainStatus,
   reviewVideoUrl,
   type ReviewData,
   type ReviewItem,
   type Correction,
-  type RetrainStatus,
 } from "@/lib/api";
 
 const STROKE_LABELS: Record<string, string> = {
@@ -47,8 +44,7 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
   const [missedPlayer, setMissedPlayer] = useState(1);
   const [missedType, setMissedType] = useState("smash");
   const [submitting, setSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState<{ saved: number; training_samples: number } | null>(null);
-  const [retrain, setRetrain] = useState<RetrainStatus | null>(null);
+  const [submitted, setSubmitted] = useState<{ saved: number } | null>(null);
   const [selected, setSelected] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -65,19 +61,6 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
       })
       .catch((e) => setError(String(e)));
   }, [rid]);
-
-  // Poll retrain status while running
-  useEffect(() => {
-    if (retrain?.status !== "running") return;
-    const iv = setInterval(async () => {
-      try {
-        const s = await getRetrainStatus();
-        setRetrain(s);
-        if (s.status !== "running") clearInterval(iv);
-      } catch { /* ignore */ }
-    }, 3000);
-    return () => clearInterval(iv);
-  }, [retrain?.status]);
 
   const seekTo = useCallback((ms: number) => {
     const v = videoRef.current;
@@ -173,21 +156,11 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
           frame_idx: item.frame_idx,
         }));
       const res = await submitReview(rid, [...corrections, ...missed]);
-      setSubmitted({ saved: res.saved, training_samples: res.training_samples });
+      setSubmitted({ saved: res.saved });
     } catch (e) {
       setError(String(e));
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const handleRetrain = async () => {
-    setError(null);
-    try {
-      await triggerRetrain(rid);
-      setRetrain({ status: "running" });
-    } catch (e) {
-      setError(String(e));
     }
   };
 
@@ -209,8 +182,7 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
         <span className="text-gray-700">/</span>
         <h1 className="text-lg font-bold text-white">Rever batidas</h1>
         <span className="text-xs text-gray-500">
-          {reviewed + missed.length}/{data.items.length} revistas
-          {data.items.some((i) => i.trainable) ? " · alimenta o treino do modelo" : " · só avaliação (sem pose guardada)"}
+          {reviewed + missed.length}/{data.items.length} revistas · corrige análise Gemini
         </span>
         <Link href={`/annotate/${rid}`} className="ml-auto text-xs text-blue-400 hover:text-blue-300 border border-blue-800 rounded-lg px-3 py-1">
           🎯 Anotar para treino
@@ -220,7 +192,7 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
       <p className="text-sm text-gray-400">
         Clica numa batida para a ver no vídeo. Marca <span className="text-green-400">✓ certa</span>,{" "}
         <span className="text-yellow-400">✎ tipo errado</span> (e escolhe o tipo certo) ou{" "}
-        <span className="text-red-400">✗ não foi batida</span>. Cada resposta é uma label de treino.
+        <span className="text-red-400">✗ não foi batida</span>. As correções validam e melhoram a análise Gemini.
       </p>
       <p className="text-xs text-gray-600">
         Teclado: <kbd className="px-1 bg-gray-800 rounded">j</kbd>/<kbd className="px-1 bg-gray-800 rounded">k</kbd> navegar ·{" "}
@@ -249,7 +221,7 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
           {/* Missed-stroke capture */}
           {data.video_available && (
             <div className="bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 space-y-2">
-              <div className="text-sm font-medium text-gray-300">Batida que o modelo não viu?</div>
+              <div className="text-sm font-medium text-gray-300">Batida não detetada?</div>
               <div className="flex items-center gap-2 flex-wrap text-sm">
                 <span className="text-gray-500">Pausa o vídeo no impacto, depois:</span>
                 <select
@@ -333,26 +305,17 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
 
         {submitted && (
           <span className="text-sm text-green-400">
-            ✓ {submitted.saved} guardadas · {submitted.training_samples} amostras de treino
+            ✓ {submitted.saved} correções guardadas
           </span>
         )}
 
         {submitted && (
-          <button
-            onClick={handleRetrain}
-            disabled={retrain?.status === "running"}
-            className="px-5 py-2 bg-blue-700 hover:bg-blue-600 disabled:opacity-40 text-white rounded-lg font-medium ml-auto"
+          <Link
+            href={`/annotate/${rid}`}
+            className="px-4 py-2 bg-blue-800 hover:bg-blue-700 text-white rounded-lg text-sm font-medium ml-auto"
           >
-            {retrain?.status === "running" ? "A treinar…" : "🔁 Retreinar modelo"}
-          </button>
-        )}
-
-        {retrain && retrain.status !== "running" && retrain.status !== "idle" && (
-          <span
-            className={`text-sm ${retrain.status === "ok" ? "text-green-400" : retrain.status === "skipped" ? "text-yellow-400" : "text-red-400"}`}
-          >
-            {retrain.status === "ok" ? "✓ " : ""}{retrain.detail}
-          </span>
+            🎯 Anotar bola e resultados
+          </Link>
         )}
 
         {error && <span className="text-sm text-red-400">{error}</span>}
