@@ -318,7 +318,8 @@ export interface MatchReport {
   score_timeline: { t_s: number; team1_games: number; team2_games: number }[];
   key_frames: { t_s: number; n_players: number; ball_visible: boolean; description: string; ball_x_norm?: number | null; ball_y_norm?: number | null; ball_conf?: number | null }[];
   rallies: { start_s: number; end_s: number; num_shots: number; winner_team: 1 | 2 | null }[];
-  ball_trajectory?: { t_s: number; x: number; y: number; vx: number; vy: number; conf: number }[];
+  ball_trajectory?: { t_s: number; x: number; y: number; vx: number; vy: number; conf: number; predicted?: boolean }[];
+  ball_trajectory_source?: "kalman" | "interpolated";
 }
 
 export async function uploadForReport(file: File): Promise<{ rid: string }> {
