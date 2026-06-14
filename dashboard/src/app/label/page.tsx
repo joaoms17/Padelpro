@@ -103,6 +103,11 @@ export default function LabelPage() {
         </span>
       </div>
 
+      <div className="text-xs text-gray-500 bg-gray-900 border border-gray-800 rounded-lg px-4 py-2.5">
+        ⚙️ Ferramenta interna de curadoria. Os tipos de pancada na análise vêm agora da
+        IA — etiquetar aqui apenas organiza clips num dataset em disco, não treina o modelo.
+      </div>
+
       {queue.clips.length === 0 && (
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-8 text-center text-sm text-gray-400 space-y-2">
           <p>Nenhum clip encontrado em <code className="text-gray-300">{queue.root}</code>.</p>

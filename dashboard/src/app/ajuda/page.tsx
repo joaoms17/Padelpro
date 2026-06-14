@@ -11,9 +11,10 @@ export default function AjudaPage() {
       <header className="space-y-3 text-center pt-4">
         <h1 className="text-3xl font-bold text-white">Como funciona</h1>
         <p className="text-gray-400 max-w-xl mx-auto">
-          O PadelPro analisa vídeos de jogos de padel: corta o tempo morto, conta as
-          pancadas e mostra estatísticas por jogador. E melhora com a tua ajuda —
-          cada correção que fazes treina o modelo. Este guia explica tudo, passo a passo.
+          O PadelPro analisa vídeos de jogos de padel: corta o tempo morto, mostra
+          estatísticas por jogador (distâncias, zonas, heatmap) e usa IA para ler as
+          pancadas — tipo, winner/erro e tática. Cada correção que fazes afina essa
+          leitura e cria um conjunto de referência. Este guia explica tudo, passo a passo.
         </p>
       </header>
 
@@ -46,11 +47,11 @@ export default function AjudaPage() {
         </ul>
       </Step>
 
-      <Step n={4} title="Rever as pancadas (ajudas a treinar o modelo)" icon="✓">
+      <Step n={4} title="Rever as pancadas (corriges o que a IA leu)" icon="✓">
         <p className="mb-2">
           No fim de uma análise aparece o botão <b>✓ Rever batidas</b>. O vídeo salta
-          para cada pancada detetada e tu confirmas ou corriges. É literalmente assim
-          que o modelo aprende.
+          para cada pancada detetada e tu confirmas ou corriges o tipo/resultado. As
+          correções afinam a leitura da IA e ficam guardadas como referência.
         </p>
         <KeyTable
           rows={[
@@ -62,52 +63,38 @@ export default function AjudaPage() {
           ]}
         />
         <p className="mt-2 text-gray-500">
-          Marca também pancadas que o modelo não viu: pausa o vídeo no impacto e usa
-          “+ Adicionar aqui”. No fim, <b>Submeter</b> — e se já houver correções
-          suficientes, podes carregar em <b>🔁 Retreinar modelo</b>.
+          Marca também pancadas que não foram detetadas: pausa o vídeo no impacto e usa
+          “+ Adicionar aqui”. No fim, <b>Submeter</b> — as tuas correções ficam guardadas.
         </p>
-      </Step>
-
-      <Step n={5} title="Etiquetar clips" icon="🏷️">
-        <p className="mb-2">
-          Na página <Link href="/label" className="text-brand hover:underline">Etiquetar</Link> aparecem
-          clips curtos de pancadas, um de cada vez, em loop. Só tens de dizer que pancada é.
-        </p>
-        <KeyTable
-          rows={[
-            ["1–9", "atribuir a classe (o número de cada botão)"],
-            ["espaço", "ver o clip outra vez"],
-            ["j / k", "saltar para a frente / trás sem etiquetar"],
-          ]}
-        />
         <p className="mt-2 text-gray-500">
-          Podem estar várias pessoas a etiquetar ao mesmo tempo — cada um recebe clips
-          diferentes. Um clip leva ~5 segundos; uma centena despacha-se num café. ☕
+          Na página <b>🎯 Anotar</b> podes ainda clicar na posição da bola e corrigir
+          quem deu a pancada — isso sim treina os detetores de bola e jogadores (a parte
+          de visão do sistema).
         </p>
       </Step>
 
-      <Step n={6} title="O que acontece ao teu trabalho" icon="🔁">
+      <Step n={5} title="O que acontece ao teu trabalho" icon="🔁">
         <p>
-          Cada revisão e cada etiqueta viram <b>exemplos de treino</b>. Quando há
-          exemplos suficientes, o modelo é retreinado e o jogo seguinte já é analisado
-          com a versão melhorada — e também usamos as tuas correções para <b>medir</b> se
-          o modelo está mesmo a melhorar de versão para versão. Ciclo completo:
+          A leitura das pancadas (tipo, winner/erro, tática) vem de uma <b>IA</b>; as
+          tuas correções afinam-na e formam um <b>conjunto de referência</b> que usamos
+          para <b>medir</b> se está a ler bem. A parte espacial (jogadores, distâncias,
+          zonas) tem os seus próprios <b>modelos de visão</b>, melhorados na página
+          Anotar. Ciclo completo:
         </p>
         <div className="mt-3 card px-4 py-3 text-sm text-gray-300 text-center font-mono">
-          jogar → analisar → rever/etiquetar → retreinar → repetir
+          jogar → analisar (IA + tracking) → rever/corrigir → afinar → repetir
         </div>
       </Step>
 
       {/* FAQ */}
       <section className="space-y-4">
         <h2 className="text-xl font-bold text-white">Dúvidas rápidas</h2>
-        <Faq q="Enganei-me numa etiqueta. E agora?">
-          Na página Etiquetar, ativa “Mostrar também clips já etiquetados” e corrige.
+        <Faq q="Enganei-me numa correção. E agora?">
           Na revisão de pancadas, basta voltar a submeter — a versão nova substitui a antiga.
         </Faq>
-        <Faq q="O modelo enganou-se imenso no meu jogo. Vale a pena rever?">
-          Vale a dobrar: as correções em jogos onde o modelo falha muito são os exemplos
-          mais valiosos para o treino. Os erros de hoje são a precisão de amanhã.
+        <Faq q="A IA enganou-se imenso no meu jogo. Vale a pena rever?">
+          Vale mesmo: corriges o relatório do teu jogo e, ao mesmo tempo, esses casos
+          difíceis são os mais úteis para verificar e afinar a leitura da IA.
         </Faq>
         <Faq q="Preciso de calibrar o campo sempre?">
           Não — uma vez por câmara/posição. Se a câmara mudar de sítio, recalibra

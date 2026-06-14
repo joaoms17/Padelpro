@@ -8,9 +8,9 @@ import {
   getCondenseCapabilities,
   condenseDownloadUrl,
   type CondenseStatus,
-  type GeminiReport,
 } from "@/lib/api";
 import { ClipReportView } from "@/components/ClipReport";
+import { GeminiInsights } from "@/components/GeminiInsights";
 
 const DEFAULT_MAX_MB = 150; // overridden by the backend's capabilities
 
@@ -259,8 +259,8 @@ export function CondenseForm() {
             <p className="text-sm text-yellow-400">Gemini: {job.gemini_error}</p>
           )}
           {job.report && <ClipReportView report={job.report} />}
-          {(job.report?.gemini || job.gemini_report) && (
-            <GeminiInsights gemini={job.report?.gemini ?? job.gemini_report!} />
+          {!job.report && job.gemini_report && (
+            <GeminiInsights gemini={job.gemini_report} shots={job.gemini_report.strokes} />
           )}
           {(job.report || job.gemini_report) && (
             <a
@@ -285,27 +285,6 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div className="bg-gray-800 border border-gray-700 rounded-lg py-3">
       <div className="text-lg font-bold text-white">{value}</div>
       <div className="text-xs text-gray-500">{label}</div>
-    </div>
-  );
-}
-
-function GeminiInsights({ gemini }: { gemini: { tactics: string; summary: string; dominant_side: string | null; n_rallies: number | null; n_strokes: number } }) {
-  const sideLabel: Record<string, string> = {
-    near: "lado próximo domina a rede",
-    far: "lado longe domina a rede",
-    balanced: "equilíbrio na rede",
-  };
-  return (
-    <div className="bg-blue-950/40 border border-blue-800/50 rounded-xl p-4 space-y-2">
-      <div className="flex items-center gap-2">
-        <span className="text-sm font-medium text-blue-300">🤖 Gemini</span>
-        <span className="text-xs text-blue-700">
-          {gemini.n_strokes} pancadas · {gemini.n_rallies != null ? `${gemini.n_rallies} rallies` : ""}
-          {gemini.dominant_side ? ` · ${sideLabel[gemini.dominant_side] ?? gemini.dominant_side}` : ""}
-        </span>
-      </div>
-      {gemini.summary && <p className="text-sm text-gray-300 font-medium">{gemini.summary}</p>}
-      {gemini.tactics && <p className="text-sm text-gray-400">{gemini.tactics}</p>}
     </div>
   );
 }

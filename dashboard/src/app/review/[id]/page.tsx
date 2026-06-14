@@ -185,7 +185,7 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
           {reviewed + missed.length}/{data.items.length} revistas · corrige análise Gemini
         </span>
         <Link href={`/annotate/${rid}`} className="ml-auto text-xs text-blue-400 hover:text-blue-300 border border-blue-800 rounded-lg px-3 py-1">
-          🎯 Anotar para treino
+          🎯 Anotar bola e resultados
         </Link>
       </div>
 

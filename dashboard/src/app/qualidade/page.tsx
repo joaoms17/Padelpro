@@ -46,10 +46,11 @@ export default function QualidadePage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-white">Qualidade do modelo na frota</h1>
+        <h1 className="text-2xl font-bold text-white">Saúde da deteção e tracking</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Telemetria de todos os jogos processados ({data.n_matches}). Quando mudares
-          um modelo ou config, é aqui que vês o impacto real — não só num clip de teste.
+          Telemetria de deteção, tracking e calibração de todos os jogos processados
+          ({data.n_matches}). É aqui que vês regressões do pipeline de visão — não só
+          num clip de teste. (Os tipos de pancada vêm da IA, não são medidos aqui.)
         </p>
       </div>
 
@@ -90,10 +91,11 @@ export default function QualidadePage() {
               hint="> 8 m/s — erro de tracking/calibração"
             />
             <SummaryCard
-              label="Pancadas c/ som"
+              label="Impactos c/ som"
               value={s["strokes.pct_with_audio_onset"]}
               suffix="%"
               health={rate(s["strokes.pct_with_audio_onset"], 70, 40)}
+              hint="cobertura de deteção de impactos por áudio — não é classificação de tipo (isso é da IA)"
             />
             <SummaryCard
               label="Fator tempo real"
@@ -116,7 +118,7 @@ export default function QualidadePage() {
                   <th className="px-4 py-3">Tracks/min</th>
                   <th className="px-4 py-3">Vel. imposs.</th>
                   <th className="px-4 py-3">Teleports</th>
-                  <th className="px-4 py-3">Pancadas</th>
+                  <th className="px-4 py-3">Impactos</th>
                   <th className="px-4 py-3">c/ som</th>
                   <th className="px-4 py-3">Calibração</th>
                   <th className="px-4 py-3">Tempo</th>

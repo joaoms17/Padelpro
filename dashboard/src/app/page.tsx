@@ -1,19 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { getLabelQueue } from "@/lib/api";
 import { CondenseForm } from "@/components/CondenseForm";
 
 export default function HomePage() {
-  const [pendingLabels, setPendingLabels] = useState<number | null>(null);
-
-  useEffect(() => {
-    getLabelQueue()
-      .then((q) => setPendingLabels(q.n_unlabelled))
-      .catch(() => setPendingLabels(null));
-  }, []);
-
   return (
     <div className="space-y-10">
       {/* Hero + main flow */}
@@ -27,13 +17,14 @@ export default function HomePage() {
           </h1>
           <p className="text-gray-400">
             Carrega o vídeo e recebe o <span className="text-gray-200">tempo útil</span> do
-            jogo e as <span className="text-gray-200">estatísticas por jogador</span> —
-            distâncias, zonas, heatmaps e pancadas.
+            jogo, as <span className="text-gray-200">estatísticas por jogador</span>{" "}
+            (distâncias, zonas, heatmaps) e a <span className="text-gray-200">leitura da IA</span> —
+            tipos de pancada, winners/erros e tática.
           </p>
           <ol className="text-sm text-gray-500 space-y-2">
             <li className="flex gap-2"><span className="text-brand font-bold">1.</span> Filma o jogo de trás do campo (telemóvel serve)</li>
             <li className="flex gap-2"><span className="text-brand font-bold">2.</span> Carrega o vídeo aqui ao lado</li>
-            <li className="flex gap-2"><span className="text-brand font-bold">3.</span> Vê o relatório e ajuda a treinar o modelo a rever as pancadas</li>
+            <li className="flex gap-2"><span className="text-brand font-bold">3.</span> Vê o relatório e revê as pancadas para corrigir o que a IA leu mal</li>
           </ol>
           <Link href="/ajuda" className="inline-block text-sm text-brand hover:underline">
             Guia completo para quem nunca usou →
@@ -51,20 +42,12 @@ export default function HomePage() {
         <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
           Ferramentas
         </h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <HomeCard
-            href="/label"
-            icon="🏷️"
-            title="Etiquetar pancadas"
-            badge={pendingLabels != null && pendingLabels > 0 ? `${pendingLabels} por fazer` : undefined}
-          >
-            Classifica clips curtos com o teclado — cada etiqueta treina o modelo.
-          </HomeCard>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <HomeCard href="/matches" icon="🎾" title="Jogos analisados">
             Histórico de análises completas, com clips e montagens por pancada.
           </HomeCard>
-          <HomeCard href="/qualidade" icon="📈" title="Qualidade do modelo">
-            Saúde da deteção e tracking em todos os jogos processados.
+          <HomeCard href="/qualidade" icon="📈" title="Saúde da deteção">
+            Deteção, tracking e calibração em todos os jogos processados.
           </HomeCard>
           <HomeCard href="/calibrate" icon="📐" title="Calibrar campo">
             Clica os 4 cantos do campo uma vez por câmara — ativa posições em metros.

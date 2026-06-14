@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { ClipReport, PlayerReport } from "@/lib/api";
 import { HeatmapGrid } from "./HeatmapGrid";
+import { ClipGeminiInsights } from "./GeminiInsights";
 
 /** Vertical padel court (10m × 20m) with a player's occupancy heatmap. */
 function CourtHeatmap({ p }: { p: PlayerReport }) {
@@ -96,6 +97,8 @@ export function ClipReportView({ report }: { report: ClipReport }) {
           e volta a analisar.
         </div>
       )}
+
+      <ClipGeminiInsights report={report} />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
         {[

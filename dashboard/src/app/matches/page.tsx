@@ -41,11 +41,11 @@ export default function MatchesPage() {
 
       {showUpload && (
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-6 max-w-md">
-          <h2 className="text-lg font-semibold text-white mb-1">Análise completa</h2>
+          <h2 className="text-lg font-semibold text-white mb-1">Análise completa (avançado)</h2>
           <p className="text-xs text-yellow-400/80 mb-4">
             ⚠️ Processa o vídeo inteiro frame a frame — demora ~20 min para 4 min de
-            vídeo. É também o único modo que gera amostras de treino a partir da
-            revisão de pancadas.
+            vídeo. Dá vídeo anotado e clips por pancada. Para a maioria dos casos usa
+            antes o ⚡ Analisar jogo (mais rápido, com leitura da IA).
           </p>
           <UploadForm />
         </div>
