@@ -366,7 +366,7 @@ def _parse_match_json(text: str) -> dict:
         logger.warning("No JSON object found in Gemini response")
         data: dict = {}
         _fill_defaults(data)
-        _derive_compat_fields(data)
+        _derive_compat_fields(data, is_v2=False)
         return data
     text = text[json_start:]
 
@@ -375,8 +375,9 @@ def _parse_match_json(text: str) -> dict:
     # Strategy 1: clean parse
     try:
         data = json.loads(text)
+        is_v2 = "jogadores" in data
         _fill_defaults(data)
-        _derive_compat_fields(data)
+        _derive_compat_fields(data, is_v2=is_v2)
         return data
     except json.JSONDecodeError:
         logger.warning("Match JSON truncated (%d chars) — attempting recovery", len(text))
@@ -391,9 +392,10 @@ def _parse_match_json(text: str) -> dict:
     repaired += "]" * max(0, opens) + "}" * max(0, opens_b)
     try:
         data = json.loads(repaired)
+        is_v2 = "jogadores" in data
         logger.info("Recovery strategy 2 succeeded (%d chars)", len(repaired))
         _fill_defaults(data)
-        _derive_compat_fields(data)
+        _derive_compat_fields(data, is_v2=is_v2)
         return data
     except json.JSONDecodeError:
         pass
@@ -418,10 +420,11 @@ def _parse_match_json(text: str) -> dict:
             if objs:
                 data[key] = objs
 
+    is_v2 = "jogadores" in data
     if data:
         logger.info("Recovery strategy 3: extracted keys %s", list(data.keys()))
     _fill_defaults(data)
-    _derive_compat_fields(data)
+    _derive_compat_fields(data, is_v2=is_v2)
     return data
 
 
@@ -505,11 +508,18 @@ def _zone_to_xy(zone: str, pid: str) -> tuple[float, float]:
     return x, y
 
 
-def _derive_compat_fields(data: dict) -> None:
-    """Derive backward-compatible fields from the new Gemini v2 schema."""
+def _derive_compat_fields(data: dict, is_v2: bool | None = None) -> None:
+    """Derive backward-compatible fields from the new Gemini v2 schema.
+
+    is_v2 must be computed BEFORE _fill_defaults() runs (which always adds
+    "jogadores": [] to every schema, making key-presence checks unreliable).
+    Falls back to rally-structure detection if not provided.
+    """
 
     resumo = data.get("resumo", {})
-    is_v2 = bool(data.get("jogadores"))
+    if is_v2 is None:
+        # Fallback: detect v2 by rally structure (v2 has "fases"/"pancadas"; v1 has "start_s")
+        is_v2 = any("fases" in r or "pancadas" in r for r in data.get("rallies", []))
 
     # duration_s — prefer existing value (v1 schema has it directly),
     # derive from resumo only for v2 schema
@@ -586,6 +596,36 @@ def _derive_compat_fields(data: dict) -> None:
 
         data["shots"] = shots
         data["shot_counts"] = shot_counts
+
+        # tempo_por_fase — computed from actual fases data (don't trust Gemini's value)
+        phase_totals: dict = {
+            "A": {"ATAQUE": 0.0, "TRANSIÇÃO": 0.0, "DEFESA": 0.0},
+            "B": {"ATAQUE": 0.0, "TRANSIÇÃO": 0.0, "DEFESA": 0.0},
+        }
+        for rally in data.get("rallies", []):
+            for fase in rally.get("fases", []):
+                team = fase.get("equipa")
+                phase = fase.get("fase")
+                if team not in phase_totals or phase not in phase_totals[team]:
+                    continue
+                dur = _hhmmss_to_s(fase.get("fim", "00:00:00")) - _hhmmss_to_s(fase.get("inicio", "00:00:00"))
+                if dur > 0:
+                    phase_totals[team][phase] += dur
+
+        def _s_to_hhmmss(s: float) -> str:
+            s = max(0, int(s))
+            return f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+
+        computed_tpf = {
+            team: {ph: _s_to_hhmmss(v) for ph, v in phases.items()}
+            for team, phases in phase_totals.items()
+        }
+        # Only overwrite if we computed meaningful values; else keep Gemini's value
+        total_computed = sum(
+            v for phases in phase_totals.values() for v in phases.values()
+        )
+        if total_computed > 0 or not resumo.get("tempo_por_fase"):
+            resumo["tempo_por_fase"] = computed_tpf
 
         # player_positions[] from fases (zone → coordinates)
         positions: list = []
