@@ -15,6 +15,7 @@ import { FormationDonut } from "@/components/report/FormationDonut";
 import { RallyTimeline } from "@/components/report/RallyTimeline";
 import { KeyFramesGallery } from "@/components/report/KeyFramesGallery";
 import { ScoreTimeline } from "@/components/report/ScoreTimeline";
+import { PhaseBreakdown } from "@/components/report/PhaseBreakdown";
 
 type View =
   | { state: "loading" }
@@ -136,7 +137,15 @@ function ReportBody({ report, rid }: { report: MatchReport; rid: string }) {
         </section>
       </div>
 
-      {/* 5. Formations */}
+      {/* 5. Phase breakdown (v2 schema) */}
+      {report.resumo?.tempo_por_fase && (
+        <section className="card p-6">
+          <SectionTitle>Tempo por Fase</SectionTitle>
+          <PhaseBreakdown report={report} />
+        </section>
+      )}
+
+      {/* 6. Formations */}
       <section className="card p-6">
         <SectionTitle>Formações</SectionTitle>
         <FormationDonut report={report} />
