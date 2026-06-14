@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useState, useEffect, useCallback } from "react";
-import Link from "next/link";
 import {
   uploadForCondense,
   uploadUrlForCondense,
@@ -230,9 +229,6 @@ export function CondenseForm() {
                   onChange={(e) => setCourtId(e.target.value)}
                   className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-white w-28"
                 />
-                <Link href="/calibrate" className="underline text-gray-500 hover:text-gray-300">
-                  calibrar primeiro
-                </Link>
               </div>
               <label className="flex items-center gap-2 text-xs text-gray-400 pl-6 cursor-pointer">
                 <input

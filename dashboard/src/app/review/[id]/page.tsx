@@ -179,7 +179,7 @@ export default function ReviewPage({ params }: { params: { id: string } }) {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center gap-3 flex-wrap">
-        <Link href={`/matches/${rid}`} className="text-gray-500 hover:text-gray-300 text-sm">← Análise</Link>
+        <Link href="/" className="text-gray-500 hover:text-gray-300 text-sm">← Início</Link>
         <span className="text-gray-700">/</span>
         <h1 className="text-lg font-bold text-white">Rever batidas</h1>
         <span className="text-xs text-gray-500">
