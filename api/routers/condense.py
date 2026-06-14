@@ -428,7 +428,7 @@ def _run_gemini_analysis(job_id: str, video: Path, cv_report: dict | None) -> No
         from padelpro_vision.analysis.gemini_clip import analyze_with_gemini, gemini_available
         if not gemini_available(api_key):
             _jobs[job_id]["gemini_error"] = (
-                "GEMINI_API_KEY não configurada ou google-generativeai não instalado."
+                "GEMINI_API_KEY não configurada ou google-genai não instalado."
             )
             return
         _jobs[job_id]["phase"] = "análise Gemini (semântica)"

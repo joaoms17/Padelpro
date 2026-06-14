@@ -85,48 +85,55 @@ def analyze_with_gemini(
                           (only present when cv_hits was provided)
     """
     try:
-        import google.generativeai as genai
+        from google import genai
+        from google.genai import types
     except ImportError:
         raise RuntimeError(
-            "google-generativeai not installed. "
-            "Run: pip install google-generativeai"
+            "google-genai not installed. Run: pip install google-genai"
         )
-
-    genai.configure(api_key=api_key)
 
     video_path = Path(video_path)
     if not video_path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
 
+    # The new google-genai SDK (unlike the legacy google-generativeai) accepts
+    # the current "AQ." API-key format and skips the $discovery endpoint.
+    client = genai.Client(api_key=api_key)
+
     # ── Upload to Gemini Files API ───────────────────────────────────────────
     logger.info("Uploading %s to Gemini Files API…", video_path.name)
     t0 = time.time()
 
-    video_file = genai.upload_file(str(video_path), mime_type="video/mp4")
+    try:
+        video_file = client.files.upload(file=str(video_path))
+    except TypeError:
+        # older google-genai builds used path= instead of file=
+        video_file = client.files.upload(path=str(video_path))
 
     # Wait for processing (Gemini needs to transcode the video)
-    while video_file.state.name == "PROCESSING":
+    while video_file.state and video_file.state.name == "PROCESSING":
         time.sleep(3)
-        video_file = genai.get_file(video_file.name)
+        video_file = client.files.get(name=video_file.name)
 
-    if video_file.state.name != "ACTIVE":
-        raise RuntimeError(f"Gemini file processing failed: {video_file.state.name}")
+    if not video_file.state or video_file.state.name != "ACTIVE":
+        state = video_file.state.name if video_file.state else "UNKNOWN"
+        raise RuntimeError(f"Gemini file processing failed: {state}")
 
     logger.info("Gemini file ready (upload+process %.1fs)", time.time() - t0)
 
     # ── Inference ────────────────────────────────────────────────────────────
-    model = genai.GenerativeModel(
-        GEMINI_MODEL,
-        generation_config=genai.GenerationConfig(
+    response = client.models.generate_content(
+        model=GEMINI_MODEL,
+        contents=[video_file, _STROKE_PROMPT],
+        config=types.GenerateContentConfig(
             response_mime_type="application/json",
             temperature=0.1,
         ),
     )
-    response = model.generate_content([video_file, _STROKE_PROMPT])
 
     # Clean up the uploaded file (we don't need it anymore)
     try:
-        genai.delete_file(video_file.name)
+        client.files.delete(name=video_file.name)
     except Exception:
         pass
 
@@ -184,14 +191,14 @@ def _merge_hits(cv_hits: list[dict], gemini_strokes: list[dict]) -> list[dict]:
 
 
 def gemini_available(api_key: str | None = None) -> bool:
-    """Return True when google-generativeai is installed and a key is set."""
+    """Return True when google-genai is installed and a key is set."""
     if api_key is None:
         import os
         api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
         return False
     try:
-        import google.generativeai  # noqa: F401
+        from google import genai  # noqa: F401
         return True
     except ImportError:
         return False
