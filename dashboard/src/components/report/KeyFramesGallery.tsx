@@ -21,6 +21,10 @@ function FrameTile({
 }) {
   const [broken, setBroken] = useState(false);
 
+  const hasBallPos =
+    frame.ball_x_norm != null && frame.ball_y_norm != null && !broken;
+  const ballConf = frame.ball_conf ?? null;
+
   return (
     <div className="card overflow-hidden">
       <div className="relative aspect-video bg-navy-800">
@@ -33,6 +37,17 @@ function FrameTile({
             onError={() => setBroken(true)}
           />
         )}
+        {hasBallPos && (
+          <div
+            className="absolute w-4 h-4 -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+            style={{
+              left: `${(frame.ball_x_norm ?? 0) * 100}%`,
+              top: `${(frame.ball_y_norm ?? 0) * 100}%`,
+            }}
+          >
+            <div className="w-full h-full rounded-full border-2 border-yellow-300 shadow-[0_0_6px_rgba(234,179,8,0.8)]" />
+          </div>
+        )}
         <span className="absolute top-2 left-2 px-2 py-0.5 rounded-full bg-navy-950/80 text-gray-200 text-xs font-mono tabular-nums">
           {formatTime(frame.t_s)}
         </span>
@@ -43,6 +58,11 @@ function FrameTile({
           {frame.ball_visible && (
             <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold bg-accent-soft text-accent border border-accent/30">
               bola
+            </span>
+          )}
+          {ballConf != null && ballConf >= 0.3 && (
+            <span className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold text-accent border border-accent/30 bg-accent-soft">
+              IA: {Math.round(ballConf * 100)}%
             </span>
           )}
         </div>
