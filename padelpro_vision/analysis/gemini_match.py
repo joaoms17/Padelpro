@@ -40,74 +40,144 @@ SHOT_TYPES = ("forehand", "backhand", "volley", "smash", "bandeja",
 FORMATIONS = ("both_net", "both_back", "split_near_net", "split_far_net", "mixed")
 
 _MATCH_PROMPT = """
-You are an expert padel coach analysing a match video. Watch the ENTIRE video from
-start to finish before answering. Be precise and count carefully.
+You are an expert padel coach with 20 years of experience. You are analysing a match
+video filmed from behind the near baseline. Be methodical — never guess or average data.
 
-STEP 1 — IDENTIFY PLAYERS BY SHIRT COLOUR (do this first, before anything else):
-Look at the players in the first 10 seconds. Each of the 4 players wears a distinct
-shirt colour (e.g. white, black, blue, red, yellow, green…). Assign:
-  Player 1 = near team, LEFT side  (court_x ≈ 0.1-0.45, court_y < 0.5)
-  Player 2 = near team, RIGHT side (court_x ≈ 0.55-0.9, court_y < 0.5)
-  Player 3 = far team,  LEFT side  (court_x ≈ 0.1-0.45, court_y > 0.5)
-  Player 4 = far team,  RIGHT side (court_x ≈ 0.55-0.9, court_y > 0.5)
-Use the shirt colour to track the SAME physical person throughout the whole match.
-If two players on the same team swap sides during play, follow the COLOUR, not the position.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 1 — PLAYER IDENTIFICATION (first 10 seconds)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Pause on the opening seconds. Note each player's shirt colour:
+  Player 1 = NEAR team, LEFT side   court_x ≈ 0.15-0.45, court_y < 0.5
+  Player 2 = NEAR team, RIGHT side  court_x ≈ 0.55-0.85, court_y < 0.5
+  Player 3 = FAR  team, LEFT side   court_x ≈ 0.15-0.45, court_y > 0.5
+  Player 4 = FAR  team, RIGHT side  court_x ≈ 0.55-0.85, court_y > 0.5
 
-PADEL BASICS:
-- 2v2 sport on an enclosed glass court (10m wide × 20m long)
-- Near team = players closest to the camera. Far team = players at the far end.
-- Each SET has multiple GAMES; each GAME has multiple POINTS; each POINT = one RALLY
-- A typical padel match has 50-200 individual rallies across 2-3 sets
+NEAR team = closer to the camera. FAR team = far end of the court.
+For the rest of the video, identify each hitter by shirt colour — NOT by position.
+If teammates swap sides, follow the COLOUR.
 
-COORDINATE SYSTEM (all values 0.0–1.0):
-  court_x: 0.0 = left edge, 1.0 = right edge (as seen from camera)
-  court_y: 0.0 = near baseline (camera side), 0.5 = net, 1.0 = far baseline
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 2 — COURT AND PHYSICS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Padel court: 10 m wide × 20 m long, enclosed by glass back walls and metal side mesh.
+The net divides at y = 0.5. Glass back wall: y = 0.0 (near) and y = 1.0 (far).
 
-PLAYER POSITION RULES:
-- Players 1 & 2: court_y ALWAYS < 0.5. Players 3 & 4: court_y ALWAYS > 0.5.
-- Player 1 & 3 (LEFT players): court_x usually 0.1-0.45
-- Player 2 & 4 (RIGHT players): court_x usually 0.55-0.9
-- Teammates MUST have court_x ≥ 0.25 apart at every timestamp.
-- Attacking (at net): court_y ≈ 0.35-0.45 (near team) or 0.55-0.65 (far team)
-- Defending (at back): court_y ≈ 0.05-0.20 (near team) or 0.80-0.95 (far team)
+IMPORTANT: The ball CAN and DOES bounce off the glass walls — this is legal and common.
+A ball hitting the back glass and rebounding is NOT a new shot.
+Shot count increments ONLY when a RACKET contacts the ball.
 
-SHOT ATTRIBUTION RULES:
-- Watch which player's racket physically hits the ball — attribute the shot to THAT player.
-- Do NOT distribute shots evenly across 4 players. Real match data is uneven:
-  some players hit many more shots than others (e.g. a dominating player may hit 40%).
-- The player at the net typically hits more volleys/smashes.
-- The player at the back typically hits more groundstrokes/lobs.
-- Shots MUST alternate between teams (near team hits → far team hits → near team hits…).
+Coordinate system (all 0.0–1.0):
+  court_x: 0.0 = left edge  → 1.0 = right edge  (as seen from camera)
+  court_y: 0.0 = near baseline → 0.5 = net → 1.0 = far baseline
 
-Return ONLY a single valid JSON object — NO markdown fences, NO text before or after.
+Typical positions by role:
+  Back-left player (P1 or P3):   court_x ≈ 0.25, court_y ≈ 0.10 (near) / 0.90 (far)
+  Back-right player (P2 or P4):  court_x ≈ 0.75, court_y ≈ 0.10 (near) / 0.90 (far)
+  Net-left player:                court_x ≈ 0.25, court_y ≈ 0.38 (near) / 0.62 (far)
+  Net-right player:               court_x ≈ 0.75, court_y ≈ 0.38 (near) / 0.62 (far)
+  Defending deep:                 court_y ≈ 0.05-0.18 (near) / 0.82-0.95 (far)
+  Attacking at net:               court_y ≈ 0.32-0.45 (near) / 0.55-0.68 (far)
 
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 3 — SHOT TYPE VISUAL GUIDE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Identify EACH racket-ball contact:
+
+serve    — underarm swing; the ball bounces in the diagonal service box. Always the
+           FIRST shot of a point. Hitter is near the back glass.
+forehand — swing with dominant arm on the dominant side of body, at low-to-mid height.
+           Player faces the ball, weight transfers forward.
+backhand — swing crossing the body to the non-dominant side, at low-to-mid height.
+           Compact rotation, often two-handed.
+volley   — player is at the net (court_y ≈ 0.33-0.45 or 0.55-0.67).
+           Ball hit WITHOUT letting it bounce. Short, punching motion.
+smash    — overhead hit with full arm extension, ball above shoulder level.
+           Aggressive power shot — intended winner or to force the opponent back.
+bandeja  — defensive overhead at shoulder height with slice, pushing the ball
+           deep and cross-court. Player stays near the net after hitting.
+           Less arm extension than smash. Ball goes high and soft.
+vibora   — offensive overhead with sharp wrist snap/topspin, aimed at the side glass.
+           Player moves FORWARD after hitting. Generates spin, low bounce.
+lob      — high, slow, arching shot aimed to pass OVER the net players.
+           Trajectory: very high arc, lands deep near the far baseline.
+other    — any contact that doesn't fit the above categories.
+
+Outcome of each shot:
+  winner        — opponent team cannot return the ball legally (point won directly).
+  unforced_error — hitter makes a mistake NOT caused by opponent's pressure.
+                   e.g. easy ball sent into the net or out.
+  forced_error  — hitter makes a mistake BECAUSE of opponent's difficult shot.
+  continuation  — the rally continues normally after this shot.
+  let           — serve clips the net and lands correctly in service box (redo serve).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+STEP 4 — SCAN METHODOLOGY (do this before writing JSON)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Scan the video in 30-second segments. For EACH segment mentally note:
+  a) How many shots occurred and WHO hit each one (identify by shirt colour).
+  b) Position of each player at the midpoint of the segment.
+  c) Formation (both teams at net? both back? split?).
+
+This segment-by-segment method prevents you from estimating totals.
+Count each segment precisely, then sum.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FORBIDDEN PATTERNS — ALWAYS WRONG
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+❌ All 4 players with equal or near-equal shot counts.
+   Real padel is UNEVEN: the dominant player hits 25-40% of their team's shots.
+   WRONG example: P1=25, P2=25, P3=25, P4=25 — this is always a hallucination.
+   RIGHT example: P1=38, P2=19, P3=31, P4=22 — uneven counts are normal.
+
+❌ Two teammates at the same court_x (or within 0.20 of each other).
+   Teammates always maintain ≥0.25 horizontal (court_x) separation.
+
+❌ Two consecutive shots by the SAME TEAM without an opponent shot between them.
+   Teams MUST alternate: near→far→near→far…
+   (Exception: serve followed by a let is re-served by the same team.)
+
+❌ Near-team players (1&2) with court_y ≥ 0.5, or far-team (3&4) with court_y ≤ 0.5.
+   Teams NEVER cross the net in normal play.
+
+❌ Attributing a shot to a player who is clearly far from the ball.
+   Always use shirt colour to identify the hitter — check it matches their location.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SELF-CHECK BEFORE WRITING JSON
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Before writing the JSON, verify:
+  □ All 4 players have DIFFERENT shirt_color values?
+  □ Shot counts across 4 players are DIFFERENT (not all equal or similar)?
+  □ Every player_position for P1 & P2 has court_y < 0.5?
+  □ Every player_position for P3 & P4 has court_y > 0.5?
+  □ P1 & P2 always differ in court_x by ≥0.25?
+  □ P3 & P4 always differ in court_x by ≥0.25?
+  □ No two consecutive shots belong to the same team?
+If any check fails, fix the data before outputting.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT — single raw JSON object, NO markdown, NO text before or after
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {
   "duration_s": <total video length in seconds, float>,
 
   "players": [
-    // Identify each player by their shirt colour (seen in the video).
-    // This anchors player IDs to real people throughout the analysis.
-    {"player": 1, "shirt_color": "<colour in Portuguese, e.g. branco, azul, vermelho>",
+    {"player": 1, "shirt_color": "<cor em português, e.g. branco, azul, vermelho, preto>",
      "team": "near", "side": "left"},
-    {"player": 2, "shirt_color": "<colour>", "team": "near", "side": "right"},
-    {"player": 3, "shirt_color": "<colour>", "team": "far",  "side": "left"},
-    {"player": 4, "shirt_color": "<colour>", "team": "far",  "side": "right"}
+    {"player": 2, "shirt_color": "<cor>", "team": "near", "side": "right"},
+    {"player": 3, "shirt_color": "<cor>", "team": "far",  "side": "left"},
+    {"player": 4, "shirt_color": "<cor>", "team": "far",  "side": "right"}
   ],
 
   "player_positions": [
-    // MANDATORY: record ALL 4 players EVERY 5 SECONDS throughout the video.
-    // Total entries MUST be at least ceil(duration_s / 5) * 4.
-    // Track each player by their shirt colour — the same person keeps the same player ID.
-    // Players 1&2: court_y < 0.5. Players 3&4: court_y > 0.5.
-    // Players 1&2 court_x MUST differ by ≥0.25. Same for players 3&4.
+    // ALL 4 players every 5 seconds. MANDATORY: ≥ ceil(duration_s/5) × 4 entries.
+    // court_y: P1&P2 < 0.5, P3&P4 > 0.5. P1&P2 court_x differ ≥0.25. Same for P3&P4.
     {"t_s": <float>, "player": <1|2|3|4>, "court_x": <0.0-1.0>, "court_y": <0.0-1.0>},
     ...
   ],
 
   "shots": [
-    // Every single racket-ball contact = 1 shot entry.
-    // Identify the hitter by their shirt colour, map to player ID.
-    // Shot counts WILL be uneven — do not artificially balance them.
+    // Every racket-ball contact. Counts MUST be uneven. Teams MUST alternate.
     {"t_s": <float>, "player": <1|2|3|4>,
      "type": "<forehand|backhand|volley|smash|bandeja|vibora|serve|lob|other>",
      "outcome": "<winner|unforced_error|forced_error|let|continuation>"},
@@ -115,15 +185,10 @@ Return ONLY a single valid JSON object — NO markdown fences, NO text before or
   ],
 
   "formation_samples": [
-    // MANDATORY: record the formation EVERY 5 SECONDS.
-    // Total entries MUST be at least ceil(duration_s / 5).
-    //   "both_net"        — both near-team players attacking at net
-    //   "both_back"       — both near-team players defending at back
-    //   "split_near_net"  — one near player at net, one at back
-    //   "split_far_net"   — far team split; near team at back
-    //   "mixed"           — other
-    // Attacking "both_net" is common in padel: expect 30-50% of samples.
-    {"t_s": <float>, "type": "<both_net|both_back|split_near_net|split_far_net|mixed>"},
+    // MANDATORY: ≥ ceil(duration_s/5) entries, one every 5 seconds.
+    // both_net | both_back | split_near_net | split_far_net | mixed
+    // "both_net" (both near players at net) is COMMON in padel: expect 30-50%.
+    {"t_s": <float>, "type": "<formation>"},
     ...
   ],
 
@@ -135,12 +200,12 @@ Return ONLY a single valid JSON object — NO markdown fences, NO text before or
   "key_frames": [
     // 8-12 moments where all 4 players AND ball are clearly visible.
     {"t_s": <float>, "n_players": <0-4>, "ball_visible": <bool>,
-     "description": "<one-sentence description in Portuguese>"},
+     "description": "<one sentence in Portuguese>"},
     ...
   ],
 
   "rallies": [
-    // One entry PER POINT. start_s = serve contact. end_s = point ends.
+    // One entry PER POINT. start_s = serve contact. end_s = point ends (ball dead).
     {"start_s": <float>, "end_s": <float>, "num_shots": <int>, "winner_team": <1|2|null>},
     ...
   ],
@@ -152,15 +217,6 @@ Return ONLY a single valid JSON object — NO markdown fences, NO text before or
   "match_summary": "<2-3 sentences in Portuguese summarising the match and who won>",
   "confidence": <0.0-1.0>
 }
-
-CRITICAL:
-1. player_positions MUST have ≥ ceil(duration_s/5) × 4 entries.
-2. formation_samples MUST have ≥ ceil(duration_s/5) entries.
-3. Identify players by shirt colour — fill the "players" array first.
-4. Shot counts MUST NOT be equal across players. Real data is uneven.
-5. Shots MUST alternate between teams (near→far→near→far…).
-6. Players 1&2 court_x MUST differ ≥0.25. Same for players 3&4.
-7. Return ONLY the raw JSON object. No explanation, no markdown.
 """.strip()
 
 
@@ -215,7 +271,7 @@ def analyze_full_match(video_path: str | Path, api_key: str | None = None) -> di
     # was the main cause of low-quality analysis. Thinking tokens are separate
     # from the output-token budget so this doesn't reduce the JSON space.
     try:
-        cfg_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=8192)
+        cfg_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=16384)
     except Exception:
         pass  # older SDK version — proceed without thinking config
 
