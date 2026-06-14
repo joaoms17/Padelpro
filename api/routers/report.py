@@ -41,6 +41,14 @@ def _frames_dir(rid: str) -> Path:
 
 # ── Create / ingest ──────────────────────────────────────────────────────────
 
+@router.get("/capabilities")
+async def report_capabilities():
+    """Lightweight probe so the frontend can check server availability and limits."""
+    max_mb = int(os.environ.get("API_MAX_UPLOAD_MB", "500"))
+    gemini_ok = bool(os.environ.get("GEMINI_API_KEY", ""))
+    return {"max_upload_mb": max_mb, "gemini": gemini_ok}
+
+
 @router.post("/upload")
 async def upload_for_report(
     background_tasks: BackgroundTasks,
@@ -48,11 +56,28 @@ async def upload_for_report(
 ):
     """Upload a match video; returns a job id to poll. Gemini analyses the whole
     video in the background."""
+    max_mb = int(os.environ.get("API_MAX_UPLOAD_MB", "500"))
+    max_bytes = max_mb * 1024 * 1024
+
     rid = str(uuid.uuid4())
     _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     in_path = _UPLOAD_DIR / f"{rid}.mp4"
+
+    written = 0
+    chunk = 1024 * 1024  # 1 MB chunks
     with open(in_path, "wb") as f:
-        shutil.copyfileobj(file.file, f, length=1024 * 1024)
+        while True:
+            data = await file.read(chunk)
+            if not data:
+                break
+            written += len(data)
+            if written > max_bytes:
+                in_path.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=413,
+                    detail=f"Ficheiro demasiado grande (máx. {max_mb} MB). Exporta em 720p e tenta de novo.",
+                )
+            f.write(data)
 
     _jobs[rid] = {"rid": rid, "status": "processing", "phase": "na fila",
                   "filename": file.filename}
