@@ -114,6 +114,16 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   return <h2 className="text-xl font-semibold text-white mb-4">{children}</h2>;
 }
 
+function downloadJson(obj: unknown, filename: string) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function ReportBody({ report, rid }: { report: MatchReport; rid: string }) {
   return (
     <div className="space-y-6">
@@ -239,6 +249,33 @@ function ReportBody({ report, rid }: { report: MatchReport; rid: string }) {
           </details>
         </section>
       )}
+
+      {/* 10b. Raw AI data — everything Gemini returned, to judge what to use */}
+      <section className="card p-6">
+        <details>
+          <summary className="cursor-pointer text-sm font-medium text-gray-400 hover:text-gray-200">
+            📋 Dados crus da IA (JSON completo)
+          </summary>
+          <div className="mt-3 space-y-2">
+            <p className="text-xs text-gray-500">
+              Tudo o que o Gemini devolveu neste jogo, tal e qual. Inclui{" "}
+              <code className="text-gray-400">rallies_v2</code> (rallies + pancadas originais),{" "}
+              <code className="text-gray-400">jogadores</code>, <code className="text-gray-400">pausas</code> e{" "}
+              <code className="text-gray-400">resumo</code>.
+            </p>
+            <button
+              type="button"
+              onClick={() => downloadJson(report, `padelpro_${rid}.json`)}
+              className="btn-ghost px-3 py-1.5 text-xs"
+            >
+              ⬇️ Descarregar JSON
+            </button>
+            <pre className="text-xs text-gray-400 whitespace-pre-wrap break-words overflow-auto max-h-[32rem] p-4 bg-[#0B1B2E] rounded-lg">
+              {JSON.stringify(report, null, 2)}
+            </pre>
+          </div>
+        </details>
+      </section>
 
       {/* 11. Footer CTAs */}
       <section className="card p-6">
