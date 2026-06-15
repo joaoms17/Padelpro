@@ -26,6 +26,7 @@ import time
 from pathlib import Path
 
 from padelpro_vision.analysis.gemini_clip import _parse_gemini_json
+from padelpro_vision.analysis.shot_detector import detect_shots, format_shot_hints
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +287,21 @@ def analyze_full_match(video_path: str | Path, api_key: str | None = None) -> di
     except Exception:
         pass  # older SDK version — proceed without thinking config
 
+    # Run optical-flow shot detection locally BEFORE sending to Gemini.
+    # This is purely visual (immune to adjacent-court audio noise) and gives
+    # Gemini a list of pre-detected shot timestamps to anchor its JSON output.
+    logger.info("Running optical-flow shot detection…")
+    detected_shots = detect_shots(video_path)
+    shot_hints = format_shot_hints(detected_shots)
+    if shot_hints:
+        logger.info("Injecting %d optical-flow shot hints into prompt", len(detected_shots))
+
+    # Build the final prompt: static prompt + optional shot hints
+    final_prompt = _MATCH_PROMPT
+    if shot_hints:
+        # Insert hints before the raciocinio section so Gemini sees them early
+        final_prompt = shot_hints + "\n\n" + _MATCH_PROMPT
+
     # Extract a few still frames from the start of the video and include them
     # as inline images BEFORE the video. This lets Gemini calibrate the court
     # boundaries (net position, service lines, glass walls) from high-quality
@@ -306,7 +322,7 @@ def analyze_full_match(video_path: str | Path, api_key: str | None = None) -> di
             except Exception:
                 pass  # SDK version difference — skip inline frames gracefully
     contents.append(video_file)
-    contents.append(_MATCH_PROMPT)
+    contents.append(final_prompt)
 
     response = client.models.generate_content(
         model=GEMINI_MODEL,
@@ -326,9 +342,12 @@ def analyze_full_match(video_path: str | Path, api_key: str | None = None) -> di
     dur = report.get("duration_s", 0.0)
     is_v2 = bool(report.get("jogadores"))
     logger.info(
-        "Gemini full-match (schema=%s): %d positions, %d shots, %d rallies (duration=%.0fs)",
-        "v2" if is_v2 else "v1", n_pos, n_shots, n_rallies, dur,
+        "Gemini full-match (schema=%s): %d positions, %d shots, %d rallies "
+        "(duration=%.0fs, optical_flow_hints=%d)",
+        "v2" if is_v2 else "v1", n_pos, n_shots, n_rallies, dur, len(detected_shots),
     )
+    # Attach optical-flow metadata so the frontend can show it
+    report["_optical_flow_shots"] = len(detected_shots)
     return report
 
 
