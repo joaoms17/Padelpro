@@ -95,6 +95,13 @@ export interface CondenseStatus {
   report_error?: string;
   gemini_report?: GeminiReport;
   gemini_error?: string;
+  cut?: CutTimelineData;
+}
+
+export interface CutTimelineData {
+  duration_s: number;
+  play_score: number[];   // one value [0..1] per second of the ORIGINAL video
+  segments: { start_ms: number; end_ms: number; type: string }[];
 }
 
 export async function getCondenseCapabilities(): Promise<{ analyze: boolean; gemini: boolean; youtube: boolean; max_upload_mb?: number }> {

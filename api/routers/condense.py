@@ -233,6 +233,25 @@ def _condense_sync(
                useful_pct=round(100.0 * useful_s / total_s, 1) if total_s else 0.0,
                rallies=len(rallies))
 
+    # Capture the cut decisions so the UI can render a timeline (diagnostic):
+    # the per-second "play score" + which spans were kept (rally) vs cut.
+    try:
+        ps_path = _UPLOAD_DIR / job_id / "play_score.json"
+        play_score = (
+            json.load(open(ps_path)).get("play_score_per_second", [])
+            if ps_path.exists() else []
+        )
+        _jobs[job_id]["cut"] = {
+            "duration_s": round(total_s, 1),
+            "play_score": [round(float(v), 3) for v in play_score],
+            "segments": [
+                {"start_ms": s.start_ms, "end_ms": s.end_ms, "type": s.type}
+                for s in segs
+            ],
+        }
+    except Exception:
+        logger.warning("Could not capture cut timeline (job %s)", job_id, exc_info=True)
+
     if not rallies:
         _rm(in_path)
         _rm(_UPLOAD_DIR / job_id)

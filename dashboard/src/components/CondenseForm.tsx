@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import { ClipReportView } from "@/components/ClipReport";
 import { GeminiInsights } from "@/components/GeminiInsights";
+import { CutTimeline } from "@/components/CutTimeline";
 
 const DEFAULT_MAX_MB = 150; // overridden by the backend's capabilities
 
@@ -299,6 +300,8 @@ export function CondenseForm() {
             <Stat label="% do vídeo" value={job.useful_pct != null ? `${job.useful_pct}%` : "—"} />
             <Stat label="Rallies" value={String(job.rallies ?? "—")} />
           </div>
+
+          {job.cut && <CutTimeline cut={job.cut} />}
           <a
             href={condenseDownloadUrl(job.job_id)}
             className="block w-full text-center py-2.5 bg-brand hover:bg-brand-dark text-navy-950 rounded-full font-bold text-sm transition-colors"
