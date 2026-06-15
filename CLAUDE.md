@@ -70,6 +70,23 @@ A página `/annotate` continua a treinar os **detetores de bola e jogadores**
 (`feedback/retrain.py: retrain_ball_detector / retrain_player_detector`) — esses
 são modelos de visão úteis e independentes do classificador de pancadas.
 
+### Motor de deteção "detetar → classificar" (`analysis/shot_pipeline.py`)
+
+Provado experimentalmente (ver `scripts/testar_*.py`): pedir ao Gemini para "ver o
+vídeo todo" **alucina** um molde (ex.: serve→forehand em loop) porque a API de vídeo
+amostra a ~1 img/s. O caminho que funciona:
+1. **Candidatos** = movimento (optical flow) + áudio (`shot_detector.py`).
+   - `mode="confirmed"` (interseção) = preciso mas esparso → bom para **dados de treino limpos**.
+   - `mode="union"` = recall alto mas com ruído (áudio apanha courts vizinhos).
+2. **Gemini por pancada** (5 frames: 2 antes + contacto + 2 depois) confirma se há
+   pancada neste court (filtra vizinhos) e diz o **tipo**.
+- `harvest_training_shots()` + `scripts/colher_treino.py`: colhe pancadas limpas →
+  frames + tipo sugerido + `manifest.json` para o humano confirmar (semente do TCN).
+- **Limites reais:** a 480p o tipo (forehand/backhand) e o recall sofrem; deteção de
+  serviço por "intervalo grande" só funciona com dados densos. Vídeo 1080p/tripé sobe o teto.
+- **Ainda NÃO ligado** ao `report.py` (a análise viva). Cuidado com os limites do
+  plano gratuito do Gemini (5 pedidos/min) ao integrar — usar lotes + pausas.
+
 ## Convenções de trabalho
 
 - **Branch próprio → PR para `main`** com testes verdes + `next build` limpo. O merge ao `main` deploya o frontend automaticamente (Vercel via Git).

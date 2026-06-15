@@ -32,15 +32,16 @@ FRAME_DT = 0.2      # espaçamento entre os 5 fotogramas (s)
 DEDUP_S = 0.8       # candidatos a menos de isto = mesmo evento
 BATCH = 10          # candidatos por pedido ao Gemini
 PAUSE_S = 12.0      # espera entre pedidos (plano gratis = 5/min)
+SERVE_GAP_S = 5.0   # 1a pancada depois de um intervalo maior = inicio de ponto (servico)
 
 _CLASSIFY_PROMPT = (
     "Recebeste {n} candidatos a pancada de padel. Cada candidato vem como 5 imagens "
     "consecutivas (~0.2s) a volta do momento, precedidas de 'CANDIDATO k'. "
     "O court relevante e o que esta em primeiro plano/maior.\n"
     "Para CADA candidato decide:\n"
-    "- ha_pancada: true se um jogador DESTE court esta a bater na bola nestes frames; "
-    "false se nao se ve pancada neste court (jogadores parados, a apanhar bola, ou a "
-    "pancada e de outro court ao fundo/lado).\n"
+    "- ha_pancada: true se houver jogo a decorrer no court em primeiro plano (jogadores "
+    "numa troca de bola). false APENAS se o court estiver vazio / parado / a accao for "
+    "claramente de outro court ao fundo (jogadores muito pequenos).\n"
     "- tipo: forehand | backhand | volley | overhead | serve | lob | indefinido "
     "(se ha_pancada=false usa indefinido).\n"
     "Responde SO em JSON, uma entrada por candidato e por ordem:\n"
@@ -48,17 +49,28 @@ _CLASSIFY_PROMPT = (
 )
 
 
-def build_candidates(video_path: str | Path, dedup_s: float = DEDUP_S) -> tuple[list[dict], dict]:
-    """Junta movimento + áudio numa lista de candidatos (com de-duplicação)."""
+def build_candidates(
+    video_path: str | Path, dedup_s: float = DEDUP_S, mode: str = "union",
+) -> tuple[list[dict], dict]:
+    """Constrói candidatos a pancada.
+
+    mode="confirmed": só onde movimento E áudio concordam (alta precisão).
+    mode="union":     movimento ∪ áudio (alto recall, mais ruído).
+    """
     vis = detect_shots(video_path)
     aud = detect_shots_audio(video_path)
     merged = merge_signals(vis, aud)
-    audio_only = {round(t, 3) for t in merged["audio_only"]}
 
-    cands: list[dict] = [{"t_s": s["t_s"], "zone": s["zone"], "src": "mov"} for s in vis]
-    for a in aud:
-        if round(a["t_s"], 3) in audio_only:
-            cands.append({"t_s": a["t_s"], "zone": "audio", "src": "audio"})
+    if mode == "confirmed":
+        conf = {round(t, 3) for t in merged["confirmed"]}
+        cands = [{"t_s": s["t_s"], "zone": s["zone"], "src": "conf"}
+                 for s in vis if round(s["t_s"], 3) in conf]
+    else:
+        audio_only = {round(t, 3) for t in merged["audio_only"]}
+        cands = [{"t_s": s["t_s"], "zone": s["zone"], "src": "mov"} for s in vis]
+        for a in aud:
+            if round(a["t_s"], 3) in audio_only:
+                cands.append({"t_s": a["t_s"], "zone": "audio", "src": "audio"})
     cands.sort(key=lambda c: c["t_s"])
 
     # de-dup: candidatos muito próximos = mesmo evento; preferir zona de movimento
@@ -71,8 +83,10 @@ def build_candidates(video_path: str | Path, dedup_s: float = DEDUP_S) -> tuple[
         out.append(c)
 
     stats = {
+        "modo": mode,
         "movimento": len(vis),
         "audio": len(aud),
+        "confirmadas_sinal": len(merged["confirmed"]),
         "audio_only": len(merged["audio_only"]),
         "candidatos": len(out),
     }
@@ -116,11 +130,16 @@ def _classify_batch(client, types, batch: list[dict]) -> dict:
             arr = json.loads(r.text or "[]")
             return {int(x.get("n", i + 1)): x for i, x in enumerate(arr)}
         except Exception as e:
-            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
+            msg = str(e)
+            if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
                 logger.info("rate limit — espero 60s")
                 time.sleep(60)
                 continue
-            logger.warning("classify batch falhou: %s", str(e)[:160])
+            if "503" in msg or "UNAVAILABLE" in msg:
+                logger.info("servidor ocupado (503) — espero 15s")
+                time.sleep(15)
+                continue
+            logger.warning("classify batch falhou: %s", msg[:160])
             return {}
     return {}
 
@@ -173,6 +192,65 @@ def detect_and_classify(
             time.sleep(pause_s)
 
     confirmed = [r for r in results if r["ha_pancada"]]
+
+    # Serviço = 1ª pancada confirmada depois de um intervalo longo (início de ponto).
+    # Calculado sobre as pancadas LIMPAS, não sobre os candidatos com buracos.
+    confirmed.sort(key=lambda r: r["t_s"])
+    prev = -999.0
+    for r in confirmed:
+        r["servico"] = (r["t_s"] - prev) > SERVE_GAP_S
+        prev = r["t_s"]
+
     stats["confirmadas"] = len(confirmed)
     stats["filtradas"] = len(results) - len(confirmed)
+    stats["servicos"] = sum(1 for r in confirmed if r["servico"])
     return {"shots": confirmed, "all": results, "stats": stats}
+
+
+def harvest_training_shots(
+    video_path: str | Path,
+    out_dir: str | Path | None = None,
+    api_key: str | None = None,
+    mode: str = "confirmed",
+) -> dict:
+    """Colhe pancadas LIMPAS de um vídeo para treinar o nosso modelo.
+
+    Pipeline: candidatos (interseção, alta precisão) → Gemini sugere o tipo →
+    guarda os 5 fotogramas de cada pancada + um manifesto para o utilizador
+    CONFIRMAR o tipo (Gemini sugere, humano confirma → label de treino).
+    """
+    import json as _json
+
+    video_path = Path(video_path)
+    cands, cstats = build_candidates(video_path, mode=mode)
+    out = detect_and_classify(video_path, api_key=api_key, candidates=cands)
+    frames_by_t = {round(c["t_s"], 3): c.get("_frames", []) for c in cands}
+
+    if out_dir is None:
+        safe = "".join(ch if ch.isalnum() else "_" for ch in video_path.stem)[:40]
+        out_dir = Path("data/dataset/candidates") / safe
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    manifest = []
+    for i, shot in enumerate(out["shots"], 1):
+        tipo = shot.get("tipo", "indefinido")
+        frames = frames_by_t.get(round(shot["t_s"], 3), [])
+        sd = out_dir / f"shot_{i:02d}_{tipo}"
+        sd.mkdir(exist_ok=True)
+        for k, fb in enumerate(frames):
+            (sd / f"frame_{k}.jpg").write_bytes(fb)
+        manifest.append({
+            "n": i,
+            "t_s": round(shot["t_s"], 3),
+            "zone": shot["zone"],
+            "tipo_sugerido": tipo,
+            "servico": shot.get("servico", False),
+            "n_frames": len(frames),
+            "confirmado": False,     # o utilizador poe True quando valida
+            "tipo_correto": None,    # o utilizador corrige aqui se preciso
+        })
+    (out_dir / "manifest.json").write_text(
+        _json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    return {"out_dir": str(out_dir), "n_shots": len(manifest), "stats": {**cstats, **out["stats"]}}
