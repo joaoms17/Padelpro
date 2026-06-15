@@ -304,16 +304,19 @@ export interface MatchJogador {
 export interface MatchPancada {
   timestamp: string; // "HH:MM:SS"
   jogador: "A1" | "A2" | "B1" | "B2";
-  tipo: "volley" | "forehand" | "backhand" | "smash" | "overhead" | "saida_vidro" | "serve" | "indefinido";
+  // v3 types (simplified); legacy v2 types kept for backward compat with old reports
+  tipo: "forehand" | "backhand" | "volley" | "overhead" | "serve" | "lob" | "indefinido"
+      | "smash" | "bandeja" | "vibora" | "saida_vidro";
   zona: string;
-  segunda_bola?: boolean;
+  segunda_bola?: boolean; // v2 legacy field
 }
 
 export interface MatchFase {
   fase: "ATAQUE" | "TRANSIÇÃO" | "DEFESA";
-  equipa: "A" | "B";
   inicio: string;
   fim: string;
+  // v2 legacy fields (not present in v3 schema)
+  equipa?: "A" | "B";
   momento?: "servico";
   timestamp_servico?: string;
   posicao_A1?: string;
@@ -327,10 +330,14 @@ export interface MatchRallyV2 {
   inicio: string;
   fim: string;
   servidor: string;
-  servico_valido: boolean;
   equipa_ganha_ponto: "A" | "B" | null;
-  fases: MatchFase[];
+  // v3 format: separate arrays per team
+  fases_A?: MatchFase[];
+  fases_B?: MatchFase[];
+  // v2 legacy: single interleaved array with equipa field
+  fases?: MatchFase[];
   pancadas: MatchPancada[];
+  servico_valido?: boolean; // v2 legacy field
 }
 
 export interface MatchPausa {

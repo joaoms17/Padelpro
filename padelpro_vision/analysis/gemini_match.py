@@ -26,6 +26,11 @@ import time
 from pathlib import Path
 
 from padelpro_vision.analysis.gemini_clip import _parse_gemini_json
+from padelpro_vision.analysis.shot_detector import (
+    detect_shots,
+    detect_shots_audio,
+    format_shot_hints,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,188 +41,111 @@ GEMINI_MODEL = "gemini-2.5-flash"
 #   court_y: 0.0 = near baseline (closest to camera), 1.0 = far baseline
 # Players 1 & 2 are the near team (Equipa A); players 3 & 4 are the far team (Equipa B).
 
-SHOT_TYPES = ("forehand", "backhand", "volley", "smash", "bandeja",
-              "vibora", "serve", "lob", "other")
+SHOT_TYPES = ("forehand", "backhand", "volley", "overhead", "serve", "lob", "other")
 
 FORMATIONS = ("both_net", "both_back", "split_near_net", "split_far_net", "mixed")
 
 _MATCH_PROMPT = """
-# PROMPT GEMINI — ANÁLISE DE VÍDEO DE PADEL
----
-## 0. CALIBRAÇÃO DO CAMPO (FAZ ISTO PRIMEIRO)
+# ANÁLISE DE VÍDEO DE PADEL — PadelPro Vision
 
-As imagens que precedem este texto são frames de referência extraídos do início do vídeo. **Antes de qualquer outra análise**, usa-as para calibrar o campo:
-
-1. **Fronteiras do campo** — identifica as 4 paredes/linhas que delimitam o campo. Estima em que % do frame (horizontal e vertical) cada fronteira fica. Ex: "o campo ocupa de ~10% a ~90% da largura e de ~15% a ~95% da altura do frame"
-2. **Rede** — identifica a posição da rede. A que altura do frame fica? Ex: "a rede está a ~50% da altura do frame"
-3. **Linhas de serviço** — identifica as duas linhas de serviço (paralelas à rede). Onde ficam?
-4. **Vidros laterais e de fundo** — identifica as paredes de vidro. Os jogadores em defesa chegam a estas zonas
-5. **Perspectiva da câmara** — a câmara está centrada no campo? Ligeiramente para um lado? Em que ângulo vertical?
-6. **Dimensões relativas** — com base na calibração, estima o tamanho de cada zona no frame: ML1/ML2 (rede), ML3 (linha de serviço), VL1/VL2 (lateral), VF1-VF5 (fundo)
-
-**Usa esta calibração como referência para TODAS as estimativas de posição que se seguem. Quando um jogador está no fundo do campo (VF zones), ele deve estar fisicamente nos vidros de fundo — não no meio do campo.**
+A câmara está fixa atrás de uma das linhas de fundo, centrada no eixo longo do campo.
 
 ---
-## INSTRUÇÕES GERAIS
-Analisa este vídeo de padel. Antes de gerar qualquer JSON, escreve um bloco de raciocínio entre `<raciocinio>` e `</raciocinio>` onde:
-1. **Calibração do campo** (secção 0 acima) — descreve as fronteiras e referências visuais
-2. Identificas os 4 jogadores e descreves os seus elementos visuais
-3. Confirmas a posição inicial (esquerda/direita) de cada equipa
-4. Verificas as tuas deteções antes de as confirmar no JSON
-5. Para cada rally, rastreias as mudanças de posição coletiva de cada equipa e registas o timestamp exacto de cada transição de fase — estes dados são usados para cortar o vídeo automaticamente por fase (ATAQUE / TRANSIÇÃO / DEFESA). O serviço é um momento dentro do ATAQUE, não uma fase separada
-6. Cada vez que a posição coletiva de uma equipa muda claramente, fechas a fase anterior (registas o `fim`) e abres uma nova (registas o `inicio`). Só registas uma **mudança de fase** quando a mudança é visualmente confirmada — nunca por estimativa
-7. No `resumo` do JSON incluis: `duracao_util` (duração total menos todas as pausas) e `tempo_por_fase` com o total acumulado por fase (ATAQUE / TRANSIÇÃO / DEFESA) para cada equipa
+## 0. CALIBRAÇÃO (FAZ ISTO PRIMEIRO)
+
+As imagens que precedem este texto são frames de referência do início do vídeo. Usa-as para:
+
+1. Localizar as 4 linhas/paredes do campo no frame (em % horizontal e vertical)
+2. Localizar a rede (a que % da altura do frame fica)
+3. Localizar as linhas de serviço (paralelas à rede, a ~1/3 do campo de cada lado)
+4. Localizar os vidros de fundo (até onde os jogadores recuam em DEFESA)
+
+Esta calibração é a referência para todas as zonas que atribuis a seguir.
 
 ---
 ## 1. IDENTIFICAÇÃO DOS JOGADORES
-No início do vídeo, identifica os 4 jogadores com base nos seguintes elementos visuais:
-- Cor e padrão da **camisola**
-- Cor dos **calções**
-- Cor e padrão das **meias**
-- Cor e modelo dos **ténis**
-- Modelo e cor da **raquete**
 
-Se dois jogadores tiverem elementos similares, usa a combinação dos restantes fatores para os distinguir.
+Identifica os 4 jogadores pelos seus elementos visuais: camisola, calções, meias, ténis, raquete.
 
-**Posição no campo:** o Gemini deteta os jogadores automaticamente (bounding box). A referência de posição é sempre a **parte inferior do bounding box** — não a cabeça nem o tronco. Se o bounding box não for suficiente, usa os ténis/pés como backup.
-
-Atribui as seguintes IDs:
-- **Equipa A:** `A1` (lado esquerdo) e `A2` (lado direito)
-- **Equipa B:** `B1` (lado esquerdo) e `B2` (lado direito)
-
-> **Nota:** Esquerda/direita serve apenas para identificação inicial. Não é usada na análise posterior — a posição muda ao longo do jogo.
+- **Equipa A:** `A1` (esquerda) e `A2` (direita) — equipa mais próxima da câmara
+- **Equipa B:** `B1` (esquerda) e `B2` (direita) — equipa mais afastada
 
 ---
-## 2. SISTEMA DE ZONAS DO CAMPO
+## 2. ZONAS DO CAMPO
 
-Zonas do campo, da rede para o fundo:
+Usa apenas 3 zonas:
 
 | Zona | Localização | Fase |
 |------|-------------|------|
-| `ML1` | 1ª malha (junto à rede) | ATAQUE |
-| `ML2` | 2ª malha | ATAQUE |
-| `ML3` | 3ª malha + espaço até à linha de serviço | TRANSIÇÃO |
-| `VL1` | 1º vidro lateral (da linha de serviço até ao VL2) | DEFESA |
-| `VL2` | 2º vidro lateral | DEFESA |
-| `VF1`–`VF5` | Vidro de fundo — da direita (`VF1`) para a esquerda (`VF5`) | DEFESA |
-
-**Zona ML3:** engloba o painel físico da 3ª malha e todo o espaço de campo aberto até à linha de serviço. A linha de serviço é a fronteira entre ML3 (TRANSIÇÃO) e VL1 (DEFESA) — não existe sobreposição entre zonas.
-
-**VL1:** começa na linha de serviço e estende-se até ao VL2.
-
-**VF1–VF5:** o vidro de fundo divide-se em 5 zonas da direita para a esquerda (perspectiva da câmara). Usa para registar posições precisas no fundo do campo.
+| `REDE` | Junto à rede (1ª e 2ª malha) | ATAQUE |
+| `MEIO` | Zona de transição (3ª malha até à linha de serviço) | TRANSIÇÃO |
+| `FUNDO` | Vidros laterais e de fundo | DEFESA |
 
 ---
 ## 3. FASES DE JOGO
 
-As fases são determinadas pela posição **coletiva da equipa** — nunca pelo jogador individual.
+Cada rally tem `fases_A` (equipa A) e `fases_B` (equipa B) em listas independentes e paralelas.
 
 | Fase | Condição |
 |------|----------|
-| `ATAQUE` | Ambos os jogadores da equipa em ML1 ou ML2 — **exceto durante o serviço** (ver nota abaixo) |
-| `TRANSIÇÃO` | Um ou ambos os jogadores na zona ML3 (da 3ª malha até à linha de serviço) |
-| `DEFESA` | Ambos os jogadores em VL1, VL2 ou VF1–VF5 |
+| `ATAQUE` | Equipa junto à rede (REDE) |
+| `TRANSIÇÃO` | Equipa em movimento entre rede e fundo (MEIO) |
+| `DEFESA` | Equipa nos vidros (FUNDO) |
 
-**Nota — Serviço dentro do ATAQUE:**
-O serviço não é uma fase separada — é um momento (`momento: "servico"`) registado dentro da fase ATAQUE da equipa que serve. O parceiro já está em ML1/ML2; o servidor executa a partir de VL1/VL2/VF mas a equipa mantém a fase ATAQUE. Regista o `timestamp_servico` na fase para permitir cortes isolados no futuro.
+**Rallies com menos de 5 segundos:** omite `fases_A` e `fases_B` (usa `[]`).
 
-**Nota — 2ª bola (para uso futuro):**
-A primeira pancada da equipa receptora após o serviço é a "2ª bola". Regista `"segunda_bola": true` na pancada correspondente em `pancadas` — não altera a fase, serve apenas para análise futura.
-
-**Regras obrigatórias:**
-- A fase só muda quando o **bounding box ou os pés** do(s) jogador(es) mudam claramente de zona
-- Em caso de dúvida, **mantém a fase anterior**
-- Uma equipa **não pode** passar directamente de `DEFESA` → `ATAQUE` sem `TRANSIÇÃO`. **Exceção:** se a transição foi demasiado rápida para captar — aceitar o salto sem erro, o rally continua
-
-Cada fase gera um clip independente com timestamps de início e fim.
+Regista apenas mudanças de fase visualmente confirmadas. Em caso de dúvida, mantém a fase anterior.
 
 ---
-## 4. DETECÇÃO DO SERVIÇO
+## 4. TIPOS DE PANCADA
 
-O serviço é um **momento dentro da fase ATAQUE** (ver secção 3). Detecta-o para registar `timestamp_servico` e `momento: "servico"` na fase correspondente, e para marcar `"tipo": "serve"` na pancada.
-
-Imediatamente antes do serviço e quando o serviço acontece, verificam-se estas condições:
-- Servidor está **atrás da linha de serviço** (zona VL1/VL2/VF1–VF5)
-- Parceiro do servidor está junto à rede (ML1/ML2)
-- Adversários perto da linha de serviço ou atrás
-- A bola cai da mão do servidor, bate no chão, e o servidor bate-a com a raquete
-- A bola vai cruzada para o **quadrado de serviço diagonal** do adversário
-
-**Validade do serviço:**
-- ✅ Válido se: a bola bate dentro do quadrado de serviço cruzado e não toca na malha; confirmado se o receptor jogou a bola de volta **e** o próximo serviço é feito para o lado oposto (ou muda o servidor)
-- 🔄 Repetição (let): a bola toca na tela da rede mas cai dentro do quadrado cruzado — o serviço repete-se
-- ❌ Falta se: a bola toca na malha e não entra; ou o receptor não jogou (deixou passar, passou a bola sem força ao adversário, ou bateu para a rede); ou muda o servidor
+| Tipo | Descrição |
+|------|-----------|
+| `forehand` | Pancada pelo lado dominante após a bola tocar no chão/vidro |
+| `backhand` | Pancada pelo lado não-dominante após a bola tocar no chão/vidro |
+| `volley` | Pancada sem a bola tocar no chão — geralmente junto à rede |
+| `overhead` | Qualquer pancada acima ou ao lado da cabeça após balão adversário (smash, bandeja, víbora, kick) |
+| `serve` | Serviço |
+| `lob` | Balão alto (inclui saída de vidro de fundo com efeito alto) |
+| `indefinido` | Tipo não identificável |
 
 ---
 ## 5. FIM DE RALLY
 
-Um rally termina quando **uma** destas condições for verdade:
-
-1. **(Primário — deteção de bola)** A bola saiu do campo; ou está na mão de um jogador; ou tocou duas vezes no chão; ou a mesma equipa tocou nela duas vezes seguidas
-2. Mais de **6 segundos** sem nenhuma pancada de nenhum jogador — se o ponto está a durar 6 segundos sem pancada, terminou. Aplica-se sempre, independentemente de a bola ser detetável ou não
-3. Dois jogadores cumprimentam-se (de equipas opostas ou da mesma equipa) — indicador claro de fim de ponto
-4. Um jogador toca na rede com a raquete ou o corpo durante o rally
+Um rally termina quando:
+1. A bola sai do campo, toca duas vezes no chão, ou a mesma equipa toca nela duas vezes seguidas
+2. Mais de 6 segundos sem nenhuma pancada
+3. Jogadores cumprimentam-se (fim de ponto)
 
 ---
-## 6. PAUSAS E TROCA DE CAMPO
+## 6. PAUSAS
 
-Uma pausa superior a **45 segundos** pode indicar três situações diferentes. Após a pausa, verifica a posição dos jogadores para determinar qual:
-
-| Situação | Indicador |
-|----------|-----------|
-| **Troca de campo** | Jogadores estão no lado oposto ao que estavam antes da pausa |
-| **Discussão / timeout** | Jogadores continuam no mesmo lado, reagrupados junto à rede ou no fundo |
-| **Lesão / interrupção** | Jogadores dispersos, câmara pode focar num jogador específico |
-
-**Em qualquer pausa > 45 segundos:**
-- Regista com timestamps de início e fim
-- Regista a duração em segundos
-- Identifica a situação (`troca_de_campo`, `discussao`, `lesao`, `indefinido`)
-- Se for troca de campo: atualiza as posições dos jogadores para o lado oposto
-- A camisola de um jogador pode mudar durante a pausa, mas não de todos em simultâneo — atualiza só o jogador que mudou
-- Cruza com os dados de posição de cada jogador no resumo individual
-
-**No JSON das pausas**, inclui o campo `tipo_pausa` com um destes valores: `troca_de_campo`, `discussao`, `lesao`, `indefinido`.
+Regista pausas > 45 segundos com `tipo_pausa`: `troca_de_campo`, `discussao`, `lesao`, ou `indefinido`.
 
 ---
-## 7. TIPOS DE PANCADA
+## 7. VÍDEOS LONGOS (> 40 minutos)
 
-Para cada pancada, identifica o tipo com base no que vês. Usa `indefinido` se não tiveres certeza.
-
-| Tipo | Descrição |
-|------|-----------|
-| `volley` | Pancada sem deixar a bola tocar no chão. Geralmente em ML1/ML2, mas pode ser feita mais atrás |
-| `forehand` | Pancada após a bola tocar no chão (ou no vidro), executada pelo lado dominante |
-| `backhand` | Pancada após a bola tocar no chão (ou no vidro), executada pelo lado não-dominante |
-| `smash` | Após um balão do adversário: pancada com **força máxima**, executada **acima da cabeça**. Equipa tipicamente em ataque |
-| `overhead` | Após um balão do adversário: pancada executada **ao lado da cabeça**, com efeito lateral, pulso alto e movimento lateral. Inclui: víbora (lateral com efeito), bandeja (controlado a recuar), kick (bola mais à esquerda da cabeça, raquete mais alta, tocado para malha ou vidro lateral) |
-| `saida_vidro` | Equipa recua após balão adversário, deixa a bola bater alto no **vidro de fundo**, e executa a pancada quando a bola ressalta |
-| `serve` | Serviço (ver secção 4) |
-| `indefinido` | Tipo não identificável com certeza |
-
-> **Smash vs. Overhead:** ambos ocorrem após balão adversário. O smash é força máxima acima da cabeça; o overhead tem movimento lateral e efeito.
+Se o vídeo for mais longo que 40 minutos, analisa os primeiros 30 minutos em detalhe completo e resume o resto apenas no `resumo` (pontuação, duração total). Não omitas nenhum rally dos primeiros 30 minutos.
 
 ---
-## 8. RACIOCÍNIO ANTES DO JSON
+## 8. RACIOCÍNIO (ANTES DO JSON)
 
-Antes de gerar o JSON, escreve o bloco de raciocínio:
+Escreve o bloco de raciocínio entre `<raciocinio>` e `</raciocinio>`:
 
 <raciocinio>
-CALIBRAÇÃO DO CAMPO:
-- Fronteiras: [descreve onde o campo começa e acaba no frame, em % aprox.]
-- Rede: [a que % da altura do frame fica a rede]
-- Linhas de serviço: [onde ficam as duas linhas de serviço]
-- Vidros de fundo: [onde ficam os vidros de fundo — é até aqui que os jogadores recuam em DEFESA]
-- Perspectiva: [ângulo da câmara, está centrada?]
-- Zonas aproximadas no frame: ML1/ML2=[onde], ML3=[onde], VL1/VL2=[onde], VF=[onde]
+CALIBRAÇÃO:
+- Campo no frame: [% horizontal e % vertical]
+- Rede: [% da altura do frame]
+- Linhas de serviço: [% da altura do frame]
+- Vidros de fundo: [% da altura do frame — é até aqui que os jogadores recuam em FUNDO]
+- Mapeamento de zonas no frame: REDE=[~x% a ~y%], MEIO=[~x% a ~y%], FUNDO=[~x% a ~y%]
 
-JOGADORES IDENTIFICADOS:
-- A1: [descrição visual completa]
-- A2: [descrição visual completa]
-- B1: [descrição visual completa]
-- B2: [descrição visual completa]
-Posição inicial: Equipa A no lado [esquerdo/direito], Equipa B no lado [esquerdo/direito].
-[Descreve o que vês nos primeiros segundos do vídeo antes de confirmar qualquer deteção.]
+JOGADORES:
+- A1: [descrição visual]
+- A2: [descrição visual]
+- B1: [descrição visual]
+- B2: [descrição visual]
+- Equipa A está no lado [próximo/afastado da câmara]
 </raciocinio>
 
 ---
@@ -226,7 +154,7 @@ Posição inicial: Equipa A no lado [esquerdo/direito], Equipa B no lado [esquer
 ```json
 {
   "jogadores": [
-    { "id": "A1", "equipa": "A", "descricao_visual": "Camisola azul escura, calções pretos, meias brancas, ténis brancos Nike, raquete Head vermelha" },
+    { "id": "A1", "equipa": "A", "descricao_visual": "Camisola azul escura, calções pretos, ténis brancos" },
     { "id": "A2", "equipa": "A", "descricao_visual": "..." },
     { "id": "B1", "equipa": "B", "descricao_visual": "..." },
     { "id": "B2", "equipa": "B", "descricao_visual": "..." }
@@ -239,35 +167,31 @@ Posição inicial: Equipa A no lado [esquerdo/direito], Equipa B no lado [esquer
     "duracao_util": "00:00:00",
     "pontuacao_final": "6-3 4-6 7-5",
     "resumo_jogo": "2-3 frases em português a resumir o jogo e o vencedor",
-    "tempo_por_fase": {
-      "A": { "ATAQUE": "00:00:00", "TRANSIÇÃO": "00:00:00", "DEFESA": "00:00:00" },
-      "B": { "ATAQUE": "00:00:00", "TRANSIÇÃO": "00:00:00", "DEFESA": "00:00:00" }
-    },
-    "eventos_incomuns": [],
     "confianca": 0.8
   },
   "pausas": [
     { "id": 1, "inicio": "00:00:00", "fim": "00:00:00", "duracao_segundos": 0, "tipo_pausa": "troca_de_campo" }
   ],
-
   "rallies": [
     {
       "id": 1,
       "inicio": "00:00:00",
       "fim": "00:00:08",
       "servidor": "A1",
-      "servico_valido": true,
       "equipa_ganha_ponto": "A",
-      "fases": [
-        { "fase": "ATAQUE", "momento": "servico", "timestamp_servico": "00:00:00", "equipa": "A", "inicio": "00:00:00", "fim": "00:00:01", "posicao_A1": "VL2", "posicao_A2": "ML1", "posicao_B1": "VL1", "posicao_B2": "VL1" },
-        { "fase": "DEFESA", "equipa": "B", "inicio": "00:00:00", "fim": "00:00:05", "posicao_A1": "VL2", "posicao_A2": "ML1", "posicao_B1": "VL1", "posicao_B2": "VL1" },
-        { "fase": "TRANSIÇÃO", "equipa": "A", "inicio": "00:00:01", "fim": "00:00:03", "posicao_A1": "ML3", "posicao_A2": "ML2", "posicao_B1": "VL1", "posicao_B2": "VL2" },
-        { "fase": "ATAQUE", "equipa": "A", "inicio": "00:00:03", "fim": "00:00:08", "posicao_A1": "ML1", "posicao_A2": "ML2", "posicao_B1": "VF3", "posicao_B2": "VF1" },
-        { "fase": "DEFESA", "equipa": "B", "inicio": "00:00:05", "fim": "00:00:08", "posicao_A1": "ML1", "posicao_A2": "ML2", "posicao_B1": "VF3", "posicao_B2": "VF1" }
+      "fases_A": [
+        { "fase": "DEFESA", "inicio": "00:00:00", "fim": "00:00:02" },
+        { "fase": "TRANSIÇÃO", "inicio": "00:00:02", "fim": "00:00:04" },
+        { "fase": "ATAQUE", "inicio": "00:00:04", "fim": "00:00:08" }
+      ],
+      "fases_B": [
+        { "fase": "ATAQUE", "inicio": "00:00:00", "fim": "00:00:05" },
+        { "fase": "DEFESA", "inicio": "00:00:05", "fim": "00:00:08" }
       ],
       "pancadas": [
-        { "timestamp": "00:00:00", "jogador": "A1", "tipo": "serve", "zona": "VL2" },
-        { "timestamp": "00:00:00", "jogador": "B2", "tipo": "backhand", "zona": "VL1", "segunda_bola": true }
+        { "timestamp": "00:00:00", "jogador": "A1", "tipo": "serve", "zona": "FUNDO" },
+        { "timestamp": "00:00:02", "jogador": "B2", "tipo": "backhand", "zona": "FUNDO" },
+        { "timestamp": "00:00:05", "jogador": "A2", "tipo": "volley", "zona": "REDE" }
       ]
     }
   ]
@@ -276,12 +200,12 @@ Posição inicial: Equipa A no lado [esquerdo/direito], Equipa B no lado [esquer
 
 ---
 ## REGRAS DE TIMESTAMP
-- Ancora timestamps **apenas** em eventos visuais claros: início de serviço, primeira pancada do rally, bola fora, fim de ponto
+- Ancora timestamps apenas em eventos visuais claros
 - Arredonda ao segundo mais próximo
-- **Não inventas timestamps por estimativa** — se não consegues ancorar, omite o evento
+- Não inventas timestamps por estimativa
 
 ---
-*Versão: 2026-06-14 v2 — PadelPro Vision*
+*Versão: 2026-06-15 v3 — PadelPro Vision*
 """.strip()
 
 
@@ -367,6 +291,27 @@ def analyze_full_match(video_path: str | Path, api_key: str | None = None) -> di
     except Exception:
         pass  # older SDK version — proceed without thinking config
 
+    # Run both visual (optical flow) and audio shot detection locally BEFORE
+    # sending to Gemini. Visual = high confidence (court-specific). Audio =
+    # suggestive only (may pick up adjacent courts). Both are injected as
+    # labelled hints so Gemini knows which to trust more.
+    logger.info("Running optical-flow shot detection…")
+    detected_shots = detect_shots(video_path)
+    logger.info("Running audio shot detection…")
+    detected_audio = detect_shots_audio(video_path)
+    shot_hints = format_shot_hints(detected_shots, detected_audio or None)
+    if shot_hints:
+        logger.info(
+            "Injecting shot hints: %d visual, %d audio",
+            len(detected_shots), len(detected_audio),
+        )
+
+    # Build the final prompt: static prompt + optional shot hints
+    final_prompt = _MATCH_PROMPT
+    if shot_hints:
+        # Insert hints before the raciocinio section so Gemini sees them early
+        final_prompt = shot_hints + "\n\n" + _MATCH_PROMPT
+
     # Extract a few still frames from the start of the video and include them
     # as inline images BEFORE the video. This lets Gemini calibrate the court
     # boundaries (net position, service lines, glass walls) from high-quality
@@ -387,7 +332,7 @@ def analyze_full_match(video_path: str | Path, api_key: str | None = None) -> di
             except Exception:
                 pass  # SDK version difference — skip inline frames gracefully
     contents.append(video_file)
-    contents.append(_MATCH_PROMPT)
+    contents.append(final_prompt)
 
     response = client.models.generate_content(
         model=GEMINI_MODEL,
@@ -407,9 +352,13 @@ def analyze_full_match(video_path: str | Path, api_key: str | None = None) -> di
     dur = report.get("duration_s", 0.0)
     is_v2 = bool(report.get("jogadores"))
     logger.info(
-        "Gemini full-match (schema=%s): %d positions, %d shots, %d rallies (duration=%.0fs)",
-        "v2" if is_v2 else "v1", n_pos, n_shots, n_rallies, dur,
+        "Gemini full-match (schema=%s): %d positions, %d shots, %d rallies "
+        "(duration=%.0fs, optical_flow_hints=%d)",
+        "v2" if is_v2 else "v1", n_pos, n_shots, n_rallies, dur, len(detected_shots),
     )
+    # Attach optical-flow metadata so the frontend can show it
+    report["_optical_flow_shots"] = len(detected_shots)
+    report["_audio_shots"] = len(detected_audio)
     return report
 
 
@@ -537,7 +486,7 @@ def _fill_defaults(data: dict) -> None:
         "A": {"ATAQUE": "00:00:00", "TRANSIÇÃO": "00:00:00", "DEFESA": "00:00:00"},
         "B": {"ATAQUE": "00:00:00", "TRANSIÇÃO": "00:00:00", "DEFESA": "00:00:00"},
     })
-    resumo.setdefault("eventos_incomuns", [])
+    resumo.setdefault("eventos_incomuns", [])  # kept for backward compat (v2 reports)
     resumo.setdefault("confianca", 0.0)
     data.setdefault("pausas", [])
     data.setdefault("rallies", [])
@@ -555,11 +504,17 @@ def _fill_defaults(data: dict) -> None:
 
 # ── Zone → court coordinate mapping ─────────────────────────────────────────
 _ZONE_Y_NEAR = {
+    # v3 system (3 zones)
+    "REDE": 0.40, "MEIO": 0.44, "FUNDO": 0.05,
+    # v2 legacy (10 zones)
     "ML1": 0.38, "ML2": 0.41, "ML3": 0.44,
     "VL1": 0.27, "VL2": 0.15,
     "VF1": 0.05, "VF2": 0.05, "VF3": 0.05, "VF4": 0.05, "VF5": 0.05,
 }
 _ZONE_Y_FAR = {
+    # v3 system (3 zones)
+    "REDE": 0.60, "MEIO": 0.56, "FUNDO": 0.95,
+    # v2 legacy (10 zones)
     "ML1": 0.62, "ML2": 0.59, "ML3": 0.56,
     "VL1": 0.73, "VL2": 0.85,
     "VF1": 0.95, "VF2": 0.95, "VF3": 0.95, "VF4": 0.95, "VF5": 0.95,
@@ -569,16 +524,20 @@ _PLAYER_DEFAULT_X = {"A1": 0.25, "A2": 0.75, "B1": 0.25, "B2": 0.75}
 _PLAYER_NUM = {"A1": 1, "A2": 2, "B1": 3, "B2": 4}
 _PLAYER_TEAM_FAR = {"B1", "B2"}
 
-# Map new shot types to old schema types
+# Map v3/v2 shot types to compat types used by shot_counts + frontend
 _SHOT_TYPE_MAP = {
-    "volley": "volley",
-    "forehand": "forehand",
-    "backhand": "backhand",
-    "smash": "smash",
-    "overhead": "bandeja",   # closest old equivalent
-    "saida_vidro": "lob",    # closest old equivalent
-    "serve": "serve",
-    "indefinido": "other",
+    "forehand":    "forehand",
+    "backhand":    "backhand",
+    "volley":      "volley",
+    "overhead":    "overhead",
+    "smash":       "overhead",   # v2 legacy → overhead
+    "bandeja":     "overhead",   # v2 legacy → overhead
+    "vibora":      "overhead",   # v2 legacy → overhead
+    "serve":       "serve",
+    "lob":         "lob",
+    "saida_vidro": "lob",        # v2 legacy → lob
+    "indefinido":  "other",
+    "other":       "other",
 }
 
 
@@ -612,8 +571,11 @@ def _derive_compat_fields(data: dict, is_v2: bool | None = None) -> None:
 
     resumo = data.get("resumo", {})
     if is_v2 is None:
-        # Fallback: detect v2 by rally structure (v2 has "fases"/"pancadas"; v1 has "start_s")
-        is_v2 = any("fases" in r or "pancadas" in r for r in data.get("rallies", []))
+        # Fallback: detect v2 by rally structure
+        is_v2 = any(
+            "fases" in r or "pancadas" in r or "fases_A" in r
+            for r in data.get("rallies", [])
+        )
 
     # duration_s — prefer existing value (v1 schema has it directly),
     # derive from resumo only for v2 schema
@@ -692,12 +654,22 @@ def _derive_compat_fields(data: dict, is_v2: bool | None = None) -> None:
         data["shots"] = shots
         data["shot_counts"] = shot_counts
 
-        # tempo_por_fase — computed from actual fases data (don't trust Gemini's value)
+        # tempo_por_fase — computed from fases_A/fases_B (v3) or fases with equipa (v2 legacy)
         phase_totals: dict = {
             "A": {"ATAQUE": 0.0, "TRANSIÇÃO": 0.0, "DEFESA": 0.0},
             "B": {"ATAQUE": 0.0, "TRANSIÇÃO": 0.0, "DEFESA": 0.0},
         }
         for rally in data.get("rallies", []):
+            # v3 format: separate fases_A / fases_B lists
+            for team_key, team in (("fases_A", "A"), ("fases_B", "B")):
+                for fase in rally.get(team_key, []):
+                    phase = fase.get("fase")
+                    if phase not in phase_totals[team]:
+                        continue
+                    dur = _hhmmss_to_s(fase.get("fim", "00:00:00")) - _hhmmss_to_s(fase.get("inicio", "00:00:00"))
+                    if dur > 0:
+                        phase_totals[team][phase] += dur
+            # v2 legacy format: single fases list with equipa field
             for fase in rally.get("fases", []):
                 team = fase.get("equipa")
                 phase = fase.get("fase")
@@ -715,14 +687,30 @@ def _derive_compat_fields(data: dict, is_v2: bool | None = None) -> None:
             team: {ph: _s_to_hhmmss(v) for ph, v in phases.items()}
             for team, phases in phase_totals.items()
         }
-        # Always use values computed from actual fases — don't trust Gemini's resumo
-        # summary which is often wrong (symmetric or all-zero).
+        # Always use computed values — don't trust Gemini's resumo which is often wrong.
         resumo["tempo_por_fase"] = computed_tpf
 
-        # player_positions[] from fases (zone → coordinates)
+        # player_positions[] — v3: from pancadas zones; v2 legacy: from fases posicao_*
         positions: list = []
         seen: set = set()
+
         for rally in data.get("rallies", []):
+            # v3: derive positions from each shot's zona
+            for p in rally.get("pancadas", []):
+                pid = p.get("jogador", "")
+                zone = p.get("zona", "")
+                if not pid or not zone:
+                    continue
+                t_s = _hhmmss_to_s(p.get("timestamp", "00:00:00"))
+                key = (round(t_s), pid)
+                if key in seen:
+                    continue
+                seen.add(key)
+                x, y = _zone_to_xy(zone, pid)
+                pnum = _PLAYER_NUM.get(pid, 0)
+                if pnum:
+                    positions.append({"t_s": t_s, "player": pnum, "court_x": x, "court_y": y})
+            # v2 legacy: derive positions from fases posicao_* fields
             for fase in rally.get("fases", []):
                 t_s = _hhmmss_to_s(fase.get("inicio", "00:00:00"))
                 for pid in ("A1", "A2", "B1", "B2"):

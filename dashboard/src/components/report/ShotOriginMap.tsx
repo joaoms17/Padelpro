@@ -5,11 +5,17 @@ import type { MatchReport } from "@/lib/api";
 
 // Zone → normalised court coordinates (mirrors gemini_match.py)
 const ZONE_Y_NEAR: Record<string, number> = {
+  // v3 system (3 zones)
+  REDE: 0.40, MEIO: 0.44, FUNDO: 0.05,
+  // v2 legacy (10 zones)
   ML1: 0.38, ML2: 0.41, ML3: 0.44,
   VL1: 0.27, VL2: 0.15,
   VF1: 0.05, VF2: 0.05, VF3: 0.05, VF4: 0.05, VF5: 0.05,
 };
 const ZONE_Y_FAR: Record<string, number> = {
+  // v3 system (3 zones)
+  REDE: 0.60, MEIO: 0.56, FUNDO: 0.95,
+  // v2 legacy (10 zones)
   ML1: 0.62, ML2: 0.59, ML3: 0.56,
   VL1: 0.73, VL2: 0.85,
   VF1: 0.95, VF2: 0.95, VF3: 0.95, VF4: 0.95, VF5: 0.95,
