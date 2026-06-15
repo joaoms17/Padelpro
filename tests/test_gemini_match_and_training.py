@@ -22,13 +22,13 @@ from padelpro_vision.training.dataset import (
 
 def test_shot_counts_buckets_unknown_type_as_other():
     shots = [
-        {"t_s": 1, "player": 1, "type": "smash"},
+        {"t_s": 1, "player": 1, "type": "overhead"},
         {"t_s": 2, "player": 1, "type": "forehand"},
         {"t_s": 3, "player": 2, "type": "not_a_real_type"},
-        {"t_s": 4, "player": 9, "type": "smash"},  # invalid player ignored
+        {"t_s": 4, "player": 9, "type": "overhead"},  # invalid player ignored
     ]
     counts = compute_shot_counts(shots)
-    assert counts["player_1"]["smash"] == 1
+    assert counts["player_1"]["overhead"] == 1
     assert counts["player_1"]["forehand"] == 1
     assert counts["player_2"]["other"] == 1
     assert set(counts) == {"player_1", "player_2", "player_3", "player_4"}
@@ -69,12 +69,12 @@ def test_rally_stats_zero_duration_safe():
 def test_enrich_report_adds_derived_fields():
     report = {
         "duration_s": 60.0,
-        "shots": [{"t_s": 1, "player": 1, "type": "smash"}],
+        "shots": [{"t_s": 1, "player": 1, "type": "overhead"}],
         "formation_samples": [{"type": "both_net"}],
         "rallies": [{"start_s": 0, "end_s": 6}],
     }
     out = enrich_report(report)
-    assert out["shot_counts"]["player_1"]["smash"] == 1
+    assert out["shot_counts"]["player_1"]["overhead"] == 1
     assert out["formation_pct"]["both_net"] == 100.0
     assert out["rally_stats"]["total_rallies"] == 1
 

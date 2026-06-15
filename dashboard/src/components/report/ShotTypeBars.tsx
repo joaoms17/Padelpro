@@ -6,27 +6,31 @@ const SHOT_COLORS: Record<string, string> = {
   forehand:  "#00E0A4",
   backhand:  "#54A7FF",
   volley:    "#E8FF3D",
-  smash:     "#FF7A59",
-  bandeja:   "#FFB347",
-  vibora:    "#D16FFF",
+  overhead:  "#FF7A59",
   serve:     "#7EE8FA",
   lob:       "#FFF176",
   other:     "#6B7280",
+  // legacy v2 types (for old reports)
+  smash:     "#FF7A59",
+  bandeja:   "#FFB347",
+  vibora:    "#D16FFF",
 };
 
 const SHOT_LABELS: Record<string, string> = {
   forehand:  "Direita",
   backhand:  "Esquerda",
   volley:    "Voleio",
-  smash:     "Remate",
-  bandeja:   "Bandeja",
-  vibora:    "Víbora",
+  overhead:  "Overhead",
   serve:     "Serviço",
   lob:       "Globo",
   other:     "Outra",
+  // legacy v2 types
+  smash:     "Remate",
+  bandeja:   "Bandeja",
+  vibora:    "Víbora",
 };
 
-const ORDER = ["forehand", "backhand", "volley", "smash", "bandeja", "vibora", "serve", "lob", "other"];
+const ORDER = ["forehand", "backhand", "volley", "overhead", "serve", "lob", "other", "smash", "bandeja", "vibora"];
 
 function playerLabel(report: MatchReport, pid: number): string {
   const p = report.players?.find((pl) => pl.player === pid);

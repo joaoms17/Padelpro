@@ -8,17 +8,19 @@ function playerLabel(report: MatchReport, playerNum: number): string {
   return p?.shirt_color ? `J${playerNum} (${p.shirt_color})` : `Jogador ${playerNum}`;
 }
 
-// Type order + PT-PT labels.
+// Type order + PT-PT labels (v3 types first, then legacy v2 fallbacks).
 const SHOT_LABELS: Record<string, string> = {
   forehand: "Direita",
   backhand: "Esquerda",
   volley: "Voleio",
-  smash: "Remate",
-  bandeja: "Bandeja",
-  vibora: "Víbora",
+  overhead: "Overhead",
   serve: "Serviço",
   lob: "Globo",
   other: "Outra",
+  // legacy v2 types (old reports)
+  smash: "Remate",
+  bandeja: "Bandeja",
+  vibora: "Víbora",
 };
 
 const PLAYERS = ["player_1", "player_2", "player_3", "player_4"] as const;
