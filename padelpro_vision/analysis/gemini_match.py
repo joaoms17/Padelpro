@@ -26,7 +26,11 @@ import time
 from pathlib import Path
 
 from padelpro_vision.analysis.gemini_clip import _parse_gemini_json
-from padelpro_vision.analysis.shot_detector import detect_shots, format_shot_hints
+from padelpro_vision.analysis.shot_detector import (
+    detect_shots,
+    detect_shots_audio,
+    format_shot_hints,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -287,14 +291,20 @@ def analyze_full_match(video_path: str | Path, api_key: str | None = None) -> di
     except Exception:
         pass  # older SDK version — proceed without thinking config
 
-    # Run optical-flow shot detection locally BEFORE sending to Gemini.
-    # This is purely visual (immune to adjacent-court audio noise) and gives
-    # Gemini a list of pre-detected shot timestamps to anchor its JSON output.
+    # Run both visual (optical flow) and audio shot detection locally BEFORE
+    # sending to Gemini. Visual = high confidence (court-specific). Audio =
+    # suggestive only (may pick up adjacent courts). Both are injected as
+    # labelled hints so Gemini knows which to trust more.
     logger.info("Running optical-flow shot detection…")
     detected_shots = detect_shots(video_path)
-    shot_hints = format_shot_hints(detected_shots)
+    logger.info("Running audio shot detection…")
+    detected_audio = detect_shots_audio(video_path)
+    shot_hints = format_shot_hints(detected_shots, detected_audio or None)
     if shot_hints:
-        logger.info("Injecting %d optical-flow shot hints into prompt", len(detected_shots))
+        logger.info(
+            "Injecting shot hints: %d visual, %d audio",
+            len(detected_shots), len(detected_audio),
+        )
 
     # Build the final prompt: static prompt + optional shot hints
     final_prompt = _MATCH_PROMPT
@@ -348,6 +358,7 @@ def analyze_full_match(video_path: str | Path, api_key: str | None = None) -> di
     )
     # Attach optical-flow metadata so the frontend can show it
     report["_optical_flow_shots"] = len(detected_shots)
+    report["_audio_shots"] = len(detected_audio)
     return report
 
 

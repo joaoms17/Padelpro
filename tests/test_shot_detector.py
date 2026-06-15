@@ -1,4 +1,4 @@
-"""Tests for the optical-flow shot detector."""
+"""Tests for the optical-flow + audio shot detector."""
 from __future__ import annotations
 
 import numpy as np
@@ -8,6 +8,7 @@ from padelpro_vision.analysis.shot_detector import (
     _find_peaks,
     _t_to_hhmmss,
     format_shot_hints,
+    merge_signals,
 )
 
 
@@ -48,7 +49,7 @@ def test_format_shot_hints_empty():
     assert format_shot_hints([]) == ""
 
 
-def test_format_shot_hints_shows_both_zones():
+def test_format_shot_hints_visual_only():
     shots = [
         {"t_s": 5.0,  "zone": "near", "magnitude": 1.0},
         {"t_s": 7.0,  "zone": "far",  "magnitude": 1.2},
@@ -62,3 +63,40 @@ def test_format_shot_hints_shows_both_zones():
     assert "00:00:12" in hint
     assert "Equipa próxima (A)" in hint
     assert "Equipa afastada (B)" in hint
+    assert "áudio" not in hint
+
+
+def test_format_shot_hints_with_audio():
+    visual = [
+        {"t_s": 5.0,  "zone": "near", "magnitude": 1.0},
+        {"t_s": 12.0, "zone": "far",  "magnitude": 1.2},
+    ]
+    audio = [
+        {"t_s": 5.2,  "zone": "audio", "magnitude": 0.8},   # confirms visual@5.0
+        {"t_s": 20.0, "zone": "audio", "magnitude": 0.7},   # audio-only
+    ]
+    hint = format_shot_hints(visual, audio)
+    assert "optical flow" in hint
+    assert "sugestivo" in hint
+    assert "00:00:20" in hint          # audio-only timestamp present
+    assert "campos vizinhos" in hint
+
+
+def test_merge_signals_confirmed():
+    visual = [{"t_s": 5.0,  "zone": "near", "magnitude": 1.0},
+              {"t_s": 10.0, "zone": "far",  "magnitude": 1.2}]
+    audio  = [{"t_s": 5.3,  "zone": "audio", "magnitude": 0.8},
+              {"t_s": 20.0, "zone": "audio", "magnitude": 0.7}]
+    m = merge_signals(visual, audio)
+    assert 5.0 in m["confirmed"]
+    assert 10.0 in m["visual_only"]
+    assert 20.0 in m["audio_only"]
+    assert len(m["confirmed"]) == 1
+
+
+def test_merge_signals_no_audio():
+    visual = [{"t_s": 5.0, "zone": "near", "magnitude": 1.0}]
+    m = merge_signals(visual, [])
+    assert m["confirmed"] == []
+    assert 5.0 in m["visual_only"]
+    assert m["audio_only"] == []
