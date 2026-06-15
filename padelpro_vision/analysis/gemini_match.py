@@ -44,14 +44,29 @@ FORMATIONS = ("both_net", "both_back", "split_near_net", "split_far_net", "mixed
 _MATCH_PROMPT = """
 # PROMPT GEMINI — ANÁLISE DE VÍDEO DE PADEL
 ---
+## 0. CALIBRAÇÃO DO CAMPO (FAZ ISTO PRIMEIRO)
+
+As imagens que precedem este texto são frames de referência extraídos do início do vídeo. **Antes de qualquer outra análise**, usa-as para calibrar o campo:
+
+1. **Fronteiras do campo** — identifica as 4 paredes/linhas que delimitam o campo. Estima em que % do frame (horizontal e vertical) cada fronteira fica. Ex: "o campo ocupa de ~10% a ~90% da largura e de ~15% a ~95% da altura do frame"
+2. **Rede** — identifica a posição da rede. A que altura do frame fica? Ex: "a rede está a ~50% da altura do frame"
+3. **Linhas de serviço** — identifica as duas linhas de serviço (paralelas à rede). Onde ficam?
+4. **Vidros laterais e de fundo** — identifica as paredes de vidro. Os jogadores em defesa chegam a estas zonas
+5. **Perspectiva da câmara** — a câmara está centrada no campo? Ligeiramente para um lado? Em que ângulo vertical?
+6. **Dimensões relativas** — com base na calibração, estima o tamanho de cada zona no frame: ML1/ML2 (rede), ML3 (linha de serviço), VL1/VL2 (lateral), VF1-VF5 (fundo)
+
+**Usa esta calibração como referência para TODAS as estimativas de posição que se seguem. Quando um jogador está no fundo do campo (VF zones), ele deve estar fisicamente nos vidros de fundo — não no meio do campo.**
+
+---
 ## INSTRUÇÕES GERAIS
 Analisa este vídeo de padel. Antes de gerar qualquer JSON, escreve um bloco de raciocínio entre `<raciocinio>` e `</raciocinio>` onde:
-1. Identificas os 4 jogadores e descreves os seus elementos visuais
-2. Confirmas a posição inicial (esquerda/direita) de cada equipa
-3. Verificas as tuas deteções antes de as confirmar no JSON
-4. Para cada rally, rastreias as mudanças de posição coletiva de cada equipa e registas o timestamp exacto de cada transição de fase — estes dados são usados para cortar o vídeo automaticamente por fase (ATAQUE / TRANSIÇÃO / DEFESA). O serviço é um momento dentro do ATAQUE, não uma fase separada
-5. Cada vez que a posição coletiva de uma equipa muda claramente, fechas a fase anterior (registas o `fim`) e abres uma nova (registas o `inicio`). Só registas uma **mudança de fase** quando a mudança é visualmente confirmada — nunca por estimativa
-6. No `resumo` do JSON incluis: `duracao_util` (duração total menos todas as pausas) e `tempo_por_fase` com o total acumulado por fase (ATAQUE / TRANSIÇÃO / DEFESA) para cada equipa
+1. **Calibração do campo** (secção 0 acima) — descreve as fronteiras e referências visuais
+2. Identificas os 4 jogadores e descreves os seus elementos visuais
+3. Confirmas a posição inicial (esquerda/direita) de cada equipa
+4. Verificas as tuas deteções antes de as confirmar no JSON
+5. Para cada rally, rastreias as mudanças de posição coletiva de cada equipa e registas o timestamp exacto de cada transição de fase — estes dados são usados para cortar o vídeo automaticamente por fase (ATAQUE / TRANSIÇÃO / DEFESA). O serviço é um momento dentro do ATAQUE, não uma fase separada
+6. Cada vez que a posição coletiva de uma equipa muda claramente, fechas a fase anterior (registas o `fim`) e abres uma nova (registas o `inicio`). Só registas uma **mudança de fase** quando a mudança é visualmente confirmada — nunca por estimativa
+7. No `resumo` do JSON incluis: `duracao_util` (duração total menos todas as pausas) e `tempo_por_fase` com o total acumulado por fase (ATAQUE / TRANSIÇÃO / DEFESA) para cada equipa
 
 ---
 ## 1. IDENTIFICAÇÃO DOS JOGADORES
@@ -188,7 +203,15 @@ Para cada pancada, identifica o tipo com base no que vês. Usa `indefinido` se n
 Antes de gerar o JSON, escreve o bloco de raciocínio:
 
 <raciocinio>
-Jogadores identificados:
+CALIBRAÇÃO DO CAMPO:
+- Fronteiras: [descreve onde o campo começa e acaba no frame, em % aprox.]
+- Rede: [a que % da altura do frame fica a rede]
+- Linhas de serviço: [onde ficam as duas linhas de serviço]
+- Vidros de fundo: [onde ficam os vidros de fundo — é até aqui que os jogadores recuam em DEFESA]
+- Perspectiva: [ângulo da câmara, está centrada?]
+- Zonas aproximadas no frame: ML1/ML2=[onde], ML3=[onde], VL1/VL2=[onde], VF=[onde]
+
+JOGADORES IDENTIFICADOS:
 - A1: [descrição visual completa]
 - A2: [descrição visual completa]
 - B1: [descrição visual completa]
@@ -262,6 +285,34 @@ Posição inicial: Equipa A no lado [esquerdo/direito], Equipa B no lado [esquer
 """.strip()
 
 
+def _extract_reference_frames(video_path: Path, n: int = 3) -> list[bytes]:
+    """Extract n JPEG frames spaced across the first ~10 seconds for court calibration."""
+    try:
+        import cv2
+    except ImportError:
+        return []
+    cap = cv2.VideoCapture(str(video_path))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+    frames: list[bytes] = []
+    sample_times = [1.0, 4.0, 8.0][:n]  # seconds into the video
+    for t in sample_times:
+        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+        ret, frame = cap.read()
+        if not ret:
+            continue
+        # Downscale to max 960px wide to keep inline payload small
+        h, w = frame.shape[:2]
+        if w > 960:
+            scale = 960 / w
+            frame = cv2.resize(frame, (960, int(h * scale)))
+        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+        if ok:
+            frames.append(buf.tobytes())
+    cap.release()
+    logger.info("Extracted %d reference frames from %s", len(frames), video_path.name)
+    return frames
+
+
 def analyze_full_match(video_path: str | Path, api_key: str | None = None) -> dict:
     """Upload the full video to Gemini and return a parsed match report dict.
 
@@ -316,9 +367,31 @@ def analyze_full_match(video_path: str | Path, api_key: str | None = None) -> di
     except Exception:
         pass  # older SDK version — proceed without thinking config
 
+    # Extract a few still frames from the start of the video and include them
+    # as inline images BEFORE the video. This lets Gemini calibrate the court
+    # boundaries (net position, service lines, glass walls) from high-quality
+    # stills before processing the full compressed video stream.
+    ref_frames = _extract_reference_frames(video_path)
+    contents: list = []
+    if ref_frames:
+        contents.append(
+            "As seguintes imagens são frames de referência do início do vídeo. "
+            "Usa-as para calibrar o campo (rede, linhas de serviço, vidros de fundo) "
+            "antes de analisar o vídeo completo:"
+        )
+        for fb in ref_frames:
+            try:
+                contents.append(types.Part(
+                    inline_data=types.Blob(mime_type="image/jpeg", data=fb)
+                ))
+            except Exception:
+                pass  # SDK version difference — skip inline frames gracefully
+    contents.append(video_file)
+    contents.append(_MATCH_PROMPT)
+
     response = client.models.generate_content(
         model=GEMINI_MODEL,
-        contents=[video_file, _MATCH_PROMPT],
+        contents=contents,
         config=types.GenerateContentConfig(**cfg_kwargs),
     )
 
