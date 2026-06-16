@@ -207,6 +207,48 @@ def detect_and_classify(
     return {"shots": confirmed, "all": results, "stats": stats}
 
 
+def detect_points(
+    video_path: str | Path,
+    thr: float = 0.25,
+    bridge_s: float = 2.0,
+    min_block_s: float = 2.0,
+) -> list[tuple[float, float]]:
+    """Blocos de jogo (≈ pontos) a partir da ENERGIA DE MOVIMENTO por segundo.
+
+    O movimento é específico do nosso court (ao contrário do áudio, que apanha
+    courts vizinhos), por isso as pausas longas = entre pontos no NOSSO court.
+    Devolve lista de (inicio_s, fim_s).
+    """
+    from padelpro_vision.segmentation.segmentation import _motion_energy_per_second
+    m = _motion_energy_per_second(video_path)
+    active = [i for i, v in enumerate(m) if v > thr]
+    if not active:
+        return []
+    blocks: list[tuple[int, int]] = []
+    start = prev = active[0]
+    for i in active[1:]:
+        if i - prev <= bridge_s:   # liga pequenas falhas dentro do ponto
+            prev = i
+        else:
+            blocks.append((start, prev))
+            start = prev = i
+    blocks.append((start, prev))
+    return [(float(s), float(e)) for s, e in blocks if (e - s) >= min_block_s]
+
+
+def mark_serves(shots: list[dict], blocks: list[tuple[float, float]], pad_s: float = 1.0) -> list[dict]:
+    """Marca servico=True na 1ª pancada de cada bloco de jogo (início de ponto)."""
+    shots = sorted(shots, key=lambda s: s["t_s"])
+    for s in shots:
+        s["servico"] = False
+    for (bs, be) in blocks:
+        for s in shots:
+            if (bs - pad_s) <= s["t_s"] <= (be + pad_s):
+                s["servico"] = True
+                break
+    return shots
+
+
 def harvest_training_shots(
     video_path: str | Path,
     out_dir: str | Path | None = None,
