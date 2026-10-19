@@ -44,6 +44,13 @@ export async function setCushionTarget(
   if (error) throw error;
 }
 
+export async function setTaxRate(householdId: string, rate: number): Promise<void> {
+  const { error } = await supabase
+    .from("settings")
+    .upsert({ household_id: householdId, tax_rate: rate }, { onConflict: "household_id" });
+  if (error) throw error;
+}
+
 export async function setPriceTable(
   householdId: string,
   priceTable: Record<string, number>,
