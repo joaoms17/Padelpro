@@ -115,3 +115,14 @@ export interface Settings {
   cushion_target_months: number;
   price_table: Record<string, number>;
 }
+
+export interface BankConnection {
+  id: string;
+  household_id: string;
+  aspsp_name: string;
+  session_id: string | null;
+  valid_until: string | null;
+  status: string;
+  last_sync_at: string | null;
+  last_error: string | null;
+}

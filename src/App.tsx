@@ -6,6 +6,7 @@ import { AppShell } from "@/components/AppShell";
 import { Login } from "@/screens/Login";
 import { Inicio } from "@/screens/Inicio";
 import { Movimentos } from "@/screens/Movimentos";
+import { LigarBanco, LigarBancoCallback } from "@/screens/LigarBanco";
 import { Definicoes } from "@/screens/Definicoes";
 import {
   PorRever,
@@ -43,6 +44,8 @@ function Gate() {
           <Route path="/objetivos" element={<Objetivos />} />
           <Route path="/pergunta" element={<Pergunta />} />
           <Route path="/definicoes" element={<Definicoes />} />
+          <Route path="/ligar-banco" element={<LigarBanco />} />
+          <Route path="/ligar-banco/callback" element={<LigarBancoCallback />} />
           <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
