@@ -8,6 +8,7 @@ import {
   loadSettings,
   setCushionTarget,
   setPriceTable,
+  setTaxRate,
 } from "@/data/settings";
 import { parseCents, formatCents } from "@/lib/format";
 import type { Member } from "@/lib/types";
@@ -24,6 +25,7 @@ export function Dinheiro() {
   const [members, setMembers] = useState<Member[]>([]);
   const [cushion, setCushion] = useState<number>(3);
   const [prices, setPrices] = useState<Record<string, number>>({});
+  const [taxPct, setTaxPct] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState(false);
 
@@ -36,6 +38,7 @@ export function Dinheiro() {
       if (s) {
         setCushion(s.cushion_target_months);
         setPrices(s.price_table ?? {});
+        setTaxPct(s.tax_rate ? String(Math.round(s.tax_rate * 100)) : "");
       }
     } finally {
       setLoading(false);
@@ -63,6 +66,14 @@ export function Dinheiro() {
     if (!householdId) return;
     await setCushionTarget(householdId, months);
     setCushion(months);
+    flash();
+  }
+
+  async function saveTax(text: string) {
+    if (!householdId) return;
+    const pct = Number(text.replace(/[^\d]/g, ""));
+    const rate = Number.isFinite(pct) ? Math.min(100, Math.max(0, pct)) / 100 : 0;
+    await setTaxRate(householdId, rate);
     flash();
   }
 
@@ -147,6 +158,30 @@ export function Dinheiro() {
             </Card>
             <p className="text-xs text-tinta/40 dark:text-creme/40 mt-2">
               Sugere o valor ao criar um evento. Podes sempre ajustar.
+            </p>
+          </section>
+
+          <section>
+            <SectionTitle>Reserva para impostos</SectionTitle>
+            <Card>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm text-tinta/70 dark:text-creme/70">
+                  Taxa sobre a rentabilidade da atividade
+                </span>
+                <div className="flex items-center gap-1">
+                  <input
+                    inputMode="numeric"
+                    className="input py-1.5 w-20 text-right"
+                    placeholder="0"
+                    defaultValue={taxPct}
+                    onBlur={(e) => saveTax(e.target.value)}
+                  />
+                  <span className="text-tinta/50 dark:text-creme/50">%</span>
+                </div>
+              </div>
+            </Card>
+            <p className="text-xs text-tinta/40 dark:text-creme/40 mt-2">
+              Mostra quanto guardar dos eventos para o IRS. 0% desliga.
             </p>
           </section>
         </>

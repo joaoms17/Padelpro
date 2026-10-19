@@ -15,7 +15,7 @@ import {
 } from "@/data/events";
 import { loadSettings } from "@/data/settings";
 import { buildICS } from "@/lib/ics";
-import { activityYearReport, type YearReport } from "@/lib/activityYear";
+import { activityYearReport, taxReserve, type YearReport } from "@/lib/activityYear";
 import {
   eventDue,
   eventPaid,
@@ -65,6 +65,7 @@ export function Eventos() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [priceTable, setPriceTable] = useState<Record<string, number>>({});
   const [yearReport, setYearReport] = useState<YearReport | null>(null);
+  const [taxRate, setTaxRate] = useState(0);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [openEvent, setOpenEvent] = useState<EventRow | null>(null);
@@ -79,6 +80,7 @@ export function Eventos() {
       setEvents(evs);
       setPayments(pays);
       setPriceTable(s?.price_table ?? {});
+      setTaxRate(s?.tax_rate ?? 0);
 
       // Annual activity summary (current year).
       const year = new Date().getFullYear();
@@ -222,6 +224,12 @@ export function Eventos() {
           <Line k="Gastos da atividade" v={formatCents(yearReport.gastosCents)} />
           <Line k="Rentabilidade" v={formatCents(yearReport.rentabilidadeCents)} />
           <Line k="Margem" v={formatPct(yearReport.margem)} />
+          {taxRate > 0 && (
+            <Line
+              k={`Reservar p/ impostos (${Math.round(taxRate * 100)}%)`}
+              v={formatCents(taxReserve(yearReport.rentabilidadeCents, taxRate))}
+            />
+          )}
           {yearReport.gastosPorCategoria.length > 0 && (
             <div className="pt-2 mt-1 border-t border-areia/50 dark:border-white/5 space-y-1">
               {yearReport.gastosPorCategoria.map((g) => (
