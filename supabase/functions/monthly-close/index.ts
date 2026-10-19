@@ -3,6 +3,7 @@
 // Core P&L is computed inline to avoid importing the frontend metrics engine.
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { serviceClient } from "../_shared/db.ts";
+import { pushToHousehold } from "../_shared/push.ts";
 
 type Grp = "entrada" | "fixa" | "variavel" | "atividade" | "mesada" | "interna";
 
@@ -56,6 +57,14 @@ async function closeHousehold(svc: ReturnType<typeof serviceClient>, householdId
   await svc
     .from("monthly_snapshots")
     .upsert({ household_id: householdId, month, metrics }, { onConflict: "household_id,month" });
+
+  const sobraEur = (sobra / 100).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  await pushToHousehold(
+    svc,
+    householdId,
+    { title: "Fecho do mês", body: `A sobra do mês foi ${sobraEur} €.`, url: "/metricas" },
+    "fecho_mes",
+  );
   return metrics;
 }
 
