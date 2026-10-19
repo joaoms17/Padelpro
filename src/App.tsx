@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/auth/AuthProvider";
 import { HouseholdProvider } from "@/data/household";
@@ -11,10 +12,16 @@ import { Regras } from "@/screens/Regras";
 import { Orcamento } from "@/screens/Orcamento";
 import { Dinheiro } from "@/screens/Dinheiro";
 import { Eventos } from "@/screens/Eventos";
+import { Objetivos } from "@/screens/Objetivos";
 import { LigarBanco, LigarBancoCallback } from "@/screens/LigarBanco";
 import { ApplePay } from "@/screens/ApplePay";
 import { Definicoes } from "@/screens/Definicoes";
-import { Metricas, Objetivos, Pergunta } from "@/screens/stubs";
+import { Pergunta } from "@/screens/stubs";
+
+// Lazy — keeps Recharts out of the initial bundle.
+const Metricas = lazy(() =>
+  import("@/screens/Metricas").then((m) => ({ default: m.Metricas })),
+);
 
 function Gate() {
   const { loading, session } = useAuth();
@@ -39,7 +46,14 @@ function Gate() {
           <Route path="/por-rever" element={<PorRever />} />
           <Route path="/orcamento" element={<Orcamento />} />
           <Route path="/eventos" element={<Eventos />} />
-          <Route path="/metricas" element={<Metricas />} />
+          <Route
+            path="/metricas"
+            element={
+              <Suspense fallback={<div className="py-10 text-center text-tinta/50 dark:text-creme/50">A carregar…</div>}>
+                <Metricas />
+              </Suspense>
+            }
+          />
           <Route path="/objetivos" element={<Objetivos />} />
           <Route path="/pergunta" element={<Pergunta />} />
           <Route path="/definicoes" element={<Definicoes />} />

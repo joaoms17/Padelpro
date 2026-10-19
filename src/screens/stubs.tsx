@@ -16,37 +16,6 @@ export function PorRever() {
   );
 }
 
-export function Metricas() {
-  return (
-    <Stub
-      title="Métricas"
-      subtitle="Sobra, poupança, almofada e previsão."
-      milestone="M8"
-      points={[
-        "Sobra do mês e taxa de poupança",
-        "Almofada disponível em euros e em meses",
-        "Previsão de fim de mês",
-        "Evolução de 12 meses e sazonalidade",
-      ]}
-    />
-  );
-}
-
-export function Objetivos() {
-  return (
-    <Stub
-      title="Objetivos"
-      subtitle="Reservas virtuais dentro da almofada."
-      milestone="M8"
-      points={[
-        "Férias, concertos, amortização do crédito",
-        "Valor alvo, data limite e valor reservado",
-        "Quanto falta reservar por mês para chegar a tempo",
-      ]}
-    />
-  );
-}
-
 export function Pergunta() {
   return (
     <Stub
