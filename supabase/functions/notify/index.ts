@@ -34,12 +34,16 @@ Deno.serve(async (req) => {
       const { data: households } = await svc.from("households").select("id");
       let total = 0;
       for (const h of households ?? []) {
-        total += await pushToHousehold(
-          svc,
-          h.id as string,
-          { title: "Resumo da semana", body: "Vê como correu a semana nas Contas a Dois.", url: "/metricas" },
-          "resumo_semana",
-        );
+        try {
+          total += await pushToHousehold(
+            svc,
+            h.id as string,
+            { title: "Resumo da semana", body: "Vê como correu a semana nas Contas a Dois.", url: "/metricas" },
+            "resumo_semana",
+          );
+        } catch (_e) {
+          /* isolate per-household failures */
+        }
       }
       return json({ sent: total });
     }

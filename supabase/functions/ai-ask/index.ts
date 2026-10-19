@@ -3,6 +3,7 @@
 // with the service role, scoped to the caller's household.
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { householdFromRequest, serviceClient } from "../_shared/db.ts";
+import { redactForAI, displayMerchant } from "../_shared/categorize.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 
 const API = "https://api.anthropic.com/v1/messages";
@@ -114,12 +115,23 @@ async function runTool(
       return { gastos: [...byCat.entries()].map(([categoria, cents]) => ({ categoria, cents })).sort((a, b) => b.cents - a.cents) };
     }
     case "movimentos": {
-      let q = svc.from("transactions").select("booking_date, description_raw, merchant_clean, amount_cents").eq("household_id", householdId).is("matched_transaction_id", null).order("booking_date", { ascending: false }).limit(Math.min(50, Number(input.limite) || 20));
+      let q = svc.from("transactions").select("booking_date, description_raw, merchant_clean, counterparty, amount_cents").eq("household_id", householdId).is("matched_transaction_id", null).order("booking_date", { ascending: false }).limit(Math.min(50, Number(input.limite) || 20));
       if (input.inicio) q = q.gte("booking_date", String(input.inicio));
       if (input.fim) q = q.lt("booking_date", String(input.fim));
-      if (input.texto) { const s = `%${String(input.texto)}%`; q = q.or(`description_raw.ilike.${s},merchant_clean.ilike.${s}`); }
+      if (input.texto) {
+        // Strip PostgREST filter metacharacters so the .or() can't be broken.
+        const s = `%${String(input.texto).replace(/[(),*%]/g, " ").trim()}%`;
+        q = q.or(`merchant_clean.ilike.${s},counterparty.ilike.${s}`);
+      }
       const { data } = await q;
-      return { movimentos: (data ?? []).map((t) => ({ data: t.booking_date, descricao: t.merchant_clean || t.description_raw, cents: t.amount_cents })) };
+      // Redact IBANs + counterparty names before the description reaches the AI.
+      return {
+        movimentos: (data ?? []).map((t) => ({
+          data: t.booking_date,
+          descricao: redactForAI(t.merchant_clean || displayMerchant(t.description_raw), t.counterparty),
+          cents: t.amount_cents,
+        })),
+      };
     }
     case "eventos": {
       let q = svc.from("events").select("date, type, client_name, service_cents, status").eq("household_id", householdId).order("date", { ascending: false });
@@ -127,7 +139,13 @@ async function runTool(
       if (input.fim) q = q.lt("date", String(input.fim));
       if (input.estado) q = q.eq("status", String(input.estado));
       const { data } = await q;
-      return { eventos: data ?? [] };
+      // Send only the client's first name, not the full name.
+      return {
+        eventos: (data ?? []).map((e) => ({
+          ...e,
+          client_name: e.client_name ? String(e.client_name).split(/\s+/)[0] : null,
+        })),
+      };
     }
     case "objetivos": {
       const { data } = await svc.from("goals").select("name, target_cents, reserved_cents, due_date").eq("household_id", householdId);
