@@ -98,7 +98,7 @@ export function Definicoes() {
         <Row title="Ligação ao banco" hint="Enable Banking · Santander" to="/ligar-banco" />
         <Row title="Atalho Apple Pay" hint="Token e URL por iPhone" to="/apple-pay" />
         <Row title="Contas de origem da Joana" hint="Revolut, numerário" milestone="M7" />
-        <Row title="Notificações" hint="Web Push por membro" milestone="M9" />
+        <Row title="Notificações" hint="Web Push por membro" to="/notificacoes" />
       </section>
 
       {/* Dados */}

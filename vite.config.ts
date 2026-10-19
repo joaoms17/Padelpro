@@ -14,8 +14,14 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
       registerType: "autoUpdate",
       includeAssets: ["favicon.svg", "apple-touch-icon.png"],
+      injectManifest: {
+        globPatterns: ["**/*.{js,css,html,svg,png,woff,woff2}"],
+      },
       manifest: {
         name: "Contas a Dois",
         short_name: "Contas a Dois",
@@ -37,10 +43,6 @@ export default defineConfig({
             purpose: "maskable",
           },
         ],
-      },
-      workbox: {
-        navigateFallback: "index.html",
-        globPatterns: ["**/*.{js,css,html,svg,png,woff,woff2}"],
       },
       devOptions: {
         enabled: false,

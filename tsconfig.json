@@ -22,5 +22,6 @@
       "@shared/*": ["supabase/functions/_shared/*"]
     }
   },
-  "include": ["src", "supabase/functions/_shared/categorize.ts"]
+  "include": ["src", "supabase/functions/_shared/categorize.ts"],
+  "exclude": ["src/sw.ts"]
 }

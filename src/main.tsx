@@ -12,8 +12,10 @@ import "@fontsource/dm-sans/700.css";
 import "./index.css";
 import App from "./App";
 import { applyStoredTheme } from "./lib/theme";
+import { registerSW } from "virtual:pwa-register";
 
 applyStoredTheme();
+registerSW({ immediate: true });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

@@ -51,9 +51,13 @@ pôr `{{ .Token }}` no template. Restringir os signups aos dois emails.
 Edge Functions em `supabase/functions/`: `eb-auth-start`, `eb-callback`, `eb-sync`.
 
 ```bash
-supabase functions deploy eb-auth-start eb-callback eb-sync categorize ingest-applepay monthly-close
+supabase functions deploy eb-auth-start eb-callback eb-sync categorize ingest-applepay monthly-close notify
 supabase secrets set EB_APP_ID=... EB_PRIVATE_KEY="$(cat chave.pem)"
 supabase secrets set ANTHROPIC_API_KEY=sk-ant-...   # categorização por IA (M4)
+# Web Push (M9): gerar com `npx web-push generate-vapid-keys`
+supabase secrets set VAPID_PUBLIC_KEY=... VAPID_PRIVATE_KEY=... VAPID_SUBJECT=mailto:tu@email.pt
+# e pôr a VAPID_PUBLIC_KEY também no Vercel como VITE_VAPID_PUBLIC_KEY
+# Crons (M3/M8/M9): aplicar supabase/cron/*.sql (eb-sync, monthly-close, weekly-summary)
 ```
 
 - Registar em enablebanking.com, criar app **Production**, gerar a chave privada
@@ -76,7 +80,7 @@ supabase secrets set ANTHROPIC_API_KEY=sk-ant-...   # categorização por IA (M4
 | M6 | Orçamentos, fixas recorrentes, alertas | ✅ feito |
 | M7 | Eventos da Joana e pagamentos | ✅ feito |
 | M8 | Métricas, almofada, previsão, objetivos, fecho do mês | ✅ feito |
-| M9 | Notificações Web Push | — |
+| M9 | Notificações Web Push | ✅ feito |
 | M10 | IA: pergunta à app e resumo do fecho | — |
 
 ## Checklist do João (configuração inicial)

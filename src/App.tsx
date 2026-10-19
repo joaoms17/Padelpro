@@ -15,6 +15,7 @@ import { Eventos } from "@/screens/Eventos";
 import { Objetivos } from "@/screens/Objetivos";
 import { LigarBanco, LigarBancoCallback } from "@/screens/LigarBanco";
 import { ApplePay } from "@/screens/ApplePay";
+import { Notificacoes } from "@/screens/Notificacoes";
 import { Definicoes } from "@/screens/Definicoes";
 import { Pergunta } from "@/screens/stubs";
 
@@ -60,6 +61,7 @@ function Gate() {
           <Route path="/regras" element={<Regras />} />
           <Route path="/dinheiro" element={<Dinheiro />} />
           <Route path="/apple-pay" element={<ApplePay />} />
+          <Route path="/notificacoes" element={<Notificacoes />} />
           <Route path="/ligar-banco" element={<LigarBanco />} />
           <Route path="/ligar-banco/callback" element={<LigarBancoCallback />} />
           <Route path="*" element={<Navigate to="/" replace />} />
