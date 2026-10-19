@@ -23,6 +23,9 @@ export async function listTransactions(f: TxFilters): Promise<Transaction[]> {
     .from("transactions")
     .select("*")
     .eq("household_id", f.householdId)
+    // Exclude Apple Pay provisionals already matched to a bank movement, so
+    // they never count twice.
+    .is("matched_transaction_id", null)
     .order("booking_date", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(500);
