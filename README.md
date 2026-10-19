@@ -51,7 +51,7 @@ pôr `{{ .Token }}` no template. Restringir os signups aos dois emails.
 Edge Functions em `supabase/functions/`: `eb-auth-start`, `eb-callback`, `eb-sync`.
 
 ```bash
-supabase functions deploy eb-auth-start eb-callback eb-sync categorize
+supabase functions deploy eb-auth-start eb-callback eb-sync categorize ingest-applepay
 supabase secrets set EB_APP_ID=... EB_PRIVATE_KEY="$(cat chave.pem)"
 supabase secrets set ANTHROPIC_API_KEY=sk-ant-...   # categorização por IA (M4)
 ```
@@ -72,7 +72,7 @@ supabase secrets set ANTHROPIC_API_KEY=sk-ant-...   # categorização por IA (M4
 | M2 | Movimentos: manual, importar extrato, lista, edição, divisão | ✅ feito |
 | M3 | Santander via Enable Banking (sync 2×/dia, saldo, renovar) | ✅ feito |
 | M4 | Categorização: regras, histórico, IA, Por rever | ✅ feito |
-| M5 | Apple Pay: Atalho + `ingest-applepay` + reconciliação | — |
+| M5 | Apple Pay: Atalho + `ingest-applepay` + reconciliação | ✅ feito |
 | M6 | Orçamentos, fixas recorrentes, alertas | — |
 | M7 | Eventos da Joana e pagamentos | — |
 | M8 | Métricas, almofada, previsão, objetivos, fecho do mês | — |
