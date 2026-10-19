@@ -1,15 +1,22 @@
 import { useCallback, useEffect, useState } from "react";
-import { PageHeader, EmptyState } from "@/components/ui";
+import { PageHeader, EmptyState, Card } from "@/components/ui";
 import { CategoryPicker } from "@/components/CategoryPicker";
 import { useHousehold } from "@/data/household";
 import { listTransactions, setCategory } from "@/data/transactions";
 import { runCategorize } from "@/data/rules";
-import { formatSigned, formatDate, formatPct } from "@/lib/format";
+import {
+  listEventProposals,
+  confirmEventProposal,
+  dismissEventProposal,
+  type EventProposal,
+} from "@/data/review";
+import { formatSigned, formatDate, formatPct, formatCents } from "@/lib/format";
 import type { Transaction } from "@/lib/types";
 
 export function PorRever() {
   const { householdId } = useHousehold();
   const [items, setItems] = useState<Transaction[]>([]);
+  const [proposals, setProposals] = useState<EventProposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -18,11 +25,26 @@ export function PorRever() {
     if (!householdId) return;
     setLoading(true);
     try {
-      setItems(await listTransactions({ householdId, onlyReview: true }));
+      const [txs, props] = await Promise.all([
+        listTransactions({ householdId, onlyReview: true }),
+        listEventProposals(householdId),
+      ]);
+      setItems(txs);
+      setProposals(props);
     } finally {
       setLoading(false);
     }
   }, [householdId]);
+
+  async function confirmProposal(p: EventProposal) {
+    if (!householdId) return;
+    await confirmEventProposal(householdId, p);
+    setProposals((list) => list.filter((x) => x.id !== p.id));
+  }
+  async function dismissProposal(p: EventProposal) {
+    await dismissEventProposal(p);
+    setProposals((list) => list.filter((x) => x.id !== p.id));
+  }
 
   useEffect(() => {
     void load();
@@ -56,6 +78,24 @@ export function PorRever() {
         subtitle="Movimentos sem categoria ou com baixa confiança da IA."
       />
 
+      {proposals.length > 0 && (
+        <div className="space-y-2">
+          {proposals.map((p) => (
+            <Card key={p.id} className="border-petroleo/30 bg-petroleo/5">
+              <div className="text-sm">
+                Isto é o <b>{p.ref.kind}</b> {p.ref.client_name ? `de ${p.ref.client_name}` : "de um evento"}?{" "}
+                <span className="tnum">{formatCents(p.ref.amount_cents)}</span>{" "}
+                <span className="text-tinta/50 dark:text-creme/50">· {p.ref.method}</span>
+              </div>
+              <div className="flex gap-2 mt-3">
+                <button className="btn-primary text-sm px-4 py-1.5" onClick={() => confirmProposal(p)}>Sim</button>
+                <button className="btn-ghost text-sm px-4 py-1.5" onClick={() => dismissProposal(p)}>Não</button>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
       <button className="btn-primary w-full" onClick={categorizeAuto} disabled={running}>
         {running ? "A categorizar…" : "Categorizar automaticamente"}
       </button>
@@ -63,7 +103,7 @@ export function PorRever() {
 
       {loading ? (
         <div className="py-8 text-center text-tinta/50 dark:text-creme/50">A carregar…</div>
-      ) : items.length === 0 ? (
+      ) : items.length === 0 && proposals.length === 0 ? (
         <EmptyState title="Nada por rever 🎉" hint="Tudo categorizado." />
       ) : (
         <div className="space-y-3">

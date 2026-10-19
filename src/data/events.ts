@@ -71,6 +71,7 @@ export interface NewPayment {
   receivedAt: string;
   method: Payment["method"];
   location: Payment["location"];
+  transactionId?: string | null;
 }
 
 export async function addPayment(p: NewPayment): Promise<void> {
@@ -81,6 +82,7 @@ export async function addPayment(p: NewPayment): Promise<void> {
     received_at: p.receivedAt,
     method: p.method,
     location: p.location,
+    transaction_id: p.transactionId ?? null,
   });
   if (error) throw error;
 }
