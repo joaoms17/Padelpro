@@ -1,12 +1,13 @@
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/auth/AuthProvider";
+import { HouseholdProvider } from "@/data/household";
 import { PinLock } from "@/auth/PinLock";
 import { AppShell } from "@/components/AppShell";
 import { Login } from "@/screens/Login";
 import { Inicio } from "@/screens/Inicio";
+import { Movimentos } from "@/screens/Movimentos";
 import { Definicoes } from "@/screens/Definicoes";
 import {
-  Movimentos,
   PorRever,
   Orcamento,
   Eventos,
@@ -30,7 +31,8 @@ function Gate() {
 
   return (
     <PinLock>
-      <Routes>
+      <HouseholdProvider>
+        <Routes>
         <Route element={<AppShell />}>
           <Route path="/" element={<Inicio />} />
           <Route path="/movimentos" element={<Movimentos />} />
@@ -42,8 +44,9 @@ function Gate() {
           <Route path="/pergunta" element={<Pergunta />} />
           <Route path="/definicoes" element={<Definicoes />} />
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Route>
-      </Routes>
+          </Route>
+        </Routes>
+      </HouseholdProvider>
     </PinLock>
   );
 }

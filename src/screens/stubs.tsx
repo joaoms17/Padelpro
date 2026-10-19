@@ -1,21 +1,5 @@
 import { Stub } from "./Stub";
 
-export function Movimentos() {
-  return (
-    <Stub
-      title="Movimentos"
-      subtitle="Tudo o que entra e sai da Conta Casa."
-      milestone="M2"
-      points={[
-        "Lista por dia com etiqueta de origem (Banco, Apple Pay, Manual, Extrato)",
-        "Registo manual com o botão +",
-        "Importar extrato CSV/XLSX do Santander",
-        "Mudar categoria, dividir movimento, adicionar nota",
-      ]}
-    />
-  );
-}
-
 export function PorRever() {
   return (
     <Stub
