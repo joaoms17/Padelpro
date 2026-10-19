@@ -1,0 +1,63 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light dark;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    @apply h-full;
+  }
+
+  body {
+    @apply bg-creme text-tinta font-sans antialiased;
+    /* safe areas for iPhone notch / home indicator */
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .dark body {
+    @apply bg-tinta text-creme;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: "Fraunces", Georgia, serif;
+    font-optical-sizing: auto;
+  }
+
+  /* tabular numbers everywhere money is shown */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-card bg-white/70 dark:bg-white/[0.04] shadow-card border border-areia/60 dark:border-white/5;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .btn-primary {
+    @apply btn bg-terracota text-creme hover:bg-terracota/90;
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent border border-areia dark:border-white/10 hover:bg-areia/40 dark:hover:bg-white/5;
+  }
+
+  .input {
+    @apply w-full rounded-2xl border border-areia dark:border-white/10 bg-white/80 dark:bg-white/[0.04] px-4 py-3 text-tinta dark:text-creme outline-none focus:border-petroleo focus:ring-2 focus:ring-petroleo/20;
+  }
+
+  .label {
+    @apply block text-sm font-medium text-tinta/70 dark:text-creme/70 mb-1.5;
+  }
+}

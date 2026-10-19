@@ -6,24 +6,27 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+dev.vars
+.dev.vars
 
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-
-# Node
+# Node / build
 node_modules/
-.next/
 dist/
-build/
+dist-ssr/
+*.local
 *.log
+
+# Vite / PWA
+dev-dist/
+
+# Vercel / Supabase
+.vercel/
+supabase/.branches/
+supabase/.temp/
 
 # Editors
 .vscode/
 .idea/
+
+# TS build info
+*.tsbuildinfo
