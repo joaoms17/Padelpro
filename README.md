@@ -50,7 +50,7 @@ pôr `{{ .Token }}` no template. Restringir os signups aos dois emails.
 | | Marco | Estado |
 |---|---|---|
 | M1 | Base: auth OTP, agregado, PWA, visual, categorias, Definições | ✅ feito |
-| M2 | Movimentos: manual, importar extrato, lista, edição, divisão | — |
+| M2 | Movimentos: manual, importar extrato, lista, edição, divisão | ✅ feito |
 | M3 | Santander via Enable Banking (sync 2×/dia, saldo, renovar) | — |
 | M4 | Categorização: regras, histórico, IA, Por rever | — |
 | M5 | Apple Pay: Atalho + `ingest-applepay` + reconciliação | — |
