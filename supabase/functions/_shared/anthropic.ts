@@ -24,12 +24,28 @@ export interface CategoryOption {
   grp: string;
 }
 
-function extractJson(text: string): unknown {
+function extractJson(text: string): AICatResult[] {
   const fence = text.replace(/```(?:json)?/gi, "").trim();
+  // Try a clean array parse first.
   const start = fence.indexOf("[");
   const end = fence.lastIndexOf("]");
-  if (start === -1 || end === -1) return [];
-  return JSON.parse(fence.slice(start, end + 1));
+  if (start !== -1 && end > start) {
+    try {
+      return JSON.parse(fence.slice(start, end + 1)) as AICatResult[];
+    } catch {
+      /* fall through to tolerant per-object parse (handles truncation) */
+    }
+  }
+  // Tolerant: parse each complete {...} object we can find.
+  const out: AICatResult[] = [];
+  for (const m of fence.matchAll(/\{[^{}]*\}/g)) {
+    try {
+      out.push(JSON.parse(m[0]) as AICatResult);
+    } catch {
+      /* skip malformed fragment */
+    }
+  }
+  return out;
 }
 
 /** Classify a batch of movements. Returns one result per input item. */
@@ -38,7 +54,7 @@ export async function categorizeWithAI(
   categories: CategoryOption[],
 ): Promise<AICatResult[]> {
   const key = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!key || items.length === 0) return [];
+  if (!key || items.length === 0 || categories.length === 0) return [];
 
   const catList = categories
     .map((c) => `- ${c.id} :: ${c.name} (${c.grp})`)
@@ -71,7 +87,7 @@ ${items
     },
     body: JSON.stringify({
       model: MODEL,
-      max_tokens: 2048,
+      max_tokens: 4096,
       messages: [{ role: "user", content: prompt }],
     }),
   });

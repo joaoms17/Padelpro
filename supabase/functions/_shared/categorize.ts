@@ -59,24 +59,29 @@ const PREFIXES = [
   "compra cartao",
 ];
 
+// Longest first so "compra c/ cartao" is stripped before the shorter "compra".
+const PREFIXES_BY_LEN = [...PREFIXES].sort((a, b) => b.length - a.length);
+
 /** Normalise a bank description down to a stable merchant key. */
 export function normalizeMerchant(desc: string | null): string {
   if (!desc) return "";
   let s = desc.toLowerCase();
 
+  // redact IBAN-like tokens (country code + check digits + body) entirely, then
   // strip card numbers, long digit codes, dates, times
   s = s
+    .replace(/\b[a-z]{2}\d{2}[a-z0-9]{8,}\b/gi, " ") // IBAN (e.g. PT50…)
     .replace(/\b\d{1,2}[/\-.]\d{1,2}([/\-.]\d{2,4})?\b/g, " ") // dates
     .replace(/\b\d{1,2}:\d{2}(:\d{2})?\b/g, " ") // times
     .replace(/\bx{2,}\d+\b/gi, " ") // masked card like xxxx1234
     .replace(/\b\d+\b/g, " "); // standalone numbers (store codes, card fragments)
 
-  // strip known prefixes (possibly several)
+  // strip known prefixes (possibly several), longest match first
   let changed = true;
   while (changed) {
     changed = false;
     const t = s.trimStart();
-    for (const p of PREFIXES) {
+    for (const p of PREFIXES_BY_LEN) {
       if (t.startsWith(p)) {
         s = t.slice(p.length);
         changed = true;
@@ -92,6 +97,25 @@ export function normalizeMerchant(desc: string | null): string {
     .trim();
 
   return s;
+}
+
+/**
+ * Redact a merchant string before it leaves the device for the AI: remove any
+ * IBAN-like tokens and the counterparty's name tokens (spec 6.2: "sem IBANs
+ * nem nomes completos"). Used only for the AI payload, never for storage keys.
+ */
+export function redactForAI(text: string, counterparty: string | null): string {
+  let s = ` ${text.toLowerCase()} `
+    .replace(/\b[a-z]{2}\d{2}[a-z0-9]{6,}\b/gi, " ")
+    .replace(/\b[a-z]{2}\d{2}\b/gi, " "); // stray IBAN prefix like "pt50"
+  if (counterparty) {
+    for (const tok of counterparty.toLowerCase().split(/\s+/)) {
+      if (tok.length >= 3) {
+        s = s.replace(new RegExp(`\\b${tok.replace(/[^\p{L}\p{N}]/gu, "")}\\b`, "giu"), " ");
+      }
+    }
+  }
+  return s.replace(/\s+/g, " ").trim();
 }
 
 /** Title-case the normalized merchant for display. */
@@ -127,6 +151,8 @@ function ruleMatches(tx: TxLite, rule: Rule): boolean {
     case "contains":
       return value.includes(pat);
     case "regex":
+      // Guard against pathological patterns (self-inflicted ReDoS): cap sizes.
+      if (rule.pattern.length > 200 || value.length > 1000) return false;
       try {
         return new RegExp(rule.pattern, "i").test(value);
       } catch {

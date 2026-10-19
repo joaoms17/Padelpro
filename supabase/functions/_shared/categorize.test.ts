@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   normalizeMerchant,
   displayMerchant,
+  redactForAI,
   matchRules,
   matchMesada,
   matchHistory,
@@ -36,6 +37,32 @@ describe("normalizeMerchant", () => {
 
   it("title-cases for display", () => {
     expect(displayMerchant("COMPRA 1234 CONTINENTE LISBOA")).toBe("Continente Lisboa");
+  });
+
+  it("strips continuous IBAN tokens (no spaces)", () => {
+    const n = normalizeMerchant("TRF PT50000201231234567890154 JOANA SILVA");
+    expect(n).not.toMatch(/pt50000201231234567890154/);
+    expect(n).toContain("joana silva"); // name handled separately by redactForAI
+  });
+
+  it("strips the longest matching prefix first (no shadowing)", () => {
+    expect(normalizeMerchant("COMPRA C/ CARTAO CONTINENTE")).toBe(
+      normalizeMerchant("COMPRA CONTINENTE"),
+    );
+    expect(normalizeMerchant("COMPRA C/ CARTAO CONTINENTE")).toBe("continente");
+  });
+});
+
+describe("redactForAI", () => {
+  it("removes IBANs and the counterparty name before sending to the AI", () => {
+    const out = redactForAI("Sepa Pt50000201231234567890154 Joana Silva", "JOANA SILVA");
+    expect(out).not.toMatch(/pt50/);
+    expect(out).not.toMatch(/joana/);
+    expect(out).not.toMatch(/silva/);
+    expect(out).toContain("sepa");
+  });
+  it("keeps a plain merchant intact", () => {
+    expect(redactForAI("Continente Lisboa", null)).toBe("continente lisboa");
   });
 });
 

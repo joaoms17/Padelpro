@@ -7,6 +7,7 @@ import {
   classifyLocal,
   normalizeMerchant,
   displayMerchant,
+  redactForAI,
   AI_CONFIDENCE_THRESHOLD,
   type Rule,
   type MesadaRule,
@@ -59,6 +60,9 @@ Deno.serve(async (req) => {
         .select("description_raw, category_id, booking_date")
         .eq("household_id", householdId)
         .not("category_id", "is", null)
+        // Only user-confirmed categories count as history — never AI guesses,
+        // so a wrong AI guess cannot self-reinforce (spec: "última confirmada").
+        .in("category_source", ["manual", "rule", "mesada"])
         .order("booking_date", { ascending: false })
         .limit(1000),
     ]);
@@ -88,15 +92,19 @@ Deno.serve(async (req) => {
     const updates: { id: string; category_id: string | null; category_source: string | null; confidence: number; merchant_clean: string }[] = [];
     const aiItems: AICatItem[] = [];
 
+    const cleanById = new Map<string, string>();
     for (const tx of uncategorized) {
       const merchant_clean = displayMerchant(tx.description_raw);
+      cleanById.set(tx.id, merchant_clean);
       const local = classifyLocal(tx, ctx);
       if (local) {
         updates.push({ id: tx.id, category_id: local.category_id, category_source: local.source, confidence: local.confidence, merchant_clean });
       } else {
+        // Redact IBANs and the counterparty name before anything leaves the
+        // device for the AI (spec 6.2).
         aiItems.push({
           id: tx.id,
-          description: merchant_clean || "movimento",
+          description: redactForAI(merchant_clean, tx.counterparty) || "movimento",
           amount_eur: Math.round(tx.amount_cents) / 100,
           date: tx.booking_date,
         });
@@ -117,7 +125,8 @@ Deno.serve(async (req) => {
       const byId = new Map(results.map((r) => [r.id, r]));
       for (const it of chunk) {
         const r = byId.get(it.id);
-        const merchant_clean = it.description;
+        // Store the real (unredacted) display name, not the AI-redacted string.
+        const merchant_clean = cleanById.get(it.id) ?? it.description;
         if (r && r.category_id && r.confidence >= AI_CONFIDENCE_THRESHOLD) {
           updates.push({ id: it.id, category_id: r.category_id, category_source: "ai", confidence: r.confidence, merchant_clean });
           aiAssigned++;
@@ -129,26 +138,37 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Persist.
-    await Promise.all(
-      updates.map((u) =>
-        svc
-          .from("transactions")
-          .update({
-            category_id: u.category_id,
-            category_source: u.category_source,
-            confidence: u.confidence,
-            merchant_clean: u.merchant_clean,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", u.id),
-      ),
-    );
+    // Persist in chunks, conditionally (only rows still uncategorized, so we
+    // never clobber a category set concurrently) and tolerant of row failures.
+    const CHUNK = 25;
+    let persisted = 0;
+    for (let i = 0; i < updates.length; i += CHUNK) {
+      const batch = updates.slice(i, i + CHUNK);
+      const settled = await Promise.allSettled(
+        batch.map((u) =>
+          svc
+            .from("transactions")
+            .update({
+              category_id: u.category_id,
+              category_source: u.category_source,
+              confidence: u.confidence,
+              merchant_clean: u.merchant_clean,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", u.id)
+            .is("category_id", null),
+        ),
+      );
+      persisted += settled.filter(
+        (r) => r.status === "fulfilled" && !(r.value as { error?: unknown }).error,
+      ).length;
+    }
 
     const assigned = updates.filter((u) => u.category_id).length;
     return json({
       processed: uncategorized.length,
       assigned,
+      persisted,
       review: uncategorized.length - assigned,
       ai_assigned: aiAssigned,
       ai_review: aiReview,

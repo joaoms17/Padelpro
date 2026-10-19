@@ -66,7 +66,7 @@ Deno.serve(async (req) => {
       svc.from("rules").select("field, match_type, pattern, category_id, priority").eq("household_id", householdId),
       svc.from("categories").select("id, name, grp").eq("household_id", householdId).eq("archived", false),
       svc.from("members").select("display_name, mesada_cents, mesada_day").eq("household_id", householdId),
-      svc.from("transactions").select("description_raw, category_id").eq("household_id", householdId).not("category_id", "is", null).order("booking_date", { ascending: false }).limit(500),
+      svc.from("transactions").select("description_raw, category_id").eq("household_id", householdId).not("category_id", "is", null).in("category_source", ["manual", "rule", "mesada"]).order("booking_date", { ascending: false }).limit(500),
     ]);
     const categories = (catsRes.data ?? []) as { id: string; name: string; grp: string }[];
     const mesadas: MesadaRule[] = [];

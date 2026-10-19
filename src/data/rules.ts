@@ -37,7 +37,11 @@ export async function deleteRule(id: string): Promise<void> {
   if (error) throw error;
 }
 
-/** Apply a merchant rule to past movements (including already categorized). */
+/**
+ * Apply a merchant rule to past movements. Only touches movements that are
+ * uncategorized or were categorized automatically (ai/history) — never
+ * overwrites a category the user set by hand, a rule/mesada match, or a split.
+ */
 export async function applyMerchantToPast(
   householdId: string,
   merchantKey: string,
@@ -49,7 +53,8 @@ export async function applyMerchantToPast(
     .from("transactions")
     .update({ category_id: categoryId, category_source: "rule", updated_at: new Date().toISOString() })
     .eq("household_id", householdId)
-    .ilike("merchant_clean", `%${merchantKey}%`);
+    .ilike("merchant_clean", `%${merchantKey}%`)
+    .or("category_id.is.null,category_source.in.(ai,history)");
   if (error) throw error;
 }
 
