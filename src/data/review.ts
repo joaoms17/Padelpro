@@ -79,3 +79,57 @@ export async function confirmEventProposal(
 export async function dismissEventProposal(item: EventProposal): Promise<void> {
   await resolveItem(item.id);
 }
+
+// ── Cash/Revolut settlement proposals (spec 5.2) ────────────────────────────
+
+export interface SettlementRef {
+  transaction_id: string;
+  payment_ids: string[];
+  amount_cents: number;
+}
+export interface SettlementProposal {
+  id: string;
+  ref: SettlementRef;
+}
+
+export async function listSettlementProposals(householdId: string): Promise<SettlementProposal[]> {
+  const { data } = await supabase
+    .from("review_items")
+    .select("id, ref")
+    .eq("household_id", householdId)
+    .eq("type", "settlement")
+    .eq("status", "aberto")
+    .order("created_at", { ascending: false });
+  return (data as SettlementProposal[]) ?? [];
+}
+
+/** Confirm: mark the por_transferir payments as arrived + category the credit. */
+export async function confirmSettlement(
+  householdId: string,
+  item: SettlementProposal,
+): Promise<void> {
+  const r = item.ref;
+  await supabase
+    .from("event_payments")
+    .update({ location: "conta_casa", transaction_id: r.transaction_id })
+    .in("id", r.payment_ids);
+
+  const { data: cat } = await supabase
+    .from("categories")
+    .select("id")
+    .eq("household_id", householdId)
+    .eq("grp", "entrada")
+    .ilike("name", "%eventos%")
+    .maybeSingle();
+  if (cat) {
+    await supabase
+      .from("transactions")
+      .update({ category_id: cat.id, category_source: "manual" })
+      .eq("id", r.transaction_id);
+  }
+  await resolveItem(item.id);
+}
+
+export async function dismissSettlement(item: SettlementProposal): Promise<void> {
+  await resolveItem(item.id);
+}

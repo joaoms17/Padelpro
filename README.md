@@ -51,7 +51,7 @@ pôr `{{ .Token }}` no template. Restringir os signups aos dois emails.
 Edge Functions em `supabase/functions/`: `eb-auth-start`, `eb-callback`, `eb-sync`.
 
 ```bash
-supabase functions deploy eb-auth-start eb-callback eb-sync categorize ingest-applepay monthly-close notify ai-ask
+supabase functions deploy eb-auth-start eb-callback eb-sync categorize ingest-applepay monthly-close notify ai-ask alerts
 supabase secrets set EB_APP_ID=... EB_PRIVATE_KEY="$(cat chave.pem)"
 supabase secrets set ANTHROPIC_API_KEY=sk-ant-...   # categorização por IA (M4)
 # Web Push (M9): gerar com `npx web-push generate-vapid-keys`
