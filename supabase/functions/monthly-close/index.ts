@@ -2,7 +2,7 @@
 // core metrics (spec 8). The friendly text summary is added in M10 (ai-ask).
 // Core P&L is computed inline to avoid importing the frontend metrics engine.
 import { corsHeaders, json } from "../_shared/cors.ts";
-import { serviceClient } from "../_shared/db.ts";
+import { serviceClient, householdFromRequest } from "../_shared/db.ts";
 import { pushToHousehold } from "../_shared/push.ts";
 import { summarizeMonth } from "../_shared/anthropic.ts";
 
@@ -81,15 +81,22 @@ Deno.serve(async (req) => {
     const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
     if (serviceKey && authHeader === `Bearer ${serviceKey}`) {
       const { data: households } = await svc.from("households").select("id");
-      const out = [];
+      let closed = 0;
       for (const h of households ?? []) {
-        out.push({ household_id: h.id, metrics: await closeHousehold(svc, h.id as string, month) });
+        try {
+          await closeHousehold(svc, h.id as string, month);
+          closed++;
+        } catch (_e) {
+          /* one household's failure must not abort the whole batch */
+        }
       }
-      return json({ month, closed: out.length });
+      return json({ month, closed });
     }
 
-    if (!body.household_id) return json({ error: "household_id em falta" }, 400);
-    const metrics = await closeHousehold(svc, body.household_id, month);
+    // Non-cron: only the caller's own household (never a client-supplied id).
+    const ctx = await householdFromRequest(req);
+    if (!ctx) return json({ error: "não autenticado" }, 401);
+    const metrics = await closeHousehold(svc, ctx.householdId, month);
     return json({ month, metrics });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);

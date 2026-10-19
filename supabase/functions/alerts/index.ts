@@ -23,7 +23,8 @@ async function checkHousehold(svc: SupabaseClient, householdId: string): Promise
     .maybeSingle();
   if (conn?.valid_until) {
     const days = Math.floor((Date.parse(conn.valid_until) - now) / 86400000);
-    if (days >= 0 && days <= 14) {
+    // Only on the milestone days (spec: 14 and 3), plus the expiry day itself.
+    if (days === 14 || days === 3 || days === 0) {
       sent += await pushToHousehold(
         svc,
         householdId,
@@ -92,7 +93,13 @@ Deno.serve(async (req) => {
     if (serviceKey && authHeader === `Bearer ${serviceKey}`) {
       const { data: households } = await svc.from("households").select("id");
       let total = 0;
-      for (const h of households ?? []) total += await checkHousehold(svc, h.id as string);
+      for (const h of households ?? []) {
+        try {
+          total += await checkHousehold(svc, h.id as string);
+        } catch (_e) {
+          /* isolate per-household failures */
+        }
+      }
       return json({ sent: total });
     }
 

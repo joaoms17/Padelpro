@@ -155,13 +155,13 @@ export async function proposeEventMatches(
     .gt("amount_cents", 0)
     .gte("booking_date", from);
 
-  // Skip credits that already have an open proposal.
+  // Skip credits already proposed before — including dismissed ones, so a
+  // "Não" is not re-proposed on every sync.
   const { data: existing } = await svc
     .from("review_items")
     .select("ref")
     .eq("household_id", householdId)
-    .eq("type", "event_match")
-    .eq("status", "aberto");
+    .eq("type", "event_match");
   const proposedTxIds = new Set(
     (existing ?? []).map((r) => (r.ref as { transaction_id?: string })?.transaction_id).filter(Boolean),
   );
@@ -245,8 +245,7 @@ export async function proposeCashSettlements(
     .from("review_items")
     .select("ref")
     .eq("household_id", householdId)
-    .eq("type", "settlement")
-    .eq("status", "aberto");
+    .eq("type", "settlement");
   const proposedTxIds = new Set(
     (existing ?? []).map((r) => (r.ref as { transaction_id?: string })?.transaction_id).filter(Boolean),
   );

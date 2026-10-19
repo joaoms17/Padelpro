@@ -48,8 +48,10 @@ export async function syncHousehold(
     for (const acc of list) {
       if (!acc.eb_account_uid) continue;
 
-      // Window: from (last sync - 5 days) to catch pending → booked (spec 4.1).
-      const from = new Date(today);
+      // Window: from (last sync − 5 days) so an outage never drops movements;
+      // the −5 days also catches pending → booked (spec 4.1). First ever sync
+      // pulls a year of history.
+      const from = conn?.last_sync_at ? new Date(conn.last_sync_at) : new Date(today);
       from.setDate(from.getDate() - (conn?.last_sync_at ? 5 : 365));
       const txs = await fetchAllTransactions(acc.eb_account_uid, isoDate(from), isoDate(today));
 
@@ -116,16 +118,20 @@ async function fetchAllTransactions(
 ): Promise<EBTransaction[]> {
   const out: EBTransaction[] = [];
   let continuation: string | null = null;
-  do {
+  const seen = new Set<string>();
+  // Hard cap + repeated-key guard so a misbehaving API never loops forever.
+  for (let page = 0; page < 200; page++) {
     const qs = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
     if (continuation) qs.set("continuation_key", continuation);
-    const page = await ebFetch<{
+    const res = await ebFetch<{
       transactions: EBTransaction[];
       continuation_key?: string | null;
     }>(`/accounts/${uid}/transactions?${qs.toString()}`);
-    out.push(...(page.transactions ?? []));
-    continuation = page.continuation_key ?? null;
-  } while (continuation);
+    out.push(...(res.transactions ?? []));
+    continuation = res.continuation_key ?? null;
+    if (!continuation || seen.has(continuation)) break;
+    seen.add(continuation);
+  }
   return out;
 }
 

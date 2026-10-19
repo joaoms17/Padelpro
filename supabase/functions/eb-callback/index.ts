@@ -51,9 +51,10 @@ Deno.serve(async (req) => {
       .select("id, role, eb_account_uid")
       .eq("household_id", householdId);
 
-    const casa = (existing ?? []).find(
-      (a) => a.role === "casa" && !a.eb_account_uid,
+    const byUid = new Map(
+      (existing ?? []).filter((a) => a.eb_account_uid).map((a) => [a.eb_account_uid as string, a]),
     );
+    const casa = (existing ?? []).find((a) => a.role === "casa" && !a.eb_account_uid);
 
     const accounts = session.accounts ?? [];
     let linked = 0;
@@ -64,7 +65,11 @@ Deno.serve(async (req) => {
       const last4 = iban ? iban.slice(-4) : null;
       if (!uid) continue;
 
-      if (i === 0 && casa) {
+      // Already linked (re-link / renew): refresh, never duplicate.
+      const already = byUid.get(uid);
+      if (already) {
+        await svc.from("accounts").update({ iban_last4: last4 }).eq("id", already.id);
+      } else if (i === 0 && casa) {
         await svc
           .from("accounts")
           .update({ eb_account_uid: uid, iban_last4: last4 })
