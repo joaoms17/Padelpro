@@ -5,6 +5,7 @@ import { useHousehold } from "@/data/household";
 import {
   listEvents,
   listPayments,
+  listActivityExpenses,
   createEvent,
   addPayment,
   settlePayment,
@@ -13,6 +14,8 @@ import {
   updateEventStatus,
 } from "@/data/events";
 import { loadSettings } from "@/data/settings";
+import { buildICS } from "@/lib/ics";
+import { activityYearReport, type YearReport } from "@/lib/activityYear";
 import {
   eventDue,
   eventPaid,
@@ -57,10 +60,11 @@ function monthBounds(): [string, string] {
 }
 
 export function Eventos() {
-  const { householdId } = useHousehold();
+  const { householdId, categories } = useHousehold();
   const [events, setEvents] = useState<EventRow[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [priceTable, setPriceTable] = useState<Record<string, number>>({});
+  const [yearReport, setYearReport] = useState<YearReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [openEvent, setOpenEvent] = useState<EventRow | null>(null);
@@ -75,10 +79,38 @@ export function Eventos() {
       setEvents(evs);
       setPayments(pays);
       setPriceTable(s?.price_table ?? {});
+
+      // Annual activity summary (current year).
+      const year = new Date().getFullYear();
+      const atividadeCats = categories.filter((c) => c.grp === "atividade");
+      const atividadeById = new Map(atividadeCats.map((c) => [c.id, c.name]));
+      const expenses = await listActivityExpenses(householdId, atividadeCats.map((c) => c.id), year);
+      setYearReport(
+        activityYearReport(
+          evs.map((e) => ({ date: e.date, status: e.status })),
+          pays.map((p) => ({ amount_cents: p.amount_cents, received_at: p.received_at })),
+          expenses.map((x) => ({ category: atividadeById.get(x.category_id ?? "") ?? "Outras", amount_cents: x.amount_cents, date: x.booking_date })),
+          year,
+        ),
+      );
     } finally {
       setLoading(false);
     }
-  }, [householdId]);
+  }, [householdId, categories]);
+
+  function exportICS() {
+    const ics = buildICS(
+      events.map((e) => ({ id: e.id, date: e.date, type: e.type, client_name: e.client_name })),
+      new Date().toISOString(),
+    );
+    const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "eventos-joana.ics";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   useEffect(() => {
     void load();
@@ -181,6 +213,29 @@ export function Eventos() {
           <Line k="Valor médio" v={formatCents(metrics.mediaEventoCents)} />
           <Line k="Margem" v={formatPct(metrics.margem)} />
         </Card>
+      )}
+
+      {yearReport && yearReport.receitaCents > 0 && (
+        <Card className="space-y-1">
+          <SectionTitle>Resumo {yearReport.year} (IRS)</SectionTitle>
+          <Line k="Receita" v={formatCents(yearReport.receitaCents)} />
+          <Line k="Gastos da atividade" v={formatCents(yearReport.gastosCents)} />
+          <Line k="Rentabilidade" v={formatCents(yearReport.rentabilidadeCents)} />
+          <Line k="Margem" v={formatPct(yearReport.margem)} />
+          {yearReport.gastosPorCategoria.length > 0 && (
+            <div className="pt-2 mt-1 border-t border-areia/50 dark:border-white/5 space-y-1">
+              {yearReport.gastosPorCategoria.map((g) => (
+                <Line key={g.categoria} k={g.categoria} v={formatCents(g.cents)} />
+              ))}
+            </div>
+          )}
+        </Card>
+      )}
+
+      {events.length > 0 && (
+        <button className="btn-ghost w-full text-sm" onClick={exportICS}>
+          Exportar eventos para o calendário (.ics)
+        </button>
       )}
 
       {creating && (
