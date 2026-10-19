@@ -16,22 +16,6 @@ export function PorRever() {
   );
 }
 
-export function Orcamento() {
-  return (
-    <Stub
-      title="Orçamento"
-      subtitle="Limites por categoria e por grupo."
-      milestone="M6"
-      points={[
-        "Definir orçamento mensal por categoria de variáveis",
-        "Fixas previstas a partir das recorrentes",
-        "Alertas a 80% e 100% e alerta de ritmo",
-        "Acumular o que sobra para o mês seguinte",
-      ]}
-    />
-  );
-}
-
 export function Eventos() {
   return (
     <Stub
