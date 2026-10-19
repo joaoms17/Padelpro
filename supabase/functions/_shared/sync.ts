@@ -4,7 +4,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import { ebFetch } from "./eb.ts";
 import { normalizeTransaction, toCents, type EBTransaction } from "./normalize.ts";
-import { reconcileHousehold, proposeEventMatches } from "./reconcile.ts";
+import { reconcileHousehold, proposeEventMatches, proposeCashSettlements } from "./reconcile.ts";
 
 interface Account {
   id: string;
@@ -85,6 +85,7 @@ export async function syncHousehold(
     try {
       await reconcileHousehold(svc, householdId);
       await proposeEventMatches(svc, householdId);
+      await proposeCashSettlements(svc, householdId);
     } catch {
       /* reconciliation is best-effort; bank data already synced */
     }

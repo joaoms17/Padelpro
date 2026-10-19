@@ -97,7 +97,7 @@ export function Definicoes() {
         <SectionTitle>Ligações</SectionTitle>
         <Row title="Ligação ao banco" hint="Enable Banking · Santander" to="/ligar-banco" />
         <Row title="Atalho Apple Pay" hint="Token e URL por iPhone" to="/apple-pay" />
-        <Row title="Contas de origem da Joana" hint="Revolut, numerário" milestone="M7" />
+        <Row title="Contas de origem da Joana" hint="Revolut, numerário" to="/joana-fontes" />
         <Row title="Notificações" hint="Web Push por membro" to="/notificacoes" />
       </section>
 
