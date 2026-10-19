@@ -8,10 +8,12 @@ import { Inicio } from "@/screens/Inicio";
 import { Movimentos } from "@/screens/Movimentos";
 import { PorRever } from "@/screens/PorRever";
 import { Regras } from "@/screens/Regras";
+import { Orcamento } from "@/screens/Orcamento";
+import { Dinheiro } from "@/screens/Dinheiro";
 import { LigarBanco, LigarBancoCallback } from "@/screens/LigarBanco";
 import { ApplePay } from "@/screens/ApplePay";
 import { Definicoes } from "@/screens/Definicoes";
-import { Orcamento, Eventos, Metricas, Objetivos, Pergunta } from "@/screens/stubs";
+import { Eventos, Metricas, Objetivos, Pergunta } from "@/screens/stubs";
 
 function Gate() {
   const { loading, session } = useAuth();
@@ -41,6 +43,7 @@ function Gate() {
           <Route path="/pergunta" element={<Pergunta />} />
           <Route path="/definicoes" element={<Definicoes />} />
           <Route path="/regras" element={<Regras />} />
+          <Route path="/dinheiro" element={<Dinheiro />} />
           <Route path="/apple-pay" element={<ApplePay />} />
           <Route path="/ligar-banco" element={<LigarBanco />} />
           <Route path="/ligar-banco/callback" element={<LigarBancoCallback />} />

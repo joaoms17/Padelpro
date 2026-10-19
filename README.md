@@ -73,7 +73,7 @@ supabase secrets set ANTHROPIC_API_KEY=sk-ant-...   # categorização por IA (M4
 | M3 | Santander via Enable Banking (sync 2×/dia, saldo, renovar) | ✅ feito |
 | M4 | Categorização: regras, histórico, IA, Por rever | ✅ feito |
 | M5 | Apple Pay: Atalho + `ingest-applepay` + reconciliação | ✅ feito |
-| M6 | Orçamentos, fixas recorrentes, alertas | — |
+| M6 | Orçamentos, fixas recorrentes, alertas | ✅ feito |
 | M7 | Eventos da Joana e pagamentos | — |
 | M8 | Métricas, almofada, previsão, objetivos, fecho do mês | — |
 | M9 | Notificações Web Push | — |
