@@ -36,6 +36,7 @@ Aplicar as migrações por ordem (SQL Editor do Supabase ou `supabase db push`):
 1. `supabase/migrations/0001_schema.sql` — tabelas (secção 13 da spec)
 2. `supabase/migrations/0002_rls.sql` — Row-Level Security por agregado
 3. `supabase/migrations/0003_bootstrap_seed.sql` — `ensure_membership()` + categorias iniciais
+4. `supabase/migrations/0004_bank.sql` — suporte Enable Banking (M3)
 
 No primeiro login, a app chama `ensure_membership()`: o primeiro utilizador
 cria o agregado "Casa" (com categorias, definições e a Conta Casa) e o segundo
@@ -45,13 +46,30 @@ junta-se automaticamente. O agregado está limitado a 2 membros.
 abre no Safari e não na PWA). No Supabase: Authentication → Email → ativar OTP e
 pôr `{{ .Token }}` no template. Restringir os signups aos dois emails.
 
+## Ligação ao banco (M3 — Enable Banking)
+
+Edge Functions em `supabase/functions/`: `eb-auth-start`, `eb-callback`, `eb-sync`.
+
+```bash
+supabase functions deploy eb-auth-start eb-callback eb-sync
+supabase secrets set EB_APP_ID=... EB_PRIVATE_KEY="$(cat chave.pem)"
+```
+
+- Registar em enablebanking.com, criar app **Production**, gerar a chave privada
+  (`.pem`), redirect URL `https://<dominio-da-app>/ligar-banco/callback`, e fazer
+  **Link accounts** com o Santander no Control Panel (sem isto a API não devolve contas).
+- Sincronização automática 2×/dia: ativar `pg_cron` + `pg_net` e correr
+  `supabase/cron/eb-sync.sql` (substituir `<PROJECT_REF>` e `<SERVICE_ROLE_KEY>`).
+- Na app: Definições → Ligação ao banco → **Ligar banco** (autoriza no Santander),
+  depois **Sincronizar agora** ou esperar pelo cron. Renovar antes de expirar.
+
 ## Marcos
 
 | | Marco | Estado |
 |---|---|---|
 | M1 | Base: auth OTP, agregado, PWA, visual, categorias, Definições | ✅ feito |
 | M2 | Movimentos: manual, importar extrato, lista, edição, divisão | ✅ feito |
-| M3 | Santander via Enable Banking (sync 2×/dia, saldo, renovar) | — |
+| M3 | Santander via Enable Banking (sync 2×/dia, saldo, renovar) | ✅ feito |
 | M4 | Categorização: regras, histórico, IA, Por rever | — |
 | M5 | Apple Pay: Atalho + `ingest-applepay` + reconciliação | — |
 | M6 | Orçamentos, fixas recorrentes, alertas | — |

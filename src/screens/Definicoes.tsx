@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useAuth } from "@/auth/AuthProvider";
 import { PageHeader, SectionTitle } from "@/components/ui";
 import { isPinSet, setPin, clearPin } from "@/auth/PinLock";
@@ -9,14 +10,16 @@ function Row({
   hint,
   milestone,
   right,
+  to,
 }: {
   title: string;
   hint?: string;
   milestone?: string;
   right?: React.ReactNode;
+  to?: string;
 }) {
-  return (
-    <div className="flex items-center justify-between gap-3 py-3 border-b border-areia/50 dark:border-white/5 last:border-0">
+  const inner = (
+    <>
       <div className="min-w-0">
         <div className="font-medium">{title}</div>
         {hint && (
@@ -30,8 +33,19 @@ function Row({
           </span>
         )}
         {right}
+        {to && <span className="text-tinta/30 dark:text-creme/30">›</span>}
       </div>
-    </div>
+    </>
+  );
+
+  const cls =
+    "flex items-center justify-between gap-3 py-3 border-b border-areia/50 dark:border-white/5 last:border-0";
+  return to ? (
+    <Link to={to} className={`${cls} active:opacity-60`}>
+      {inner}
+    </Link>
+  ) : (
+    <div className={cls}>{inner}</div>
   );
 }
 
@@ -81,7 +95,7 @@ export function Definicoes() {
       {/* Ligações */}
       <section className="card p-5">
         <SectionTitle>Ligações</SectionTitle>
-        <Row title="Ligação ao banco" hint="Enable Banking · Santander" milestone="M3" />
+        <Row title="Ligação ao banco" hint="Enable Banking · Santander" to="/ligar-banco" />
         <Row title="Atalho Apple Pay" hint="Token e URL por iPhone" milestone="M5" />
         <Row title="Contas de origem da Joana" hint="Revolut, numerário" milestone="M7" />
         <Row title="Notificações" hint="Web Push por membro" milestone="M9" />
