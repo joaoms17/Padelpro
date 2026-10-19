@@ -74,7 +74,7 @@ supabase secrets set ANTHROPIC_API_KEY=sk-ant-...   # categorização por IA (M4
 | M4 | Categorização: regras, histórico, IA, Por rever | ✅ feito |
 | M5 | Apple Pay: Atalho + `ingest-applepay` + reconciliação | ✅ feito |
 | M6 | Orçamentos, fixas recorrentes, alertas | ✅ feito |
-| M7 | Eventos da Joana e pagamentos | — |
+| M7 | Eventos da Joana e pagamentos | ✅ feito |
 | M8 | Métricas, almofada, previsão, objetivos, fecho do mês | — |
 | M9 | Notificações Web Push | — |
 | M10 | IA: pergunta à app e resumo do fecho | — |
