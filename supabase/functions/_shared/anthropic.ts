@@ -5,6 +5,29 @@
 const API = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-haiku-5-5";
 
+/** Friendly month-close summary (spec 11). Returns "" if no key configured. */
+export async function summarizeMonth(metrics: Record<string, number | null>): Promise<string> {
+  const key = Deno.env.get("ANTHROPIC_API_KEY");
+  if (!key) return "";
+  const prompt = `És o assistente de finanças de um casal (João e Joana) em Portugal.
+Escreve um resumo curto e simpático (2-3 frases, PT-PT) do fecho do mês, com o
+que correu bem, o que fugiu ao esperado e uma sugestão prática. Valores em cêntimos:
+${JSON.stringify(metrics)}
+Responde só com o texto, sem markdown.`;
+  try {
+    const res = await fetch(API, {
+      method: "POST",
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model: MODEL, max_tokens: 400, messages: [{ role: "user", content: prompt }] }),
+    });
+    if (!res.ok) return "";
+    const data = await res.json();
+    return (data?.content?.[0]?.text ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
 export interface AICatItem {
   id: string;
   description: string; // normalized merchant (no IBANs, no full names)

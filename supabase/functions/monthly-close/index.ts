@@ -4,6 +4,7 @@
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { serviceClient } from "../_shared/db.ts";
 import { pushToHousehold } from "../_shared/push.ts";
+import { summarizeMonth } from "../_shared/anthropic.ts";
 
 type Grp = "entrada" | "fixa" | "variavel" | "atividade" | "mesada" | "interna";
 
@@ -54,9 +55,10 @@ async function closeHousehold(svc: ReturnType<typeof serviceClient>, householdId
     saldo_conta_casa_cents: acc?.balance_cents ?? null,
   };
 
+  const summary_text = await summarizeMonth(metrics);
   await svc
     .from("monthly_snapshots")
-    .upsert({ household_id: householdId, month, metrics }, { onConflict: "household_id,month" });
+    .upsert({ household_id: householdId, month, metrics, summary_text }, { onConflict: "household_id,month" });
 
   const sobraEur = (sobra / 100).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   await pushToHousehold(

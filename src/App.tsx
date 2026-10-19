@@ -16,8 +16,8 @@ import { Objetivos } from "@/screens/Objetivos";
 import { LigarBanco, LigarBancoCallback } from "@/screens/LigarBanco";
 import { ApplePay } from "@/screens/ApplePay";
 import { Notificacoes } from "@/screens/Notificacoes";
+import { Pergunta } from "@/screens/Pergunta";
 import { Definicoes } from "@/screens/Definicoes";
-import { Pergunta } from "@/screens/stubs";
 
 // Lazy — keeps Recharts out of the initial bundle.
 const Metricas = lazy(() =>
