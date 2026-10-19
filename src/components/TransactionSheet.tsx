@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { Sheet } from "./Sheet";
 import { CategoryPicker } from "./CategoryPicker";
+import { useAuth } from "@/auth/AuthProvider";
 import { useHousehold } from "@/data/household";
 import { setCategory, setNote, setSplits } from "@/data/transactions";
+import { learnMerchantRule } from "@/data/rules";
+import { displayMerchant } from "@shared/categorize";
 import { formatSigned, formatDate, parseCents, formatCents } from "@/lib/format";
 import type { Transaction } from "@/lib/types";
 
@@ -20,11 +23,13 @@ export function TransactionSheet({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const { categoriesById } = useHousehold();
+  const { session } = useAuth();
+  const { householdId, categoriesById } = useHousehold();
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [note, setNoteText] = useState("");
   const [splitting, setSplitting] = useState(false);
   const [splits, setSplitRows] = useState<SplitRow[]>([]);
+  const [applyAlways, setApplyAlways] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,10 +38,14 @@ export function TransactionSheet({
     setNoteText(tx?.note ?? "");
     setSplitting(false);
     setSplitRows([]);
+    setApplyAlways(false);
     setError(null);
   }, [tx]);
 
   if (!tx) return null;
+
+  const merchant = tx.merchant_clean || displayMerchant(tx.description_raw);
+  const categoryChanged = categoryId !== (tx.category_id ?? null);
 
   const totalCents = Math.abs(tx.amount_cents);
   const splitSum = splits.reduce((a, s) => a + (parseCents(s.amount) ?? 0), 0);
@@ -77,6 +86,15 @@ export function TransactionSheet({
       } else {
         await setCategory(tx.id, categoryId);
         await setSplits(tx.id, []); // clear any prior split
+        if (applyAlways && categoryId && householdId && merchant) {
+          await learnMerchantRule({
+            householdId,
+            descriptionRaw: tx.description_raw,
+            categoryId,
+            createdBy: session?.user.id ?? null,
+            applyToPast: true,
+          });
+        }
       }
       if (note !== (tx.note ?? "")) await setNote(tx.id, note);
       onSaved();
@@ -117,6 +135,17 @@ export function TransactionSheet({
               <label className="label" htmlFor="cat">Categoria</label>
               <CategoryPicker id="cat" value={categoryId} onChange={setCategoryId} />
             </div>
+            {categoryChanged && categoryId && merchant && (
+              <label className="flex items-center gap-2 text-sm text-tinta/70 dark:text-creme/70">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-terracota"
+                  checked={applyAlways}
+                  onChange={(e) => setApplyAlways(e.target.checked)}
+                />
+                Aplicar sempre a «{merchant}»
+              </label>
+            )}
             <button className="btn-ghost w-full text-sm" onClick={startSplit}>
               Dividir por várias categorias
             </button>

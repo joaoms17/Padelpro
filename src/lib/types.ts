@@ -116,6 +116,17 @@ export interface Settings {
   price_table: Record<string, number>;
 }
 
+export interface Rule {
+  id: string;
+  household_id: string;
+  field: "merchant" | "description" | "counterparty" | "iban";
+  match_type: "equals" | "contains" | "regex";
+  pattern: string;
+  category_id: string;
+  priority: number;
+  created_by: string | null;
+}
+
 export interface BankConnection {
   id: string;
   household_id: string;

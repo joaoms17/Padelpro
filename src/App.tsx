@@ -6,16 +6,11 @@ import { AppShell } from "@/components/AppShell";
 import { Login } from "@/screens/Login";
 import { Inicio } from "@/screens/Inicio";
 import { Movimentos } from "@/screens/Movimentos";
+import { PorRever } from "@/screens/PorRever";
+import { Regras } from "@/screens/Regras";
 import { LigarBanco, LigarBancoCallback } from "@/screens/LigarBanco";
 import { Definicoes } from "@/screens/Definicoes";
-import {
-  PorRever,
-  Orcamento,
-  Eventos,
-  Metricas,
-  Objetivos,
-  Pergunta,
-} from "@/screens/stubs";
+import { Orcamento, Eventos, Metricas, Objetivos, Pergunta } from "@/screens/stubs";
 
 function Gate() {
   const { loading, session } = useAuth();
@@ -44,6 +39,7 @@ function Gate() {
           <Route path="/objetivos" element={<Objetivos />} />
           <Route path="/pergunta" element={<Pergunta />} />
           <Route path="/definicoes" element={<Definicoes />} />
+          <Route path="/regras" element={<Regras />} />
           <Route path="/ligar-banco" element={<LigarBanco />} />
           <Route path="/ligar-banco/callback" element={<LigarBancoCallback />} />
           <Route path="*" element={<Navigate to="/" replace />} />

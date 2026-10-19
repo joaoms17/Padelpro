@@ -89,7 +89,7 @@ export function Definicoes() {
         <Row title="Mesadas" hint="Valor, dia e conta de destino" milestone="M1" />
         <Row title="Alvo da almofada" hint="Em meses de despesas" milestone="M1" />
         <Row title="Tabela de preços dos eventos" hint="Noiva, convidada, €/km" milestone="M7" />
-        <Row title="Categorias e regras" hint="Editar e criar regras" milestone="M4" />
+        <Row title="Categorias e regras" hint="Editar e criar regras" to="/regras" />
       </section>
 
       {/* Ligações */}
