@@ -100,3 +100,21 @@ export async function deletePayment(id: string): Promise<void> {
   const { error } = await supabase.from("event_payments").delete().eq("id", id);
   if (error) throw error;
 }
+
+/** Activity-expense movements (grp "atividade") for a year, by category id. */
+export async function listActivityExpenses(
+  householdId: string,
+  categoryIds: string[],
+  year: number,
+): Promise<{ category_id: string | null; amount_cents: number; booking_date: string }[]> {
+  if (categoryIds.length === 0) return [];
+  const { data } = await supabase
+    .from("transactions")
+    .select("category_id, amount_cents, booking_date")
+    .eq("household_id", householdId)
+    .is("matched_transaction_id", null)
+    .in("category_id", categoryIds)
+    .gte("booking_date", `${year}-01-01`)
+    .lt("booking_date", `${year + 1}-01-01`);
+  return data ?? [];
+}
