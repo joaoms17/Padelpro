@@ -23,6 +23,9 @@ export async function listTransactions(f: TxFilters): Promise<Transaction[]> {
     .from("transactions")
     .select("*")
     .eq("household_id", f.householdId)
+    // Exclude Apple Pay provisionals already matched to a bank movement, so
+    // they never count twice.
+    .is("matched_transaction_id", null)
     .order("booking_date", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(500);
@@ -34,7 +37,9 @@ export async function listTransactions(f: TxFilters): Promise<Transaction[]> {
   if (f.categoryId === "none") q = q.is("category_id", null);
   else if (f.categoryId) q = q.eq("category_id", f.categoryId);
   if (f.source) q = q.eq("source", f.source);
-  if (f.onlyReview) q = q.or("status.eq.provisorio,category_id.is.null");
+  // "Por rever" = uncategorized (includes low-confidence AI, which is left
+  // uncategorized). Once a category is assigned the item leaves the queue.
+  if (f.onlyReview) q = q.is("category_id", null);
   if (f.search && f.search.trim()) {
     const s = `%${f.search.trim()}%`;
     q = q.or(

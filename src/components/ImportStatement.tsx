@@ -8,6 +8,7 @@ import {
   type Mapping,
 } from "@/lib/import";
 import { importTransactions, type ImportOutcome } from "@/data/transactions";
+import { runCategorize } from "@/data/rules";
 import { formatSigned, formatDate } from "@/lib/format";
 
 type Stage = "pick" | "map" | "done";
@@ -93,6 +94,10 @@ export function ImportStatement({
       const res = await importTransactions(householdId, contaCasa.id, built.items);
       setOutcome(res);
       setStage("done");
+      // Auto-categorize the freshly imported movements (best-effort).
+      if (res.inserted > 0) {
+        runCategorize(householdId).catch(() => {});
+      }
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

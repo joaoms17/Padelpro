@@ -89,14 +89,14 @@ export function Definicoes() {
         <Row title="Mesadas" hint="Valor, dia e conta de destino" milestone="M1" />
         <Row title="Alvo da almofada" hint="Em meses de despesas" milestone="M1" />
         <Row title="Tabela de preços dos eventos" hint="Noiva, convidada, €/km" milestone="M7" />
-        <Row title="Categorias e regras" hint="Editar e criar regras" milestone="M4" />
+        <Row title="Categorias e regras" hint="Editar e criar regras" to="/regras" />
       </section>
 
       {/* Ligações */}
       <section className="card p-5">
         <SectionTitle>Ligações</SectionTitle>
         <Row title="Ligação ao banco" hint="Enable Banking · Santander" to="/ligar-banco" />
-        <Row title="Atalho Apple Pay" hint="Token e URL por iPhone" milestone="M5" />
+        <Row title="Atalho Apple Pay" hint="Token e URL por iPhone" to="/apple-pay" />
         <Row title="Contas de origem da Joana" hint="Revolut, numerário" milestone="M7" />
         <Row title="Notificações" hint="Web Push por membro" milestone="M9" />
       </section>

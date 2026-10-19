@@ -1,0 +1,6 @@
+# Supabase Edge Functions config.
+# ingest-applepay is authenticated by the member's personal token (not a
+# Supabase JWT), so the gateway must not reject the request — disable JWT
+# verification for this function only.
+[functions.ingest-applepay]
+verify_jwt = false

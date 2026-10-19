@@ -4,6 +4,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import { ebFetch } from "./eb.ts";
 import { normalizeTransaction, toCents, type EBTransaction } from "./normalize.ts";
+import { reconcileHousehold } from "./reconcile.ts";
 
 interface Account {
   id: string;
@@ -78,6 +79,13 @@ export async function syncHousehold(
       }
 
       await updateBalance(svc, acc);
+    }
+
+    // Reconcile Apple Pay provisionals against the freshly synced bank data.
+    try {
+      await reconcileHousehold(svc, householdId);
+    } catch {
+      /* reconciliation is best-effort; bank data already synced */
     }
 
     if (conn) {

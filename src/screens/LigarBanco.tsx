@@ -9,6 +9,7 @@ import {
   syncNow,
   daysUntil,
 } from "@/data/bank";
+import { runCategorize } from "@/data/rules";
 import { formatCents } from "@/lib/format";
 import type { BankConnection } from "@/lib/types";
 
@@ -65,6 +66,9 @@ export function LigarBanco() {
       const r = await syncNow(householdId);
       if (r.error) setError(r.error);
       else setMsg(`${r.processed} movimentos sincronizados.`);
+      if (!r.error && r.processed > 0) {
+        await runCategorize(householdId).catch(() => {});
+      }
       await Promise.all([refresh(), reload()]);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
