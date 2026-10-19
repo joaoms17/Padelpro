@@ -16,22 +16,6 @@ export function PorRever() {
   );
 }
 
-export function Eventos() {
-  return (
-    <Stub
-      title="Eventos"
-      subtitle="A atividade da Joana, de ponta a ponta."
-      milestone="M7"
-      points={[
-        "Lista e calendário, criar evento, botão Recebi",
-        "Pagamentos: sinal, restante, numerário, MB Way, Revolut",
-        "Dinheiro dos eventos ainda fora da Conta Casa",
-        "Métricas da atividade: rentabilidade, margem, a receber",
-      ]}
-    />
-  );
-}
-
 export function Metricas() {
   return (
     <Stub

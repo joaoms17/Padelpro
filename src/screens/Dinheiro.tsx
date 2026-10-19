@@ -7,15 +7,23 @@ import {
   updateMesada,
   loadSettings,
   setCushionTarget,
+  setPriceTable,
 } from "@/data/settings";
 import { parseCents, formatCents } from "@/lib/format";
 import type { Member } from "@/lib/types";
+
+const PRICE_ROWS = [
+  { key: "noiva", label: "Noiva (prova + dia)" },
+  { key: "convidada", label: "Convidada" },
+  { key: "deslocacao_km", label: "Deslocação (€/km)" },
+];
 
 export function Dinheiro() {
   const navigate = useNavigate();
   const { householdId } = useHousehold();
   const [members, setMembers] = useState<Member[]>([]);
   const [cushion, setCushion] = useState<number>(3);
+  const [prices, setPrices] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [saved, setSaved] = useState(false);
 
@@ -25,7 +33,10 @@ export function Dinheiro() {
     try {
       const [m, s] = await Promise.all([loadMembers(householdId), loadSettings(householdId)]);
       setMembers(m);
-      if (s) setCushion(s.cushion_target_months);
+      if (s) {
+        setCushion(s.cushion_target_months);
+        setPrices(s.price_table ?? {});
+      }
     } finally {
       setLoading(false);
     }
@@ -52,6 +63,17 @@ export function Dinheiro() {
     if (!householdId) return;
     await setCushionTarget(householdId, months);
     setCushion(months);
+    flash();
+  }
+
+  async function savePrice(key: string, text: string) {
+    if (!householdId) return;
+    const cents = parseCents(text);
+    const next = { ...prices };
+    if (cents == null) delete next[key];
+    else next[key] = cents;
+    setPrices(next);
+    await setPriceTable(householdId, next);
     flash();
   }
 
@@ -109,9 +131,47 @@ export function Dinheiro() {
               </div>
             </Card>
           </section>
+
+          <section>
+            <SectionTitle>Tabela de preços dos eventos</SectionTitle>
+            <Card className="space-y-3">
+              {PRICE_ROWS.map((row) => (
+                <div key={row.key} className="flex items-center justify-between gap-3">
+                  <span className="text-sm text-tinta/70 dark:text-creme/70">{row.label}</span>
+                  <PriceInput
+                    initial={prices[row.key]}
+                    onSave={(txt) => savePrice(row.key, txt)}
+                  />
+                </div>
+              ))}
+            </Card>
+            <p className="text-xs text-tinta/40 dark:text-creme/40 mt-2">
+              Sugere o valor ao criar um evento. Podes sempre ajustar.
+            </p>
+          </section>
         </>
       )}
     </div>
+  );
+}
+
+function PriceInput({
+  initial,
+  onSave,
+}: {
+  initial: number | undefined;
+  onSave: (text: string) => void;
+}) {
+  const [val, setVal] = useState(initial != null ? (initial / 100).toString() : "");
+  return (
+    <input
+      inputMode="decimal"
+      className="input py-1.5 w-28 text-right"
+      placeholder="€"
+      value={val}
+      onChange={(e) => setVal(e.target.value)}
+      onBlur={() => onSave(val)}
+    />
   );
 }
 

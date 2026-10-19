@@ -10,10 +10,11 @@ import { PorRever } from "@/screens/PorRever";
 import { Regras } from "@/screens/Regras";
 import { Orcamento } from "@/screens/Orcamento";
 import { Dinheiro } from "@/screens/Dinheiro";
+import { Eventos } from "@/screens/Eventos";
 import { LigarBanco, LigarBancoCallback } from "@/screens/LigarBanco";
 import { ApplePay } from "@/screens/ApplePay";
 import { Definicoes } from "@/screens/Definicoes";
-import { Eventos, Metricas, Objetivos, Pergunta } from "@/screens/stubs";
+import { Metricas, Objetivos, Pergunta } from "@/screens/stubs";
 
 function Gate() {
   const { loading, session } = useAuth();
