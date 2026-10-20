@@ -236,12 +236,12 @@ jobs:
           if [ "$HAS_EB" = "true" ]; then
             code=$(curl -sS -o /tmp/out -w '%{http_code}' -X POST "$base/eb-sync" \
               -H 'Content-Type: application/json' -H "x-cron-secret: $CRON_SECRET" -d '{"check":true}')
-            if [ "$code" = "200" ]; then
+            if [ "$code" = "200" ] && [ "$(jq -r '.active' /tmp/out)" = "false" ]; then
+              # Key and signature are fine; the user still has to activate the app.
+              summary "- ⚠️ Enable Banking: chave OK, mas a app ainda não está ativa — Control Panel → Activate by linking accounts (Santander)"
+            elif [ "$code" = "200" ]; then
               summary "- ✅ Enable Banking: $(jq -r '.aspsp' /tmp/out) encontrado ($(jq -r '.environment // "?"' /tmp/out))"
               summary "  - redirect URLs registados: $(jq -r '.redirect_urls | join(", ") | if . == "" then "nenhum" else . end' /tmp/out)"
-              if [ "$(jq -r '.active' /tmp/out)" = "false" ]; then
-                summary "- ⚠️ A app Enable Banking ainda não está ativa — Control Panel → Activate by linking accounts"
-              fi
             else summary "- ❌ Enable Banking: HTTP $code $(jq -r '.error // .' /tmp/out | head -c 300)"; fail=1; fi
           else summary "- ⏭️ Fase C: EB_APP_ID / EB_PRIVATE_KEY em falta"; fi
 

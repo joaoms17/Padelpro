@@ -7,7 +7,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 import { householdFromRequest, serviceClient } from "../_shared/db.ts";
 import { isCronRequest } from "../_shared/auth.ts";
 import { syncHousehold } from "../_shared/sync.ts";
-import { findSantanderPT, getApplication } from "../_shared/eb.ts";
+import { EBError, findSantanderPT, getApplication, type EBApplication } from "../_shared/eb.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -18,14 +18,28 @@ Deno.serve(async (req) => {
       const body = await req.json().catch(() => ({}));
       if (body.check) {
         // Deploy smoke test: signs a JWT, reads the app, lists the PT banks.
-        const [app, aspsp] = await Promise.all([getApplication(), findSantanderPT()]);
-        return json({
+        // An app not yet activated is reported as such (not as an error).
+        const notActive = (e: unknown) => e instanceof EBError && e.code === "APPLICATION_NOT_ACTIVE";
+        let app: EBApplication = {};
+        try {
+          app = await getApplication();
+        } catch (e) {
+          if (!notActive(e)) throw e;
+          app = { active: false };
+        }
+        const base = {
           mode: "check",
-          aspsp: aspsp.name,
-          active: app.active ?? null,
           environment: app.environment ?? null,
           redirect_urls: app.redirect_urls ?? [],
-        });
+        };
+        if (app.active === false) return json({ ...base, active: false, aspsp: null });
+        try {
+          const aspsp = await findSantanderPT();
+          return json({ ...base, active: app.active ?? true, aspsp: aspsp.name });
+        } catch (e) {
+          if (notActive(e)) return json({ ...base, active: false, aspsp: null });
+          throw e;
+        }
       }
       // cron path: sync all households with an active connection
       const { data: conns } = await svc
