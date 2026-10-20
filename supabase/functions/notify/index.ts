@@ -4,6 +4,7 @@
 //   • { household_id, title, body, prefKey? } (service role) → a custom push
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { householdFromRequest, serviceClient } from "../_shared/db.ts";
+import { isCronRequest } from "../_shared/auth.ts";
 import { pushToHousehold } from "../_shared/push.ts";
 
 Deno.serve(async (req) => {
@@ -12,9 +13,7 @@ Deno.serve(async (req) => {
     const svc = serviceClient();
     const body = await req.json().catch(() => ({}));
 
-    const authHeader = req.headers.get("Authorization") ?? "";
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-    const isService = serviceKey && authHeader === `Bearer ${serviceKey}`;
+    const isService = isCronRequest(req);
 
     // Test notification for the signed-in user's household.
     if (body.test) {

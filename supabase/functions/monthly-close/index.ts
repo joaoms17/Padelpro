@@ -3,6 +3,7 @@
 // Core P&L is computed inline to avoid importing the frontend metrics engine.
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { serviceClient, householdFromRequest } from "../_shared/db.ts";
+import { isCronRequest } from "../_shared/auth.ts";
 import { pushToHousehold } from "../_shared/push.ts";
 import { summarizeMonth } from "../_shared/anthropic.ts";
 
@@ -77,9 +78,7 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const month = body.month ?? prevMonth(new Date().toISOString().slice(0, 10));
 
-    const authHeader = req.headers.get("Authorization") ?? "";
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-    if (serviceKey && authHeader === `Bearer ${serviceKey}`) {
+    if (isCronRequest(req)) {
       const { data: households } = await svc.from("households").select("id");
       let closed = 0;
       for (const h of households ?? []) {

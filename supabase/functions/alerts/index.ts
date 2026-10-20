@@ -3,6 +3,7 @@
 // cushion dropping below target. Cron-driven (service role) or per-household.
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { householdFromRequest, serviceClient } from "../_shared/db.ts";
+import { isCronRequest } from "../_shared/auth.ts";
 import { pushToHousehold } from "../_shared/push.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 
@@ -87,10 +88,8 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const svc = serviceClient();
-    const authHeader = req.headers.get("Authorization") ?? "";
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
-    if (serviceKey && authHeader === `Bearer ${serviceKey}`) {
+    if (isCronRequest(req)) {
       const { data: households } = await svc.from("households").select("id");
       let total = 0;
       for (const h of households ?? []) {

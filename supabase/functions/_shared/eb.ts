@@ -1,6 +1,7 @@
 // Enable Banking API client for Deno Edge Functions.
 // Auth: RS256 JWT with kid = Application ID (spec 4.1).
 import { SignJWT, importPKCS8 } from "npm:jose@5.9.6";
+import { normalizePem } from "./pem.ts";
 
 const EB_BASE = "https://api.enablebanking.com";
 
@@ -21,8 +22,8 @@ async function makeJwt(): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   if (cachedJwt && cachedJwt.exp - 60 > now) return cachedJwt.token;
 
-  // Secrets stored with literal \n get normalised back to real newlines.
-  const key = await importPKCS8(pem.replace(/\\n/g, "\n"), "RS256");
+  // Accepts PKCS#8/PKCS#1, literal \n, one-line or base64 secrets.
+  const key = await importPKCS8(normalizePem(pem), "RS256");
   const exp = now + 3600; // 1h (max 24h)
   const token = await new SignJWT({})
     .setProtectedHeader({ alg: "RS256", kid: appId, typ: "JWT" })
