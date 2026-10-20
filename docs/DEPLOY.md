@@ -19,7 +19,7 @@ Guia passo-a-passo para pôr a app no ar. Faz-se uma vez.
      | Secret | Para quê |
      |---|---|
      | `SUPABASE_ACCESS_TOKEN` | obrigatório — o token acima |
-     | `ANTHROPIC_API_KEY` | Fase B — categorização IA, "Pergunta à app", resumos |
+     | `GEMINI_API_KEY` | Fase B — categorização IA, "Pergunta à app", resumos ([aistudio.google.com](https://aistudio.google.com) → Get API key, grátis; ou `ANTHROPIC_API_KEY` em alternativa) |
      | `EB_APP_ID` | Fase C — Application ID da Enable Banking |
      | `EB_PRIVATE_KEY` | Fase C — conteúdo do `.pem` (colar tal como está) |
      | `VAPID_PUBLIC_KEY` · `VAPID_PRIVATE_KEY` · `VAPID_SUBJECT` | Fase D — notificações push |
@@ -30,6 +30,10 @@ Guia passo-a-passo para pôr a app no ar. Faz-se uma vez.
      no Vault, agenda os crons (`supabase/cron/schedule.sql`) e testa tudo
      (resumo no fim do run). Volta a correr sozinho a cada alteração ao backend
      na `main`.
+   - Modelos Gemini por omissão: `gemini-3.5-flash-lite` (categorização e
+     resumos) e `gemini-3.8-flash` ("Pergunta à app", com recurso ao primeiro
+     quando a quota grátis diária acaba). Para trocar: variáveis do repo
+     `GEMINI_MODEL_FAST` / `GEMINI_MODEL_SMART`.
 
 Guarda, de Settings → API: **Project URL** e **anon/publishable key** (para a
 Vercel). A service_role/secret key nunca sai do Supabase.

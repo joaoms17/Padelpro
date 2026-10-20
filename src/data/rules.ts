@@ -85,6 +85,6 @@ export async function learnMerchantRule(input: {
 /** Run the server-side categorization engine (rules → mesada → history → AI). */
 export async function runCategorize(
   householdId: string,
-): Promise<{ processed: number; assigned: number; review: number }> {
+): Promise<{ processed: number; assigned: number; review: number; ai_error?: string | null }> {
   return invokeFn("categorize", { household_id: householdId });
 }

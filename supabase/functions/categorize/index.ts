@@ -1,5 +1,5 @@
 // categorize — classify uncategorized movements for a household.
-// Order: user rules → mesadas → history → Claude Haiku (spec 6.2).
+// Order: user rules → mesadas → history → AI (Gemini or Claude, spec 6.2).
 // Confidence < 0.7 leaves the movement uncategorized (Por rever).
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { householdFromRequest, serviceClient } from "../_shared/db.ts";
@@ -13,9 +13,10 @@ import {
   type Rule,
   type MesadaRule,
 } from "../_shared/categorize.ts";
-import { categorizeWithAI, type AICatItem } from "../_shared/anthropic.ts";
+import { categorizeWithAI, type AICatItem } from "../_shared/ai.ts";
+import { LLMError } from "../_shared/llm.ts";
 
-const AI_CHUNK = 40;
+const AI_CHUNK = 25;
 
 interface Tx {
   id: string;
@@ -111,13 +112,19 @@ Deno.serve(async (req) => {
     // AI step, in chunks.
     let aiAssigned = 0;
     let aiReview = 0;
+    let aiError: string | null = null;
     for (let i = 0; i < aiItems.length; i += AI_CHUNK) {
       const chunk = aiItems.slice(i, i + AI_CHUNK);
       let results: Awaited<ReturnType<typeof categorizeWithAI>> = [];
-      try {
-        results = await categorizeWithAI(chunk, categories);
-      } catch (_e) {
-        results = [];
+      // After a quota/availability failure, don't spend more calls: the rest
+      // simply stays "Por rever" until the next run.
+      if (!aiError) {
+        try {
+          results = await categorizeWithAI(chunk, categories);
+        } catch (e) {
+          if (e instanceof LLMError) aiError = e.message;
+          results = [];
+        }
       }
       const byId = new Map(results.map((r) => [r.id, r]));
       for (const it of chunk) {
@@ -169,6 +176,7 @@ Deno.serve(async (req) => {
       review: uncategorized.length - assigned,
       ai_assigned: aiAssigned,
       ai_review: aiReview,
+      ai_error: aiError,
     });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
