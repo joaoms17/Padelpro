@@ -8,10 +8,10 @@ Guia passo-a-passo para pôr a app no ar. Faz-se uma vez.
    Guarda a password da base de dados.
 2. **Base de dados**: SQL Editor → cola e corre `supabase/setup.sql` (junta as 6
    migrações). Cria tabelas, RLS, `ensure_membership()`, categorias e extras.
-3. **Auth OTP**: Authentication → Providers → Email → ativar. Em *Email Templates*
-   → *Magic Link*, troca o link por `{{ .Token }}` (código de 6 dígitos).
-   Em *URL Configuration* não é preciso redirect (usamos código, não link).
-   Opcional: restringir signups aos dois emails (João e Joana).
+3. **Auth (email + password)**: Authentication → Sign In / Providers → **Email**
+   ativado, e **desligar "Confirm email"** (para entrar sem precisar de email).
+   Não é preciso SMTP nem editar templates. Depois de os dois criarem conta,
+   podes desligar novos signups.
 4. **Extensões** (Database → Extensions): ativar `pg_cron` e `pg_net`.
 5. **Edge Functions** (precisa do [Supabase CLI](https://supabase.com/docs/guides/cli)):
    ```bash
