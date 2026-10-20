@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toDuetEvents, validRange, type DuetEventRow } from "./duet";
+import { toDuetEvents, toDuetReceipts, validRange, type DuetEventRow } from "./duet";
 
 const ev = (over: Partial<DuetEventRow>): DuetEventRow => ({
   id: "e1",
@@ -53,5 +53,30 @@ describe("validRange", () => {
     expect(validRange("2024-01-01", "2026-10-31")).toBeNull();
     expect(validRange("ontem", "2026-10-01")).toBeNull();
     expect(validRange(undefined, null)).toBeNull();
+  });
+});
+
+describe("toDuetReceipts", () => {
+  const events = [
+    ev({ id: "a", title: "Casamento Ana", paid: true }), // has payments: flag ignored
+    ev({ id: "b", title: "Gig antigo", value: "200", paid: true, paid_at: "2026-09-12" } as Partial<DuetEventRow>),
+    ev({ id: "c", title: "Fora", value: "90", paid: true, paid_at: "2026-08-30" } as Partial<DuetEventRow>),
+  ];
+  it("payments by their date, old paid events by paid_at, only inside the range", () => {
+    const out = toDuetReceipts(
+      events,
+      [
+        { event_id: "a", paid_at: "2026-09-02", amount: "100" },
+        { event_id: "a", paid_at: "2026-10-01", amount: "250" },
+      ],
+      new Set(["a"]),
+      projects,
+      "2026-09-01",
+      "2026-09-30",
+    );
+    expect(out).toEqual([
+      { date: "2026-09-02", amount_cents: 10000, title: "Casamento Ana", project: "Cabelos" },
+      { date: "2026-09-12", amount_cents: 20000, title: "Gig antigo", project: "Cabelos" },
+    ]);
   });
 });

@@ -11,6 +11,7 @@ import { PorRever } from "@/screens/PorRever";
 import { Regras } from "@/screens/Regras";
 import { Categorias } from "@/screens/Categorias";
 import { EntradasPrevistas } from "@/screens/EntradasPrevistas";
+import { Conferir } from "@/screens/Conferir";
 import { Orcamento } from "@/screens/Orcamento";
 import { Dinheiro } from "@/screens/Dinheiro";
 import { Eventos } from "@/screens/Eventos";
@@ -88,6 +89,7 @@ function Gate() {
           <Route path="/regras" element={<Regras />} />
           <Route path="/categorias" element={<Categorias />} />
           <Route path="/entradas-previstas" element={<EntradasPrevistas />} />
+          <Route path="/conferir" element={<Conferir />} />
           <Route path="/dinheiro" element={<Dinheiro />} />
           <Route path="/apple-pay" element={<ApplePay />} />
           <Route path="/notificacoes" element={<Notificacoes />} />
