@@ -54,7 +54,7 @@ Edge Functions em `supabase/functions/`: `eb-auth-start`, `eb-callback`, `eb-syn
 
 Deploy automático pelo workflow **Supabase deploy** (GitHub Actions): funções,
 secrets (copiados dos secrets do repo — `SUPABASE_ACCESS_TOKEN`,
-`ANTHROPIC_API_KEY`, `EB_APP_ID`, `EB_PRIVATE_KEY`, `VAPID_*`), crons
+`GEMINI_API_KEY` (ou `ANTHROPIC_API_KEY`), `EB_APP_ID`, `EB_PRIVATE_KEY`, `VAPID_*`), crons
 (`supabase/cron/schedule.sql`, autenticados por `x-cron-secret` guardado no
 Vault) e testes de fumo. Passo-a-passo em [`docs/DEPLOY.md`](docs/DEPLOY.md).
 
@@ -87,7 +87,7 @@ Vault) e testes de fumo. Passo-a-passo em [`docs/DEPLOY.md`](docs/DEPLOY.md).
 - [ ] Preencher `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` no Vercel
 - [ ] Registo na **Enable Banking**, aplicação Production, `.pem`, Application ID,
       **Link accounts** com o Santander (M3)
-- [ ] Chave da **Anthropic API** nos secrets das Edge Functions (M4/M10)
+- [ ] Chave do **Gemini** (`GEMINI_API_KEY`) nos secrets do GitHub (M4/M10)
 - [ ] Gerar chaves **VAPID** (M9)
 - [ ] Joana como cotitular no Santander
 - [ ] Instalar a PWA nos dois iPhones e criar o Atalho "Transação" (M5)

@@ -4,6 +4,8 @@ import {
   signedCents,
   ebExternalId,
   normalizeTransaction,
+  prepareBatch,
+  pickBalance,
   type EBTransaction,
 } from "./normalize";
 
@@ -26,10 +28,12 @@ describe("amounts", () => {
 });
 
 describe("ebExternalId precedence", () => {
-  it("prefers entry_reference, then transaction_id, then a hash", () => {
+  it("prefers entry_reference, else a hash — never the unstable transaction_id", () => {
     expect(ebExternalId(mk({ entry_reference: "E1", transaction_id: "T1" }), "2026-01-05")).toBe("ref:E1");
-    expect(ebExternalId(mk({ transaction_id: "T1" }), "2026-01-05")).toBe("tid:T1");
-    expect(ebExternalId(mk({}), "2026-01-05")).toMatch(/^h:2026-01-05:-4520:/);
+    expect(ebExternalId(mk({ transaction_id: "T1" }), "2026-01-05")).toMatch(/^h:2026-01-05:-4520:/);
+    expect(ebExternalId(mk({ transaction_id: "T2" }), "2026-01-05")).toBe(
+      ebExternalId(mk({ transaction_id: "T1" }), "2026-01-05"),
+    );
   });
 
   it("entry_reference keeps the id stable across pending → booked", () => {
@@ -41,9 +45,9 @@ describe("ebExternalId precedence", () => {
 
 describe("normalizeTransaction", () => {
   it("maps a booked debit", () => {
-    const n = normalizeTransaction(mk({ transaction_id: "T1" }), "2026-01-10");
+    const n = normalizeTransaction(mk({ entry_reference: "E1" }), "2026-01-10");
     expect(n).toMatchObject({
-      external_id: "tid:T1",
+      external_id: "ref:E1",
       booking_date: "2026-01-05",
       amount_cents: -4520,
       description_raw: "COMPRA CONTINENTE",
@@ -65,5 +69,89 @@ describe("normalizeTransaction", () => {
     expect(credit.status).toBe("provisorio");
     expect(credit.amount_cents).toBe(65000);
     expect(credit.counterparty).toBe("INQUILINO");
+  });
+});
+
+describe("statuses", () => {
+  it("treats holds and scheduled movements as provisional, OTHR as booked", () => {
+    expect(normalizeTransaction(mk({ status: "HOLD" }), "2026-01-10").status).toBe("provisorio");
+    expect(normalizeTransaction(mk({ status: "SCHD" }), "2026-01-10").status).toBe("provisorio");
+    expect(normalizeTransaction(mk({ status: "OTHR" }), "2026-01-10").status).toBe("confirmado");
+  });
+  it("falls back to transaction_date before today", () => {
+    const n = normalizeTransaction(
+      mk({ booking_date: null, value_date: null, transaction_date: "2026-01-03" }),
+      "2026-01-10",
+    );
+    expect(n.booking_date).toBe("2026-01-03");
+  });
+  it("ignores a minus sign on the amount (the indicator gives the direction)", () => {
+    expect(normalizeTransaction(mk({ transaction_amount: { amount: "-45.20" } }), "2026-01-10").amount_cents)
+      .toBe(-4520);
+  });
+});
+
+describe("prepareBatch", () => {
+  it("keeps two identical same-day movements as two rows", () => {
+    const { rows } = prepareBatch([mk({}), mk({})], "2026-01-10");
+    expect(rows).toHaveLength(2);
+    expect(rows[1].external_id).toBe(`${rows[0].external_id}#1`);
+  });
+  it("collapses a repeated entry_reference, booked wins over pending", () => {
+    const { rows } = prepareBatch(
+      [mk({ entry_reference: "E1", status: "BOOK" }), mk({ entry_reference: "E1", status: "PDNG" })],
+      "2026-01-10",
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0].status).toBe("confirmado");
+  });
+  it("ids do not depend on cancelled entries being listed", () => {
+    const cncl = mk({ status: "CNCL" });
+    const a = prepareBatch([cncl, mk({})], "2026-01-10");
+    const b = prepareBatch([mk({})], "2026-01-10");
+    expect(a.rows.map((x) => x.external_id)).toEqual(b.rows.map((x) => x.external_id));
+    // ...and the cancelled twin never targets the live booked row.
+    expect(a.cancelledIds).not.toContain(a.rows[0].external_id);
+  });
+  it("numbers booked before pending, whatever the bank's order", () => {
+    const pend = mk({ status: "PDNG" });
+    const book = mk({ status: "BOOK" });
+    for (const batch of [[pend, book], [book, pend]]) {
+      const { rows } = prepareBatch(batch, "2026-01-10");
+      const base = prepareBatch([pend], "2026-01-10").rows[0].external_id;
+      expect(rows.find((x) => x.status === "confirmado")?.external_id).toBe(base);
+      expect(rows.find((x) => x.status === "provisorio")?.external_id).toBe(`${base}#1`);
+    }
+  });
+  it("keeps a second identical pending movement when only the first is booked", () => {
+    const { rows } = prepareBatch([mk({ status: "BOOK" }), mk({ status: "PDNG" })], "2026-01-10");
+    expect(rows).toHaveLength(2);
+    expect(rows[1].external_id).toBe(`${rows[0].external_id}#1`);
+  });
+  it("numbers a voided twin after the live ones (so it targets the stored twin)", () => {
+    const { rows, cancelledIds } = prepareBatch([mk({ status: "CNCL" }), mk({ status: "PDNG" })], "2026-01-10");
+    expect(rows).toHaveLength(1);
+    expect(cancelledIds).toEqual([`${rows[0].external_id}#1`]);
+  });
+  it("drops cancelled/rejected movements and reports their ids", () => {
+    const { rows, cancelledIds } = prepareBatch(
+      [mk({ entry_reference: "E1", status: "CNCL" }), mk({ entry_reference: "E2", status: "RJCT" }), mk({})],
+      "2026-01-10",
+    );
+    expect(rows).toHaveLength(1);
+    expect(cancelledIds).toEqual(["ref:E1", "ref:E2"]);
+  });
+});
+
+describe("pickBalance", () => {
+  const b = (type: string, amount: string) => ({ balance_type: type, balance_amount: { amount } });
+  it("prefers booked over available (which may include an overdraft)", () => {
+    expect(pickBalance([b("ITAV", "1500.00"), b("CLBD", "1000.00")])?.balance_amount.amount).toBe("1000.00");
+    expect(pickBalance([b("CLBD", "1000.00"), b("ITBD", "990.00")])?.balance_type).toBe("ITBD");
+  });
+  it("falls back to the first balance, or null", () => {
+    expect(pickBalance([b("VALU", "5.00")])?.balance_type).toBe("VALU");
+    expect(pickBalance([])).toBeNull();
+    expect(pickBalance(undefined)).toBeNull();
   });
 });

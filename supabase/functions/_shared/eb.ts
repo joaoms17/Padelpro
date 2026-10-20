@@ -37,6 +37,35 @@ async function makeJwt(): Promise<string> {
   return token;
 }
 
+/** An Enable Banking API error, with a message the app can show as-is. */
+export class EBError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | null,
+    readonly path: string,
+    detail: string,
+  ) {
+    super(friendlyMessage(status, code) ?? `Enable Banking ${path} ${status}: ${detail}`);
+    this.name = "EBError";
+  }
+}
+
+function friendlyMessage(status: number, code: string | null): string | null {
+  if (code === "ASPSP_RATE_LIMIT_EXCEEDED" || status === 429) {
+    return "O banco limita as sincronizações por dia (cerca de 4) — tenta daqui a umas horas.";
+  }
+  if (code === "NO_ACCOUNTS_ADDED") {
+    return "Nenhuma conta está ligada à app na Enable Banking — no Control Panel faz \"Link accounts\" com o Santander.";
+  }
+  if (code === "REDIRECT_URI_NOT_ALLOWED") {
+    return "O endereço da app não está nos redirect URLs da app Enable Banking.";
+  }
+  if (code === "WRONG_TRANSACTIONS_PERIOD") {
+    return "O banco não fornece movimentos para esse período.";
+  }
+  return null;
+}
+
 export async function ebFetch<T = unknown>(
   path: string,
   init: { method?: string; body?: unknown } = {},
@@ -52,9 +81,28 @@ export async function ebFetch<T = unknown>(
   });
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(`Enable Banking ${path} ${res.status}: ${text.slice(0, 300)}`);
+    let code: string | null = null;
+    try {
+      const err = JSON.parse(text) as { error?: unknown };
+      if (typeof err.error === "string") code = err.error;
+    } catch (_e) {
+      /* non-JSON error body */
+    }
+    throw new EBError(res.status, code, path, text.slice(0, 300));
   }
   return (text ? JSON.parse(text) : {}) as T;
+}
+
+export interface EBApplication {
+  name?: string;
+  environment?: string; // PRODUCTION | SANDBOX
+  redirect_urls?: string[];
+  active?: boolean;
+}
+
+/** The registered application: activation state and allowed redirect URLs. */
+export function getApplication(): Promise<EBApplication> {
+  return ebFetch<EBApplication>("/application");
 }
 
 /** Find the Santander ASPSP in Portugal (never hardcode the exact name). */

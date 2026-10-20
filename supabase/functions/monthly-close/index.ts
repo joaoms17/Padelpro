@@ -5,7 +5,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 import { serviceClient, householdFromRequest } from "../_shared/db.ts";
 import { isCronRequest } from "../_shared/auth.ts";
 import { pushToHousehold } from "../_shared/push.ts";
-import { summarizeMonth } from "../_shared/anthropic.ts";
+import { summarizeMonth } from "../_shared/ai.ts";
 
 type Grp = "entrada" | "fixa" | "variavel" | "atividade" | "mesada" | "interna";
 

@@ -7,7 +7,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 import { householdFromRequest, serviceClient } from "../_shared/db.ts";
 import { isCronRequest } from "../_shared/auth.ts";
 import { syncHousehold } from "../_shared/sync.ts";
-import { findSantanderPT } from "../_shared/eb.ts";
+import { findSantanderPT, getApplication } from "../_shared/eb.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -17,9 +17,15 @@ Deno.serve(async (req) => {
     if (isCronRequest(req)) {
       const body = await req.json().catch(() => ({}));
       if (body.check) {
-        // Deploy smoke test: signs a JWT and lists the PT banks.
-        const aspsp = await findSantanderPT();
-        return json({ mode: "check", aspsp: aspsp.name });
+        // Deploy smoke test: signs a JWT, reads the app, lists the PT banks.
+        const [app, aspsp] = await Promise.all([getApplication(), findSantanderPT()]);
+        return json({
+          mode: "check",
+          aspsp: aspsp.name,
+          active: app.active ?? null,
+          environment: app.environment ?? null,
+          redirect_urls: app.redirect_urls ?? [],
+        });
       }
       // cron path: sync all households with an active connection
       const { data: conns } = await svc

@@ -1,28 +1,19 @@
-// Minimal Anthropic Messages API client for the categorize Edge Function.
-// Model: claude-haiku-5-5 (spec 6.2 / 11). The key lives only in the Edge
-// Function secrets (ANTHROPIC_API_KEY).
+// AI tasks of the app (spec 6.2 / 11): batch categorisation and the
+// month-close summary, on whichever provider is configured (see llm.ts —
+// Gemini or Claude, fast tier). Only redacted descriptions, amounts and dates
+// are sent: no IBANs, no full names.
+import { generateText, llmProvider } from "./llm.ts";
 
-const API = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-haiku-5-5";
-
-/** Friendly month-close summary (spec 11). Returns "" if no key configured. */
+/** Friendly month-close summary (spec 11). Returns "" if no key or on failure. */
 export async function summarizeMonth(metrics: Record<string, number | null>): Promise<string> {
-  const key = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!key) return "";
+  if (!llmProvider()) return "";
   const prompt = `És o assistente de finanças de um casal (João e Joana) em Portugal.
 Escreve um resumo curto e simpático (2-3 frases, PT-PT) do fecho do mês, com o
 que correu bem, o que fugiu ao esperado e uma sugestão prática. Valores em cêntimos:
 ${JSON.stringify(metrics)}
 Responde só com o texto, sem markdown.`;
   try {
-    const res = await fetch(API, {
-      method: "POST",
-      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: MODEL, max_tokens: 400, messages: [{ role: "user", content: prompt }] }),
-    });
-    if (!res.ok) return "";
-    const data = await res.json();
-    return (data?.content?.[0]?.text ?? "").trim();
+    return await generateText({ tier: "fast", prompt, maxTokens: 2048 });
   } catch {
     return "";
   }
@@ -76,8 +67,7 @@ export async function categorizeWithAI(
   items: AICatItem[],
   categories: CategoryOption[],
 ): Promise<AICatResult[]> {
-  const key = Deno.env.get("ANTHROPIC_API_KEY");
-  if (!key || items.length === 0 || categories.length === 0) return [];
+  if (!llmProvider() || items.length === 0 || categories.length === 0) return [];
 
   const catList = categories
     .map((c) => `- ${c.id} :: ${c.name} (${c.grp})`)
@@ -101,29 +91,28 @@ ${items
   .map((it) => `- id=${it.id} | "${it.description}" | ${it.amount_eur}€ | ${it.date}`)
   .join("\n")}`;
 
-  const res = await fetch(API, {
-    method: "POST",
-    headers: {
-      "x-api-key": key,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
+  // Gemini enforces this schema; Claude follows the prompt above.
+  const jsonSchema = {
+    type: "array",
+    items: {
+      type: "object",
+      properties: {
+        id: { type: "string" },
+        category_id: { anyOf: [{ type: "string", enum: categories.map((c) => c.id) }, { type: "null" }] },
+        confidence: { type: "number", minimum: 0, maximum: 1 },
+      },
+      required: ["id", "category_id", "confidence"],
+      propertyOrdering: ["id", "category_id", "confidence"],
     },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 4096,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
-  if (!res.ok) {
-    throw new Error(`Anthropic ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  }
-  const data = await res.json();
-  const text: string = data?.content?.[0]?.text ?? "[]";
-  const parsed = extractJson(text) as AICatResult[];
+  };
+
+  // A truncated answer still has complete objects: extractJson keeps them.
+  const text = await generateText({ tier: "fast", prompt, maxTokens: 8192, jsonSchema, allowPartial: true });
+  const parsed = extractJson(text || "[]");
   const valid = new Set(categories.map((c) => c.id));
   return parsed.map((r) => ({
     id: String(r.id),
     category_id: r.category_id && valid.has(r.category_id) ? r.category_id : null,
-    confidence: typeof r.confidence === "number" ? r.confidence : 0,
+    confidence: typeof r.confidence === "number" ? Math.max(0, Math.min(1, r.confidence)) : 0,
   }));
 }

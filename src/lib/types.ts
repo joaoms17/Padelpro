@@ -50,6 +50,8 @@ export interface Account {
   role: AccountRole;
   iban_last4: string | null;
   eb_account_uid: string | null;
+  eb_identification_hash: string | null;
+  eb_last_sync_at: string | null;
   balance_cents: number;
   balance_at: string | null;
 }

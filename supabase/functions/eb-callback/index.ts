@@ -3,11 +3,13 @@
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { householdFromRequest, serviceClient } from "../_shared/db.ts";
 import { ebFetch } from "../_shared/eb.ts";
-import { syncHousehold } from "../_shared/sync.ts";
+import { removeRows, syncHousehold } from "../_shared/sync.ts";
+import { planAccountLinks, type SessionAccount, type StoredAccount } from "../_shared/accounts.ts";
 
+// POST /sessions returns account OBJECTS (GET /sessions/{id} returns uid strings).
 interface SessionResp {
   session_id: string;
-  accounts?: Array<string | { uid: string; account_id?: { iban?: string } }>;
+  accounts?: SessionAccount[];
   aspsp?: { name?: string };
   access?: { valid_until?: string };
 }
@@ -39,6 +41,28 @@ Deno.serve(async (req) => {
       body: { code },
     });
 
+    // The code is single-use: whatever happens next, this state is spent.
+    await svc.from("eb_auth_requests").delete().eq("state", state);
+
+    // In restricted production mode only accounts linked in the Enable Banking
+    // Control Panel are returned — none means none were linked.
+    const sessionAccounts = (session.accounts ?? []).filter((a) => a && a.uid);
+    if (sessionAccounts.length === 0) {
+      return json({
+        error:
+          "O banco não devolveu nenhuma conta. Na Enable Banking (Control Panel → a tua app) faz \"Link accounts\" com o Santander e volta a ligar.",
+      }, 400);
+    }
+
+    // Plan the account mapping before switching the connection: a failed read
+    // must never turn a renewal into duplicate accounts.
+    const { data: existing, error: exErr } = await svc
+      .from("accounts")
+      .select("id, role, eb_account_uid, eb_identification_hash, iban_last4")
+      .eq("household_id", householdId);
+    if (exErr) throw exErr;
+    const plan = planAccountLinks((existing ?? []) as StoredAccount[], sessionAccounts);
+
     await svc.from("bank_connections").upsert(
       {
         household_id: householdId,
@@ -51,51 +75,32 @@ Deno.serve(async (req) => {
       { onConflict: "household_id" },
     );
 
-    // Attach EB accounts: first one links to the existing Conta Casa, the rest
-    // are added as secondary ('outra') accounts.
-    const { data: existing } = await svc
-      .from("accounts")
-      .select("id, role, eb_account_uid")
-      .eq("household_id", householdId);
-
-    const byUid = new Map(
-      (existing ?? []).filter((a) => a.eb_account_uid).map((a) => [a.eb_account_uid as string, a]),
-    );
-    const casa = (existing ?? []).find((a) => a.role === "casa" && !a.eb_account_uid);
-
-    const accounts = session.accounts ?? [];
-    let linked = 0;
-    for (let i = 0; i < accounts.length; i++) {
-      const a = accounts[i];
-      const uid = typeof a === "string" ? a : a.uid;
-      const iban = typeof a === "string" ? undefined : a.account_id?.iban;
-      const last4 = iban ? iban.slice(-4) : null;
-      if (!uid) continue;
-
-      // Already linked (re-link / renew): refresh, never duplicate.
-      const already = byUid.get(uid);
-      if (already) {
-        await svc.from("accounts").update({ iban_last4: last4 }).eq("id", already.id);
-      } else if (i === 0 && casa) {
-        await svc
-          .from("accounts")
-          .update({ eb_account_uid: uid, iban_last4: last4 })
-          .eq("id", casa.id);
-      } else {
-        await svc.from("accounts").insert({
-          household_id: householdId,
-          name: `Conta ${last4 ?? i + 1}`,
-          role: "outra",
-          eb_account_uid: uid,
-          iban_last4: last4,
-        });
-      }
-      linked++;
+    for (const u of plan.update) {
+      const { id, ...fields } = u;
+      const { error } = await svc.from("accounts").update(fields).eq("id", id);
+      if (error) throw error;
     }
+    for (const ins of plan.insert) {
+      const { error } = await svc.from("accounts").insert({ household_id: householdId, role: "outra", ...ins });
+      if (error) throw error;
+    }
+    if (plan.unlink.length) {
+      const { error } = await svc.from("accounts").update({ eb_account_uid: null }).in("id", plan.unlink);
+      if (error) throw error;
+      // Their pending rows can no longer resolve (no more syncs): drop them so
+      // they don't count forever.
+      const { data: stuck } = await svc
+        .from("transactions")
+        .select("id")
+        .in("account_id", plan.unlink)
+        .eq("source", "banco")
+        .eq("status", "provisorio");
+      await removeRows(svc, householdId, (stuck ?? []).map((t) => t.id as string));
+    }
+    const linked = plan.update.length + plan.insert.length;
 
-    await svc.from("eb_auth_requests").delete().eq("state", state);
-
-    // Initial pull so data shows up immediately.
+    // Initial pull so data shows up immediately (new accounts get their full
+    // history: banks only offer it in the consent's first hour).
     const sync = await syncHousehold(svc, householdId);
 
     return json({ ok: true, accounts: linked, sync });

@@ -1,27 +1,24 @@
-// ai-ask — "Pergunta à app" (spec 11). Claude Sonnet with tool use over a
-// fixed set of read-only functions (never free SQL). The tools run server-side
-// with the service role, scoped to the caller's household.
+// ai-ask — "Pergunta à app" (spec 11). An LLM (Gemini or Claude, see llm.ts)
+// with tool use over a fixed set of read-only functions (never free SQL). The
+// tools run server-side with the service role, scoped to the caller's household.
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { householdFromRequest, serviceClient } from "../_shared/db.ts";
 import { redactForAI, displayMerchant } from "../_shared/categorize.ts";
+import { chatWithTools, LLMError, llmProvider, type ToolDef } from "../_shared/llm.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
-
-const API = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-sonnet-5-5";
 
 type Grp = "entrada" | "fixa" | "variavel" | "atividade" | "mesada" | "interna";
 
-const TOOLS = [
+const TOOLS: ToolDef[] = [
   {
     name: "resumo_mes",
     description: "Totais de um mês: entradas, despesas da casa, mesadas e sobra.",
-    input_schema: { type: "object", properties: { mes: { type: "string", description: "YYYY-MM" } }, required: ["mes"] },
+    params: { properties: { mes: { type: "string", description: "YYYY-MM" } }, required: ["mes"] },
   },
   {
     name: "gastos_por_categoria",
     description: "Soma das despesas por categoria num período.",
-    input_schema: {
-      type: "object",
+    params: {
       properties: {
         inicio: { type: "string", description: "data ISO YYYY-MM-DD" },
         fim: { type: "string", description: "data ISO YYYY-MM-DD (exclusivo)" },
@@ -33,39 +30,33 @@ const TOOLS = [
   {
     name: "movimentos",
     description: "Lista de movimentos filtrados.",
-    input_schema: {
-      type: "object",
+    params: {
       properties: {
-        inicio: { type: "string" },
-        fim: { type: "string" },
+        inicio: { type: "string", description: "data ISO YYYY-MM-DD" },
+        fim: { type: "string", description: "data ISO YYYY-MM-DD (exclusivo)" },
         texto: { type: "string", description: "pesquisa no comerciante/descrição" },
-        limite: { type: "number" },
+        limite: { type: "number", description: "máximo de movimentos (até 50)" },
       },
-      required: [],
     },
   },
   {
     name: "eventos",
     description: "Eventos da Joana, opcionalmente por período e estado.",
-    input_schema: {
-      type: "object",
+    params: {
       properties: {
-        inicio: { type: "string" },
-        fim: { type: "string" },
+        inicio: { type: "string", description: "data ISO YYYY-MM-DD" },
+        fim: { type: "string", description: "data ISO YYYY-MM-DD (exclusivo)" },
         estado: { type: "string", description: "pedido|confirmado|realizado|pago|cancelado" },
       },
-      required: [],
     },
   },
   {
     name: "objetivos",
     description: "Objetivos de poupança: alvo, reservado e data limite.",
-    input_schema: { type: "object", properties: {}, required: [] },
   },
   {
     name: "almofada",
     description: "Saldo atual da Conta Casa e o último fecho mensal registado.",
-    input_schema: { type: "object", properties: {}, required: [] },
   },
 ];
 
@@ -164,8 +155,7 @@ async function runTool(
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    const key = Deno.env.get("ANTHROPIC_API_KEY");
-    if (!key) return json({ error: "ANTHROPIC_API_KEY não configurada" }, 500);
+    if (!llmProvider()) return json({ error: "Nenhuma chave de IA configurada (GEMINI_API_KEY)." }, 500);
 
     const ctx = await householdFromRequest(req);
     if (!ctx) return json({ error: "não autenticado" }, 401);
@@ -181,36 +171,17 @@ valores em euros (os dados vêm em cêntimos — divide por 100). Usa as ferrame
 para ir buscar dados reais; resolve datas relativas ("este ano", "maio") tu próprio.
 Nunca inventes números.`;
 
-    const messages: unknown[] = [{ role: "user", content: String(question) }];
-
-    for (let step = 0; step < 6; step++) {
-      const res = await fetch(API, {
-        method: "POST",
-        headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-        body: JSON.stringify({ model: MODEL, max_tokens: 1024, system, tools: TOOLS, messages }),
-      });
-      if (!res.ok) return json({ error: `Anthropic ${res.status}: ${(await res.text()).slice(0, 200)}` }, 500);
-      const data = await res.json();
-      const content = data.content ?? [];
-
-      if (data.stop_reason === "tool_use") {
-        messages.push({ role: "assistant", content });
-        const results = [];
-        for (const block of content) {
-          if (block.type === "tool_use") {
-            const out = await runTool(svc, ctx.householdId, block.name, block.input ?? {});
-            results.push({ type: "tool_result", tool_use_id: block.id, content: JSON.stringify(out) });
-          }
-        }
-        messages.push({ role: "user", content: results });
-        continue;
-      }
-
-      const text = content.filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("\n").trim();
-      return json({ answer: text || "Não consegui responder a isso." });
-    }
-    return json({ answer: "A pergunta ficou demasiado complexa. Tenta reformular." });
+    const answer = await chatWithTools({
+      system,
+      question: String(question),
+      tools: TOOLS,
+      run: (name, args) => runTool(svc, ctx.householdId, name, args),
+      maxSteps: 6,
+    });
+    return json({ answer: answer || "Não consegui responder a isso. Tenta reformular." });
   } catch (e) {
-    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+    // LLM failures (quota, overload) carry a message meant for the user.
+    const status = e instanceof LLMError ? 503 : 500;
+    return json({ error: e instanceof Error ? e.message : String(e) }, status);
   }
 });

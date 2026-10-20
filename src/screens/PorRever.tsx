@@ -78,7 +78,11 @@ export function PorRever() {
     setMsg(null);
     try {
       const r = await runCategorize(householdId);
-      setMsg(`${r.assigned} categorizados, ${r.review} por rever.`);
+      setMsg(
+        `${r.assigned} categorizados, ${r.review} por rever.` +
+          (r.ai_pending ? ` Faltam ${r.ai_pending} — carrega outra vez para continuar.` : "") +
+          (r.ai_error ? ` (IA indisponível: ${r.ai_error})` : ""),
+      );
       await load();
     } catch (e) {
       setMsg(e instanceof Error ? e.message : String(e));
