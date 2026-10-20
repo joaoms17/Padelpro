@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { invokeFn } from "@/lib/invoke";
 import { normalizeMerchant } from "@shared/categorize";
 import type { Rule } from "@/lib/types";
 
@@ -85,12 +86,5 @@ export async function learnMerchantRule(input: {
 export async function runCategorize(
   householdId: string,
 ): Promise<{ processed: number; assigned: number; review: number }> {
-  const { data, error } = await supabase.functions.invoke("categorize", {
-    body: { household_id: householdId },
-  });
-  if (error) throw error instanceof Error ? error : new Error(String(error));
-  if (data && typeof data === "object" && "error" in data && data.error) {
-    throw new Error(String((data as { error: string }).error));
-  }
-  return data as { processed: number; assigned: number; review: number };
+  return invokeFn("categorize", { household_id: householdId });
 }

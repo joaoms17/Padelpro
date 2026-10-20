@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { invokeFn } from "@/lib/invoke";
 
 export const VAPID_PUBLIC_KEY = (import.meta.env.VITE_VAPID_PUBLIC_KEY ?? "").trim();
 
@@ -88,11 +89,5 @@ export async function savePrefs(memberId: string, prefs: NotifyPrefs): Promise<v
 }
 
 export async function sendTestNotification(householdId: string): Promise<void> {
-  const { data, error } = await supabase.functions.invoke("notify", {
-    body: { household_id: householdId, test: true },
-  });
-  if (error) throw error instanceof Error ? error : new Error(String(error));
-  if (data && typeof data === "object" && "error" in data && data.error) {
-    throw new Error(String((data as { error: string }).error));
-  }
+  await invokeFn("notify", { household_id: householdId, test: true });
 }
