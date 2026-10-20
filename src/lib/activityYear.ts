@@ -26,12 +26,6 @@ export interface YearReport {
   receitaPorMes: number[]; // 12 entries, cents
 }
 
-/** Amount to set aside for activity taxes (secção 18). rate is 0..1. */
-export function taxReserve(rentabilidadeCents: number, rate: number): number {
-  if (rate <= 0 || rentabilidadeCents <= 0) return 0;
-  return Math.round(rentabilidadeCents * rate);
-}
-
 function yearOf(iso: string | null): number | null {
   if (!iso) return null;
   const y = Number(iso.slice(0, 4));

@@ -242,6 +242,12 @@ export function ImportStatement({
           <div className="text-4xl">✅</div>
           <div className="space-y-1">
             <p className="font-medium">{outcome.inserted} movimentos novos</p>
+            {outcome.coveredByBank > 0 && outcome.bankSince && (
+              <p className="text-sm text-tinta/60 dark:text-creme/60">
+                {outcome.coveredByBank} já vêm do banco (desde{" "}
+                {outcome.bankSince.split("-").reverse().join("/")}) e foram ignorados.
+              </p>
+            )}
             {outcome.duplicates > 0 && (
               <p className="text-sm text-tinta/60 dark:text-creme/60">
                 {outcome.duplicates} já existiam e foram ignorados.

@@ -69,8 +69,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
 
       if (data) {
+        let m = data as Member;
+        // A member created before the email → name mapping was configured
+        // (e.g. "Joao.ms17") gets the fixed name (João / Joana) once it is.
+        const fixed = nameForEmail(user!.email);
+        if (fixed && m.display_name !== fixed) {
+          const { error: upErr } = await supabase
+            .from("members")
+            .update({ display_name: fixed })
+            .eq("id", m.id);
+          if (!upErr) m = { ...m, display_name: fixed };
+        }
         if (active) {
-          setMember(data as Member);
+          setMember(m);
           setMemberError(null);
         }
         return;

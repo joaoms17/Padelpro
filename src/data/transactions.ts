@@ -139,17 +139,37 @@ export interface ImportOutcome {
   total: number;
   inserted: number;
   duplicates: number;
+  /** Rows on/after the first bank-synced day: the bank already has them. */
+  coveredByBank: number;
+  bankSince: string | null;
 }
 
-/** Insert parsed statement rows, skipping any that already exist (dedup). */
+/**
+ * Insert parsed statement rows, skipping any that already exist (dedup).
+ * Statement and bank rows use different ids, so the period the bank sync
+ * already covers is skipped too — a statement is for the history before it.
+ */
 export async function importTransactions(
   householdId: string,
   accountId: string,
   items: ParsedTx[],
 ): Promise<ImportOutcome> {
-  if (items.length === 0) return { total: 0, inserted: 0, duplicates: 0 };
+  const { data: firstBank } = await supabase
+    .from("transactions")
+    .select("booking_date")
+    .eq("account_id", accountId)
+    .eq("source", "banco")
+    .order("booking_date", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  const bankSince = (firstBank?.booking_date as string | undefined) ?? null;
+  const before = bankSince ? items.filter((it) => it.booking_date < bankSince) : items;
+  const coveredByBank = items.length - before.length;
+  if (before.length === 0) {
+    return { total: items.length, inserted: 0, duplicates: 0, coveredByBank, bankSince };
+  }
 
-  const rows = items.map((it) => ({
+  const rows = before.map((it) => ({
     household_id: householdId,
     account_id: accountId,
     source: "extrato" as TransactionSource,
@@ -170,5 +190,11 @@ export async function importTransactions(
   if (error) throw error;
 
   const inserted = data?.length ?? 0;
-  return { total: items.length, inserted, duplicates: items.length - inserted };
+  return {
+    total: items.length,
+    inserted,
+    duplicates: before.length - inserted,
+    coveredByBank,
+    bankSince,
+  };
 }

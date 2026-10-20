@@ -10,7 +10,6 @@ export const NOTIFY_OPTIONS: { key: string; label: string }[] = [
   { key: "evento_match", label: "Entrada parecida com pagamento de evento" },
   { key: "orcamento", label: "Orçamento a 80% / 100%" },
   { key: "fixa", label: "Fixa mudou ou falhou" },
-  { key: "almofada", label: "Almofada abaixo do alvo" },
   { key: "eventos_fora", label: "Dinheiro de eventos por transferir há 7+ dias" },
   { key: "ligacao_banco", label: "Ligação ao banco a expirar" },
   { key: "resumo_semana", label: "Resumo semanal (domingo)" },

@@ -112,13 +112,6 @@ export interface Goal {
   reserved_cents: number;
 }
 
-export interface Settings {
-  household_id: string;
-  cushion_target_months: number;
-  price_table: Record<string, number>;
-  tax_rate: number; // 0..1 — reserva para impostos da atividade
-}
-
 export interface Rule {
   id: string;
   household_id: string;
