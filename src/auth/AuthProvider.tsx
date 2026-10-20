@@ -14,6 +14,8 @@ interface AuthState {
   loading: boolean;
   session: Session | null;
   member: Member | null;
+  /** Set when a signed-in user cannot become a member (e.g. household full). */
+  memberError: string | null;
   configured: boolean;
   /** Sign in with email + password (session persists — no repeated logins). */
   signIn: (email: string, password: string) => Promise<void>;
@@ -28,6 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [member, setMember] = useState<Member | null>(null);
+  const [memberError, setMemberError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -65,21 +68,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
 
       if (data) {
-        if (active) setMember(data as Member);
+        if (active) {
+          setMember(data as Member);
+          setMemberError(null);
+        }
         return;
       }
 
-      // No member yet → create household/membership (João) or join it (Joana).
-      const fallbackName = (user!.email ?? "Membro").split("@")[0];
-      const display = fallbackName.charAt(0).toUpperCase() + fallbackName.slice(1);
-      await supabase.rpc("ensure_membership", { p_display: display });
+      // No member yet → create the household (first person) or join it (second).
+      // The name chosen at sign-up ("João"/"Joana") is stashed in localStorage.
+      let chosen = "";
+      try {
+        chosen = localStorage.getItem("cad.name") ?? "";
+      } catch {
+        /* ignore */
+      }
+      const fallback = (user!.email ?? "Membro").split("@")[0];
+      const display = chosen.trim() || fallback.charAt(0).toUpperCase() + fallback.slice(1);
+
+      const { error: rpcErr } = await supabase.rpc("ensure_membership", { p_display: display });
+      try {
+        localStorage.removeItem("cad.name");
+      } catch {
+        /* ignore */
+      }
+      if (rpcErr) {
+        // e.g. "o agregado já tem 2 membros" — this app is only for two people.
+        if (active) setMemberError(rpcErr.message);
+        return;
+      }
 
       const { data: created } = await supabase
         .from("members")
         .select("*")
         .eq("user_id", user!.id)
         .maybeSingle();
-      if (active) setMember((created as Member) ?? null);
+      if (active) {
+        setMember((created as Member) ?? null);
+        setMemberError(null);
+      }
     }
 
     void load();
@@ -93,6 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       loading,
       session,
       member,
+      memberError,
       configured: isSupabaseConfigured,
       async signIn(email, password) {
         const { error } = await supabase.auth.signInWithPassword({
@@ -121,7 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await supabase.auth.signOut();
       },
     }),
-    [loading, session, member],
+    [loading, session, member, memberError],
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

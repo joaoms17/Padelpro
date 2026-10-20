@@ -26,7 +26,7 @@ const Metricas = lazy(() =>
 );
 
 function Gate() {
-  const { loading, session } = useAuth();
+  const { loading, session, member, memberError, signOut } = useAuth();
 
   if (loading) {
     return (
@@ -37,6 +37,31 @@ function Gate() {
   }
 
   if (!session) return <Login />;
+
+  // This app is for exactly two people. A third sign-in can't become a member.
+  if (memberError) {
+    return (
+      <div className="min-h-full flex flex-col items-center justify-center gap-4 px-8 text-center">
+        <div className="text-4xl">🔒</div>
+        <div className="space-y-1">
+          <h1 className="text-xl font-display">Esta app é só para dois</h1>
+          <p className="text-sm text-tinta/60 dark:text-creme/60">
+            O agregado já está completo (João e Joana).
+          </p>
+        </div>
+        <button className="btn-ghost" onClick={() => signOut()}>Terminar sessão</button>
+      </div>
+    );
+  }
+
+  // Signed in but the member row is still being created.
+  if (!member) {
+    return (
+      <div className="min-h-full flex items-center justify-center">
+        <div className="h-8 w-8 rounded-full border-2 border-areia border-t-terracota animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <PinLock>
