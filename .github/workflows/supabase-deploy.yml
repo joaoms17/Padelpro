@@ -35,7 +35,7 @@ permissions:
 
 env:
   PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF || 'rhwmykdmlggcsvfbeomz' }}
-  FUNCTIONS: ai-ask alerts categorize eb-auth-start eb-callback eb-sync ingest-applepay monthly-close notify
+  FUNCTIONS: ai-ask alerts categorize duet-events eb-auth-start eb-callback eb-sync ingest-applepay monthly-close notify
 
 jobs:
   gate:
@@ -106,6 +106,8 @@ jobs:
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          DUET_SECRET_KEY: ${{ secrets.DUET_SECRET_KEY }}
+          DUET_URL: ${{ vars.DUET_URL }}
         run: |
           set -euo pipefail
           source .github/scripts/supabase-api.sh
@@ -118,17 +120,17 @@ jobs:
           payload=$(jq -n '
             ["CRON_SECRET","GEMINI_API_KEY","GEMINI_MODEL_FAST","GEMINI_MODEL_SMART",
              "ANTHROPIC_API_KEY","EB_APP_ID","EB_PRIVATE_KEY",
-             "VAPID_PUBLIC_KEY","VAPID_PRIVATE_KEY","VAPID_SUBJECT"]
+             "VAPID_PUBLIC_KEY","VAPID_PRIVATE_KEY","VAPID_SUBJECT","DUET_SECRET_KEY","DUET_URL"]
             | map({name: ., value: ((env[.] // "") | gsub("^\\s+|\\s+$"; ""))})
             | map(select(.value != ""))')
           api POST "/secrets" "$payload" > /dev/null
           echo "Secrets definidos: $(jq -r 'map(.name) | join(", ")' <<<"$payload")"
 
-          # AI provider/model choice follows the repo: a name removed there is
-          # removed here too (otherwise the old key/model would stay active).
+          # AI provider/model choice and the Duet key follow the repo: a name
+          # removed there is removed here too (otherwise it would stay active).
           existing=$(api GET "/secrets" | jq -r '.[].name')
           stale=()
-          for n in GEMINI_API_KEY GEMINI_MODEL_FAST GEMINI_MODEL_SMART ANTHROPIC_API_KEY; do
+          for n in GEMINI_API_KEY GEMINI_MODEL_FAST GEMINI_MODEL_SMART ANTHROPIC_API_KEY DUET_SECRET_KEY DUET_URL; do
             if [ -z "${!n:-}" ] && grep -qx "$n" <<<"$existing"; then stale+=("$n"); fi
           done
           if [ ${#stale[@]} -gt 0 ]; then
@@ -141,6 +143,8 @@ jobs:
           for s in EB_APP_ID EB_PRIVATE_KEY; do
             [ -n "${!s:-}" ] || echo "::warning::$s não está nos secrets do repo (a ligação ao banco fica desligada)."
           done
+          [ -n "${DUET_SECRET_KEY:-}" ] ||
+            echo "::warning::DUET_SECRET_KEY não está nos secrets do repo (os eventos da app Duet não entram na previsão)."
 
       - name: Deploy Edge Functions
         run: |
@@ -181,7 +185,7 @@ jobs:
           summary "### Supabase deploy — $PROJECT_REF"
 
           # 1. Functions are up and reject anonymous calls (in code, not the gateway).
-          for fn in categorize ai-ask eb-auth-start; do
+          for fn in categorize ai-ask eb-auth-start duet-events; do
             code=$(curl -sS -o /tmp/out -w '%{http_code}' -X POST "$base/$fn" -H 'Content-Type: application/json' -d '{}')
             if [ "$code" = "401" ] && grep -q 'autenticado' /tmp/out; then summary "- ✅ $fn ativo (pede login)"
             else summary "- ❌ $fn: HTTP $code $(head -c 200 /tmp/out)"; fail=1; fi
@@ -244,5 +248,14 @@ jobs:
               summary "  - redirect URLs registados: $(jq -r '.redirect_urls | join(", ") | if . == "" then "nenhum" else . end' /tmp/out)"
             else summary "- ❌ Enable Banking: HTTP $code $(jq -r '.error // .' /tmp/out | head -c 300)"; fail=1; fi
           else summary "- ⏭️ Fase C: EB_APP_ID / EB_PRIVATE_KEY em falta"; fi
+
+          # 5. Eventos da Joana (app Duet): the key reads her events (public log: no data shown).
+          code=$(curl -sS -o /tmp/out -w '%{http_code}' -X POST "$base/duet-events" \
+            -H 'Content-Type: application/json' -H "x-cron-secret: $CRON_SECRET" -d '{"check":true}')
+          if [ "$code" = "200" ] && [ "$(jq -r '.configured' /tmp/out)" = "false" ]; then
+            summary "- ⏭️ Duet: DUET_SECRET_KEY em falta (eventos da Joana fora da previsão)"
+          elif [ "$code" = "200" ]; then
+            summary "- ✅ Duet: chave OK, eventos da Joana lidos"
+          else summary "- ❌ Duet: HTTP $code $(jq -r '.error // .' /tmp/out | head -c 300)"; fail=1; fi
 
           exit $fail

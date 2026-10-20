@@ -10,11 +10,14 @@ import {
   almofadaDisponivel,
   almofadaMeses,
   almofadaLivre,
-  previsaoFimMes,
   type MonthTotals,
 } from "@/lib/metrics";
-import { moneyOutsideHouse, aReceber, type Payment } from "@/lib/events";
+import { moneyOutsideHouse, aReceber, eventOutstanding, type Payment } from "@/lib/events";
 import { categoriesWithRole } from "@/lib/categories";
+import { buildForecast, incomeStatus, type Forecast, type ForecastLine, type IncomeStatus } from "@/lib/forecast";
+import { formatCents } from "@/lib/format";
+import { listIncomes, loadCredits } from "./incomes";
+import { loadDuetEvents, type DuetEvent } from "./duet";
 import type { Category, Member } from "@/lib/types";
 import type { CategoryGroup } from "@/lib/types";
 
@@ -30,6 +33,12 @@ export interface MetricsBundle {
   almofadaMeses: number;
   almofadaLivreCents: number;
   previsaoCents: number;
+  /** End-of-month forecast with what is behind it. */
+  forecast: Forecast;
+  incomes: IncomeStatus[];
+  /** Joana's events this month from the Duet app (null: not connected). */
+  duetMonthEvents: DuetEvent[] | null;
+  duetError: string | null;
   eventosForaCents: number;
   eventosAReceberCents: number;
   goalsReservedCents: number;
@@ -44,6 +53,11 @@ function shiftMonth(month: string, delta: number): string {
   const d = new Date(y, m - 1 + delta, 1);
   return monthKey(d);
 }
+/** Last day of a month, YYYY-MM-DD. */
+function lastDay(month: string): string {
+  const [y, m] = month.split("-").map(Number);
+  return `${month}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+}
 
 export async function assembleMetrics(
   householdId: string,
@@ -56,10 +70,15 @@ export async function assembleMetrics(
   const group = new Map<string, CategoryGroup>(categories.map((c) => [c.id, c.grp]));
   const nameById = new Map(categories.map((c) => [c.id, c.name.toLowerCase()]));
 
-  const [monthTx, recentTx, events] = await Promise.all([
+  const monthStart = `${month}-01`;
+  const [monthTx, recentTx, events, incomes, monthCredits, duet] = await Promise.all([
     loadMonthTx(householdId, month),
     loadRecentTx(householdId, 400),
     listEvents(householdId),
+    listIncomes(householdId),
+    loadCredits(householdId, monthStart).catch(() => []),
+    // Overdue from the last 9 months and the next 3 months (Duet's limit: ~13 months).
+    loadDuetEvents(`${shiftMonth(month, -9)}-01`, lastDay(shiftMonth(month, 3))),
   ]);
   const payments = await listPayments(events.map((e) => e.id));
   const goals = await listGoals(householdId);
@@ -102,26 +121,75 @@ export async function assembleMetrics(
 
   const goalsReserved = goals.reduce((a, g) => a + (g.reserved_cents || 0), 0);
 
-  // Entradas esperadas = base fixa ainda não recebida + eventos a receber este mês.
-  const baseFixaRecebida = sumGroupEntrada(monthTx, nameById, group, baseFixaCatIds);
   const paymentsByEvent = new Map<string, Payment[]>();
   for (const p of payments) {
     const list = paymentsByEvent.get(p.event_id) ?? [];
     list.push(p);
     paymentsByEvent.set(p.event_id, list);
   }
-  const eventosAReceber = aReceber(events, paymentsByEvent, today, 3);
-  const entradasEsperadas = Math.max(0, baseFixaCents - baseFixaRecebida) + eventosAReceber;
 
-  const previsao = previsaoFimMes({
+  // What still comes in this month.
+  const incoming: ForecastLine[] = [];
+  const statuses = incomeStatus(incomes, monthCredits, month, today);
+  if (incomes.length > 0) {
+    for (const st of statuses) {
+      const inc = st.income;
+      const bits = [`dia ${inc.day}`];
+      if (inc.parts > 1) bits.push(`${inc.parts} transferências`);
+      if (st.receivedCents > 0) bits.push(`já entrou ${formatCents(st.receivedCents)}`);
+      incoming.push({ key: `income:${inc.id}`, label: inc.label, cents: st.pendingCents, detail: bits.join(" · ") });
+    }
+  } else {
+    // Not set up yet: the base fixa (salário + renda) as last month.
+    const baseFixaRecebida = sumGroupEntrada(monthTx, nameById, group, baseFixaCatIds);
+    incoming.push({
+      key: "basefixa",
+      label: "Salário e renda por receber",
+      cents: Math.max(0, baseFixaCents - baseFixaRecebida),
+      detail: "como no último mês",
+    });
+  }
+
+  // Joana's events this month: from the Duet app when connected, else the ones registered here.
+  const monthEnd = lastDay(month);
+  const duetMonthEvents = duet.configured
+    ? duet.events.filter((e) => e.date >= monthStart && e.date <= monthEnd)
+    : null;
+  if (duetMonthEvents) {
+    const toReceive = duetMonthEvents.filter((e) => e.missing_cents > 0);
+    incoming.push({
+      key: "duet",
+      label: `Eventos da Joana (${toReceive.length})`,
+      cents: toReceive.reduce((a, e) => a + e.missing_cents, 0),
+      detail: "por receber, da app Duet",
+    });
+  } else {
+    const local = events.filter(
+      (e) => (e.status === "confirmado" || e.status === "realizado") && e.date >= monthStart && e.date <= monthEnd,
+    );
+    incoming.push({
+      key: "eventos",
+      label: `Eventos da Joana (${local.length})`,
+      cents: local.reduce((a, e) => a + eventOutstanding(e, paymentsByEvent.get(e.id) ?? []), 0),
+      detail: "por receber",
+    });
+  }
+
+  const forecast = buildForecast({
     balanceCents,
-    entradasEsperadasCents: entradasEsperadas,
+    incoming,
     fixasPorSairCents: fixasPorSair,
     mesadasPorSairCents: mesadasPorSair,
     variaveisGastoCents: variaveisGasto,
     month,
     today,
   });
+
+  // "A receber (eventos)": overdue + the next 3 months.
+  const horizon = lastDay(shiftMonth(month, 3));
+  const eventosAReceber = duet.configured
+    ? duet.events.filter((e) => e.date <= horizon).reduce((a, e) => a + e.missing_cents, 0)
+    : aReceber(events, paymentsByEvent, today, 3);
 
   // 12-month entradas vs despesas series.
   const monthlySeries = buildSeries(recentTx, group, month, 12);
@@ -137,7 +205,11 @@ export async function assembleMetrics(
     almofadaDisponivelCents: almofada,
     almofadaMeses: almofadaMeses(almofada, avg3m),
     almofadaLivreCents: almofadaLivre(almofada, goalsReserved),
-    previsaoCents: previsao,
+    previsaoCents: forecast.endCents,
+    forecast,
+    incomes: statuses,
+    duetMonthEvents,
+    duetError: duet.error ?? null,
     eventosForaCents: moneyOutsideHouse(payments),
     eventosAReceberCents: eventosAReceber,
     goalsReservedCents: goalsReserved,
