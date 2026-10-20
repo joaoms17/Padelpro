@@ -17,3 +17,13 @@ jobs:
       - run: npm ci
       - run: npm run test
       - run: npm run build
+
+  edge-functions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.1.x
+      # Type-check every Edge Function (resolves npm: imports, ignores package.json).
+      - run: deno check --node-modules-dir=none --no-config supabase/functions/*/index.ts

@@ -1,6 +1,33 @@
-# Supabase Edge Functions config.
-# ingest-applepay is authenticated by the member's personal token (not a
-# Supabase JWT), so the gateway must not reject the request — disable JWT
-# verification for this function only.
+# Supabase CLI config (used by `supabase functions deploy`).
+project_id = "contas-a-dois"
+
+# Every function authenticates in code: user calls via the Auth server
+# (householdFromRequest), crons via x-cron-secret (_shared/auth.ts), and
+# ingest-applepay via the member's personal token. JWT verification at the
+# gateway is therefore off — it would also reject the new non-JWT API keys.
+[functions.ai-ask]
+verify_jwt = false
+
+[functions.alerts]
+verify_jwt = false
+
+[functions.categorize]
+verify_jwt = false
+
+[functions.eb-auth-start]
+verify_jwt = false
+
+[functions.eb-callback]
+verify_jwt = false
+
+[functions.eb-sync]
+verify_jwt = false
+
 [functions.ingest-applepay]
+verify_jwt = false
+
+[functions.monthly-close]
+verify_jwt = false
+
+[functions.notify]
 verify_jwt = false

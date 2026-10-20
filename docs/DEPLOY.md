@@ -12,27 +12,27 @@ Guia passo-a-passo para pôr a app no ar. Faz-se uma vez.
    ativado, e **desligar "Confirm email"** (para entrar sem precisar de email).
    Não é preciso SMTP nem editar templates. Depois de os dois criarem conta,
    podes desligar novos signups.
-4. **Extensões** (Database → Extensions): ativar `pg_cron` e `pg_net`.
-5. **Edge Functions** (precisa do [Supabase CLI](https://supabase.com/docs/guides/cli)):
-   ```bash
-   supabase link --project-ref <REF>
-   supabase functions deploy eb-auth-start eb-callback eb-sync categorize \
-     ingest-applepay monthly-close notify ai-ask alerts
-   ```
-6. **Secrets** das funções:
-   ```bash
-   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
-   supabase secrets set EB_APP_ID=... EB_PRIVATE_KEY="$(cat chave.pem)"
-   # Web Push — gerar com: npx web-push generate-vapid-keys
-   supabase secrets set VAPID_PUBLIC_KEY=... VAPID_PRIVATE_KEY=... \
-     VAPID_SUBJECT=mailto:tu@email.pt
-   ```
-7. **Crons** (SQL Editor, substituir `<PROJECT_REF>` e `<SERVICE_ROLE_KEY>`):
-   corre `supabase/cron/eb-sync.sql`, `monthly-close.sql`, `weekly-summary.sql`
-   e `alerts.sql`.
+4. **Funções, secrets e crons — automático** (GitHub Actions, sem instalar nada):
+   - Cria um token em [supabase.com/dashboard/account/tokens](https://supabase.com/dashboard/account/tokens).
+   - No GitHub: repo → Settings → Secrets and variables → Actions → **New repository secret**:
 
-Guarda, de Settings → API: **Project URL**, **anon/publishable key** e
-**service_role key**.
+     | Secret | Para quê |
+     |---|---|
+     | `SUPABASE_ACCESS_TOKEN` | obrigatório — o token acima |
+     | `ANTHROPIC_API_KEY` | Fase B — categorização IA, "Pergunta à app", resumos |
+     | `EB_APP_ID` | Fase C — Application ID da Enable Banking |
+     | `EB_PRIVATE_KEY` | Fase C — conteúdo do `.pem` (colar tal como está) |
+     | `VAPID_PUBLIC_KEY` · `VAPID_PRIVATE_KEY` · `VAPID_SUBJECT` | Fase D — notificações push |
+
+   - Actions → **Supabase deploy** → **Run workflow**. O workflow
+     (`.github/workflows/supabase-deploy.yml`) faz deploy das 9 funções, copia os
+     secrets para o Supabase, ativa `pg_cron`/`pg_net`, guarda o segredo dos crons
+     no Vault, agenda os crons (`supabase/cron/schedule.sql`) e testa tudo
+     (resumo no fim do run). Volta a correr sozinho a cada alteração ao backend
+     na `main`.
+
+Guarda, de Settings → API: **Project URL** e **anon/publishable key** (para a
+Vercel). A service_role/secret key nunca sai do Supabase.
 
 ## 2. Vercel (frontend PWA)
 
@@ -57,12 +57,16 @@ Guarda, de Settings → API: **Project URL**, **anon/publishable key** e
    privada no browser (descarrega `.pem`); redirect URL
    `https://<dominio-vercel>/ligar-banco/callback`. Guardar o **Application ID**.
 3. **Link accounts**: ligar o Santander e autorizar (sem isto a API não devolve contas).
-4. Os secrets (`EB_APP_ID`, `EB_PRIVATE_KEY`) já foram definidos no passo 1.6.
+4. Pôr `EB_APP_ID` e `EB_PRIVATE_KEY` nos secrets do GitHub (passo 1.4) e
+   correr o workflow — o teste "Enable Banking: Santander encontrado" confirma.
+5. Na app: Definições → Ligação ao banco → **Ligar banco**. Faz este passo no
+   Safari (ou no computador), não na app instalada: o banco volta ao browser.
 
 ## 4. iPhones
 
 1. Abrir o link Vercel no Safari → Partilhar → **Adicionar ao ecrã principal**.
-2. Abrir a app a partir do ícone, entrar com o código por email.
+2. Abrir a app a partir do ícone, criar conta (email + password) — só os
+   dois emails definidos na Vercel são aceites.
 3. Definições → Notificações → **Ativar** (permissão de notificações).
 4. Definições → Atalho Apple Pay → gerar token e criar a automação "Transação"
    (passos no ecrã).
@@ -75,5 +79,6 @@ dos eventos, taxa de reserva para impostos. Orçamento: limites por categoria.
 ## Verificar
 
 - `npm run build` e `npm run test` passam (CI corre-os em cada PR).
-- Login aparece → código por email → entras.
+- Login aparece → email + password → entras (e a sessão fica guardada).
+- Actions → Supabase deploy: o resumo do run mostra ✅ em cada teste.
 - Importar um extrato (Movimentos → Importar) popula a app sem precisar do banco.

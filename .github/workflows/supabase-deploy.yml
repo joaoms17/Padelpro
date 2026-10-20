@@ -1,0 +1,180 @@
+name: Supabase deploy
+
+# Deploys the Edge Functions, syncs their secrets from the GitHub repo secrets,
+# and (re)schedules the crons — no local CLI needed. Runs on every push to main
+# that touches the backend, or by hand (Actions → Supabase deploy → Run workflow).
+#
+# Repo secrets (Settings → Secrets and variables → Actions):
+#   SUPABASE_ACCESS_TOKEN  required — supabase.com/dashboard/account/tokens
+#   ANTHROPIC_API_KEY      Fase B (categorização IA, Pergunta à app, resumos)
+#   EB_APP_ID              Fase C (Enable Banking application ID)
+#   EB_PRIVATE_KEY         Fase C (conteúdo do .pem)
+#   VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY / VAPID_SUBJECT   Fase D (push)
+# Optional repo variable SUPABASE_PROJECT_REF overrides the project below.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "supabase/functions/**"
+      - "supabase/cron/**"
+      - "supabase/config.toml"
+      - ".github/workflows/supabase-deploy.yml"
+
+concurrency:
+  group: supabase-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF || 'rhwmykdmlggcsvfbeomz' }}
+  FUNCTIONS: ai-ask alerts categorize eb-auth-start eb-callback eb-sync ingest-applepay monthly-close notify
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - id: check
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ]; then
+            echo "::warning::SUPABASE_ACCESS_TOKEN não está nos secrets do repo — deploy ignorado."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  deploy:
+    needs: gate
+    if: needs.gate.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.121.0 # pinned: `latest` will jump to CLI v3 (breaking)
+
+      - name: Check project and schema
+        run: |
+          set -euo pipefail
+          source .github/scripts/supabase-api.sh
+          rows=$(sql "select to_regclass('public.households') is not null as core,
+                             to_regclass('public.eb_auth_requests') is not null as bank,
+                             current_user as role")
+          echo "$rows"
+          if [ "$(jq -r '.[0].core and .[0].bank' <<<"$rows")" != "true" ]; then
+            echo "::error::A base de dados não tem o schema da app — corre supabase/setup.sql no SQL Editor primeiro."
+            exit 1
+          fi
+
+      - name: Sync function secrets
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          EB_APP_ID: ${{ secrets.EB_APP_ID }}
+          EB_PRIVATE_KEY: ${{ secrets.EB_PRIVATE_KEY }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+        run: |
+          set -euo pipefail
+          source .github/scripts/supabase-api.sh
+          # Stable per token: the same value goes to the functions and to Vault.
+          CRON_SECRET=$(printf 'contas-a-dois-cron:%s' "$SUPABASE_ACCESS_TOKEN" | sha256sum | cut -d' ' -f1)
+          echo "::add-mask::$CRON_SECRET"
+          echo "CRON_SECRET=$CRON_SECRET" >> "$GITHUB_ENV"
+          export CRON_SECRET
+
+          payload=$(jq -n '
+            ["CRON_SECRET","ANTHROPIC_API_KEY","EB_APP_ID","EB_PRIVATE_KEY",
+             "VAPID_PUBLIC_KEY","VAPID_PRIVATE_KEY","VAPID_SUBJECT"]
+            | map({name: ., value: ((env[.] // "") | gsub("^\\s+|\\s+$"; ""))})
+            | map(select(.value != ""))')
+          api POST "/secrets" "$payload" > /dev/null
+          echo "Secrets definidos: $(jq -r 'map(.name) | join(", ")' <<<"$payload")"
+          for s in ANTHROPIC_API_KEY EB_APP_ID EB_PRIVATE_KEY; do
+            [ -n "${!s:-}" ] || echo "::warning::$s não está nos secrets do repo (a parte da app que o usa fica desligada)."
+          done
+
+      - name: Deploy Edge Functions
+        run: |
+          set -euo pipefail
+          # verify_jwt per function comes from supabase/config.toml.
+          supabase functions deploy $FUNCTIONS --project-ref "$PROJECT_REF" --use-api
+
+      - name: Schedule crons
+        run: |
+          set -euo pipefail
+          source .github/scripts/supabase-api.sh
+          sql "do \$do\$
+               declare v_id uuid;
+               begin
+                 select id into v_id from vault.secrets where name = 'cron_secret';
+                 if v_id is null then
+                   perform vault.create_secret('$CRON_SECRET', 'cron_secret', 'Contas a Dois — header x-cron-secret');
+                 else
+                   perform vault.update_secret(v_id, '$CRON_SECRET');
+                 end if;
+               end
+               \$do\$;" > /dev/null
+          sql "$(sed "s/<PROJECT_REF>/$PROJECT_REF/g" supabase/cron/schedule.sql)" > /dev/null
+          sql "select jobname, schedule, active from cron.job order by jobname" | jq -r '.[] | "\(.jobname)\t\(.schedule)\tativo=\(.active)"'
+
+      - name: Smoke tests
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          HAS_EB: ${{ secrets.EB_APP_ID != '' && secrets.EB_PRIVATE_KEY != '' }}
+        run: |
+          set -uo pipefail
+          base="https://$PROJECT_REF.supabase.co/functions/v1"
+          fail=0
+          summary() { echo "$1" | tee -a "$GITHUB_STEP_SUMMARY"; }
+          summary "### Supabase deploy — $PROJECT_REF"
+
+          # 1. Functions are up and reject anonymous calls (in code, not the gateway).
+          for fn in categorize ai-ask eb-auth-start; do
+            code=$(curl -sS -o /tmp/out -w '%{http_code}' -X POST "$base/$fn" -H 'Content-Type: application/json' -d '{}')
+            if [ "$code" = "401" ] && grep -q 'autenticado' /tmp/out; then summary "- ✅ $fn ativo (pede login)"
+            else summary "- ❌ $fn: HTTP $code $(head -c 200 /tmp/out)"; fail=1; fi
+          done
+          code=$(curl -sS -o /tmp/out -w '%{http_code}' -X POST "$base/ingest-applepay" -H 'Authorization: Bearer x' -d '{}')
+          if [ "$code" = "401" ] && grep -q 'token' /tmp/out; then summary "- ✅ ingest-applepay ativo (atalho Apple Pay)"
+          else summary "- ❌ ingest-applepay: HTTP $code $(head -c 200 /tmp/out)"; fail=1; fi
+
+          # 2. Cron auth works end to end (the same header pg_cron sends):
+          #    authorised but empty request → 400 "pedido inválido" (401 if not).
+          code=$(curl -sS -o /tmp/out -w '%{http_code}' -X POST "$base/notify" \
+            -H 'Content-Type: application/json' -H "x-cron-secret: $CRON_SECRET" -d '{}')
+          if [ "$code" = "400" ] && grep -q 'inválido' /tmp/out; then summary "- ✅ crons autenticam (x-cron-secret)"
+          else summary "- ❌ crons: HTTP $code $(head -c 200 /tmp/out)"; fail=1; fi
+
+          # 3. Fase B — the Anthropic key works and the models exist.
+          if [ -n "$ANTHROPIC_API_KEY" ]; then
+            models=$(curl -sS 'https://api.anthropic.com/v1/models?limit=100' \
+              -H "x-api-key: $ANTHROPIC_API_KEY" -H 'anthropic-version: 2023-06-01')
+            if jq -e '.data' <<<"$models" > /dev/null; then
+              for m in claude-haiku-5-5 claude-sonnet-5-5; do
+                if jq -e --arg m "$m" '.data | map(.id) | any(startswith($m))' <<<"$models" > /dev/null; then
+                  summary "- ✅ Anthropic: $m disponível"
+                else summary "- ⚠️ Anthropic: $m não aparece na lista de modelos"; fi
+              done
+            else summary "- ❌ Anthropic: chave recusada — $(jq -r '.error.message // .' <<<"$models" | head -c 200)"; fail=1; fi
+          else summary "- ⏭️ Fase B: ANTHROPIC_API_KEY em falta"; fi
+
+          # 4. Fase C — Enable Banking credentials (signs a JWT, finds Santander PT).
+          if [ "$HAS_EB" = "true" ]; then
+            code=$(curl -sS -o /tmp/out -w '%{http_code}' -X POST "$base/eb-sync" \
+              -H 'Content-Type: application/json' -H "x-cron-secret: $CRON_SECRET" -d '{"check":true}')
+            if [ "$code" = "200" ]; then summary "- ✅ Enable Banking: $(jq -r '.aspsp' /tmp/out) encontrado"
+            else summary "- ❌ Enable Banking: HTTP $code $(jq -r '.error // .' /tmp/out | head -c 300)"; fail=1; fi
+          else summary "- ⏭️ Fase C: EB_APP_ID / EB_PRIVATE_KEY em falta"; fi
+
+          exit $fail

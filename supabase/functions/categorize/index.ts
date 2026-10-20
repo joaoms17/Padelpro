@@ -3,6 +3,7 @@
 // Confidence < 0.7 leaves the movement uncategorized (Por rever).
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { householdFromRequest, serviceClient } from "../_shared/db.ts";
+import { isCronRequest } from "../_shared/auth.ts";
 import {
   classifyLocal,
   normalizeMerchant,
@@ -28,12 +29,8 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const svc = serviceClient();
-    const authHeader = req.headers.get("Authorization") ?? "";
-    const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-    const isService = serviceKey && authHeader === `Bearer ${serviceKey}`;
-
     let householdId: string;
-    if (isService) {
+    if (isCronRequest(req)) {
       const body = await req.json().catch(() => ({}));
       householdId = body.household_id;
       if (!householdId) return json({ error: "household_id em falta" }, 400);

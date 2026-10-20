@@ -1,7 +1,7 @@
 // eb-callback — completes authorization: exchanges the code for a session,
 // stores the connection + accounts, and does an initial sync.
 import { corsHeaders, json } from "../_shared/cors.ts";
-import { serviceClient } from "../_shared/db.ts";
+import { householdFromRequest, serviceClient } from "../_shared/db.ts";
 import { ebFetch } from "../_shared/eb.ts";
 import { syncHousehold } from "../_shared/sync.ts";
 
@@ -18,14 +18,21 @@ Deno.serve(async (req) => {
     const { code, state } = await req.json().catch(() => ({}));
     if (!code || !state) return json({ error: "code/state em falta" }, 400);
 
+    const ctx = await householdFromRequest(req);
+    if (!ctx) return json({ error: "não autenticado" }, 401);
+
     const svc = serviceClient();
     const { data: reqRow } = await svc
       .from("eb_auth_requests")
-      .select("household_id")
+      .select("household_id, created_at")
       .eq("state", state)
       .maybeSingle();
-    if (!reqRow) return json({ error: "estado inválido ou expirado" }, 400);
-    const householdId = reqRow.household_id as string;
+    // The state must belong to the caller's household and be recent (1h).
+    const fresh = reqRow && Date.now() - new Date(reqRow.created_at as string).getTime() < 3600_000;
+    if (!reqRow || !fresh || reqRow.household_id !== ctx.householdId) {
+      return json({ error: "estado inválido ou expirado — volta a ligar o banco" }, 400);
+    }
+    const householdId = ctx.householdId;
 
     const session = await ebFetch<SessionResp>("/sessions", {
       method: "POST",
