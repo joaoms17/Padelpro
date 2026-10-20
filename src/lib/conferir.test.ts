@@ -13,6 +13,19 @@ describe("joanaMonths", () => {
   });
 });
 
+describe("joanaMonths waivers", () => {
+  const duet = [{ date: "2026-10-05", amount_cents: 30000 }, { date: "2026-11-05", amount_cents: 40000 }];
+  it("before she starts transferring, the gap is not owed; later, a waiver takes part of it", () => {
+    const r = joanaMonths(["2026-10", "2026-11"], duet, [{ date: "2026-11-20", amount_cents: 25000 }], { "2026-11": 5000 }, "2026-11");
+    expect(r.map((m) => [m.autoWaived, m.waivedCents, m.diffCents])).toEqual([[true, 30000, 0], [false, 5000, 10000]]);
+    expect(r[1].runningCents).toBe(10000);
+  });
+  it("a waiver never exceeds the month's gap", () => {
+    const r = joanaMonths(["2026-11"], duet, [], { "2026-11": 99999 });
+    expect(r[0]).toMatchObject({ waivedCents: 40000, diffCents: 0 });
+  });
+});
+
 describe("incomeMonths", () => {
   const sal: ExpectedIncome = {
     id: "s", household_id: "h", label: "Ordenado", amount_cents: 240000, parts: 1, day: 23,

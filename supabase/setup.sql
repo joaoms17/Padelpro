@@ -1,6 +1,6 @@
 -- Contas a Dois — setup completo da base de dados.
 -- Colar tudo de uma vez no SQL Editor do Supabase (projeto novo e vazio).
--- Equivale a correr supabase/migrations/0001 … 0012 por ordem.
+-- Equivale a correr supabase/migrations/0001 … 0013 por ordem.
 
 -- ============================================================
 -- supabase/migrations/0001_schema.sql
@@ -901,3 +901,12 @@ alter table event_payments alter column location set default 'conta_casa';
 update review_items
    set status = 'resolvido', resolved_at = coalesce(resolved_at, now())
  where type = 'settlement' and status = 'aberto';
+
+-- ============================================================
+-- supabase/migrations/0013_joana_waivers.sql
+-- ============================================================
+-- Conferir entradas: parte da diferença entre o pago na App1 e o que entrou
+-- no Santander que o casal marcou como "não é dívida", por mês:
+-- {"2026-11": 15000, ...} (cêntimos). Idempotente (ver 0007).
+alter table settings
+  add column if not exists joana_waivers jsonb not null default '{}'::jsonb;

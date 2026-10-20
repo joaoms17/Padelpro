@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader, SectionTitle, EmptyState } from "@/components/ui";
 import { useHousehold } from "@/data/household";
-import { listIncomes, loadCredits } from "@/data/incomes";
+import { listIncomes, loadCredits, loadJoanaWaivers, saveJoanaWaiver } from "@/data/incomes";
 import { loadDuetReceipts, type DuetReceiptsResult } from "@/data/duet";
 import { categoriesWithRole } from "@/lib/categories";
-import { incomeMonths, joanaMonths, type IncomeMonth } from "@/lib/conferir";
+import { incomeMonths, joanaMonths, type IncomeMonth, type JoanaMonth } from "@/lib/conferir";
 import { addMonth, type Credit, type ExpectedIncome } from "@/lib/forecast";
-import { formatCents, formatMonth } from "@/lib/format";
+import { formatCents, formatMonth, parseCents } from "@/lib/format";
 import { errorMessage } from "@/lib/errors";
 import { JOANA_TRANSFERS_FROM } from "@/lib/events";
 import { loadMembers } from "@/data/settings";
@@ -35,6 +35,7 @@ export function Conferir() {
   const [incomes, setIncomes] = useState<ExpectedIncome[]>([]);
   const [duet, setDuet] = useState<DuetReceiptsResult | null>(null);
   const [joanaName, setJoanaName] = useState("joana");
+  const [waivers, setWaivers] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,12 +50,14 @@ export function Conferir() {
     setLoading(true);
     setError(null);
     try {
-      const [cr, inc, du, members] = await Promise.all([
+      const [cr, inc, du, members, wv] = await Promise.all([
         loadCredits(householdId, from),
         listIncomes(householdId),
         loadDuetReceipts(from, todayISO()),
         loadMembers(householdId).catch(() => []),
+        loadJoanaWaivers(householdId),
       ]);
+      setWaivers(wv);
       const j = members.find((m) => /joana/i.test(m.display_name ?? ""));
       setJoanaName(normalizeKeyword(j?.display_name ?? "joana") || "joana");
       setCredits(cr);
@@ -93,11 +96,13 @@ export function Conferir() {
   const joana = useMemo(
     () =>
       joanaMonths(
-        shown.filter((mo) => mo >= JOANA_TRANSFERS_FROM),
+        shown,
         duet?.receipts ?? [],
         fromJoana.map((c) => ({ date: c.booking_date, amount_cents: c.amount_cents })),
+        waivers,
+        JOANA_TRANSFERS_FROM,
       ),
-    [shown.join(), duet, fromJoana],
+    [shown.join(), duet, fromJoana, waivers],
   );
   const perIncome = useMemo(
     () => incomeMonths(incomes.filter((i) => i.active), credits, shown, todayISO(), credits[0]?.booking_date),
@@ -123,12 +128,7 @@ export function Conferir() {
         <>
           <section>
             <SectionTitle>Eventos da Joana</SectionTitle>
-            {thisMonth() < JOANA_TRANSFERS_FROM ? (
-              <p className="text-sm text-tinta/60 dark:text-creme/60">
-                A Joana passa a mandar o dinheiro dos eventos para o Santander a partir de{" "}
-                {formatMonth(JOANA_TRANSFERS_FROM).split(" ")[0]}. A conferência começa aí.
-              </p>
-            ) : !duet?.configured ? (
+            {!duet?.configured ? (
               <p className="text-sm text-tinta/60 dark:text-creme/60">
                 A app Duet não está ligada{duet?.error ? ` (${duet.error})` : ""}.
               </p>
@@ -159,6 +159,15 @@ export function Conferir() {
                       <JoanaRow
                         key={m.month}
                         m={m}
+                        onWaive={async (cents) => {
+                          if (!householdId) return;
+                          try {
+                            await saveJoanaWaiver(householdId, m.month, cents);
+                            setWaivers(await loadJoanaWaivers(householdId));
+                          } catch (e) {
+                            setError(errorMessage(e));
+                          }
+                        }}
                         bank={fromJoana.filter((c) => c.booking_date.slice(0, 7) === m.month)}
                         duet={(duet?.receipts ?? []).filter((r) => r.date.slice(0, 7) === m.month)}
                       />
@@ -265,13 +274,18 @@ function JoanaRow({
   m,
   bank,
   duet,
+  onWaive,
 }: {
-  m: { month: string; duetCents: number; bankCents: number; diffCents: number };
+  m: JoanaMonth;
   bank: (Credit & { category_id: string | null })[];
   duet: { date: string; amount_cents: number; title: string }[];
+  onWaive: (cents: number | null) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [amount, setAmount] = useState("");
   const day = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+  const gap = Math.max(0, m.duetCents - m.bankCents);
   return (
     <>
       <tr className="border-t border-areia/50 dark:border-white/5 cursor-pointer" onClick={() => setOpen((o) => !o)}>
@@ -280,6 +294,7 @@ function JoanaRow({
         <td className="text-right">{formatCents(m.bankCents)}</td>
         <td className={`text-right ${m.diffCents > 100 ? "text-terracota" : ""}`}>
           {m.diffCents === 0 ? "—" : formatCents(m.diffCents)}
+          {m.waivedCents > 0 && <span className="block text-[10px] text-tinta/40 dark:text-creme/40">não é dívida</span>}
         </td>
       </tr>
       {open && (
@@ -307,6 +322,59 @@ function JoanaRow({
                 </div>
               ))
             )}
+
+            {m.autoWaived && gap > 0 ? (
+              <p className="mt-2 text-tinta/50 dark:text-creme/50">
+                Antes de {formatMonth(JOANA_TRANSFERS_FROM).split(" ")[0]} a Joana ainda não transferia — não é dívida.
+              </p>
+            ) : !m.autoWaived && gap > 0 ? (
+              <div className="mt-2 space-y-2">
+                {m.waivedCents > 0 && (
+                  <p>
+                    {formatCents(m.waivedCents)} marcado como não é dívida.{" "}
+                    <button className="text-petroleo" onClick={() => onWaive(null)}>Desfazer</button>
+                  </p>
+                )}
+                {!editing ? (
+                  <div className="flex gap-3">
+                    {m.waivedCents < gap && (
+                      <button className="text-petroleo font-medium" onClick={() => onWaive(gap)}>
+                        Não é dívida ({formatCents(gap)})
+                      </button>
+                    )}
+                    <button
+                      className="text-petroleo"
+                      onClick={() => {
+                        setAmount(((m.waivedCents || gap) / 100).toFixed(2).replace(".", ","));
+                        setEditing(true);
+                      }}
+                    >
+                      Acertar valor
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2 items-center">
+                    <input
+                      className="input py-1 text-xs w-28 tnum"
+                      inputMode="decimal"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                      aria-label="Valor que não é dívida"
+                    />
+                    <span>não é dívida</span>
+                    <button
+                      className="text-petroleo font-medium"
+                      onClick={async () => {
+                        await onWaive(parseCents(amount));
+                        setEditing(false);
+                      }}
+                    >
+                      Guardar
+                    </button>
+                  </div>
+                )}
+              </div>
+            ) : null}
           </td>
         </tr>
       )}
