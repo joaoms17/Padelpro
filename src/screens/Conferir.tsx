@@ -9,6 +9,7 @@ import { incomeMonths, joanaMonths, type IncomeMonth } from "@/lib/conferir";
 import { addMonth, type Credit, type ExpectedIncome } from "@/lib/forecast";
 import { formatCents, formatMonth } from "@/lib/format";
 import { errorMessage } from "@/lib/errors";
+import { JOANA_TRANSFERS_FROM } from "@/lib/events";
 import { loadMembers } from "@/data/settings";
 import { normalizeKeyword, normalizeMerchant } from "@shared/categorize";
 
@@ -92,7 +93,7 @@ export function Conferir() {
   const joana = useMemo(
     () =>
       joanaMonths(
-        shown,
+        shown.filter((mo) => mo >= JOANA_TRANSFERS_FROM),
         duet?.receipts ?? [],
         fromJoana.map((c) => ({ date: c.booking_date, amount_cents: c.amount_cents })),
       ),
@@ -122,7 +123,12 @@ export function Conferir() {
         <>
           <section>
             <SectionTitle>Eventos da Joana</SectionTitle>
-            {!duet?.configured ? (
+            {thisMonth() < JOANA_TRANSFERS_FROM ? (
+              <p className="text-sm text-tinta/60 dark:text-creme/60">
+                A Joana passa a mandar o dinheiro dos eventos para o Santander a partir de{" "}
+                {formatMonth(JOANA_TRANSFERS_FROM).split(" ")[0]}. A conferência começa aí.
+              </p>
+            ) : !duet?.configured ? (
               <p className="text-sm text-tinta/60 dark:text-creme/60">
                 A app Duet não está ligada{duet?.error ? ` (${duet.error})` : ""}.
               </p>
@@ -134,7 +140,7 @@ export function Conferir() {
                   }`}
                 >
                   {totalGap > 100
-                    ? `Faltam ${formatCents(totalGap)} no Santander face ao que está pago na App1 (desde ${shortMonth(shown[0])}).`
+                    ? `Faltam ${formatCents(totalGap)} no Santander face ao que está pago na App1 (desde ${shortMonth(joana[0]?.month ?? shown[0])}).`
                     : totalGap < -100
                       ? `Entraram mais ${formatCents(-totalGap)} no Santander do que o marcado como pago na App1 — falta marcar algum pagamento?`
                       : "Bate certo: o pago na App1 entrou todo no Santander."}
