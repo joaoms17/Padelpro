@@ -83,23 +83,37 @@ const MIN_PART = 0.5;
 const MAX_PART = 2.5;
 
 /** Keyword and amount only, any day: a late or early transfer (catching up two months). */
-export function looselyFits(c: Credit, matchText: string, partCents: number): boolean {
+export function looselyFits(c: Credit, matchText: string, partCents: number, maxPart = MAX_PART): boolean {
   const keyword = normalizeKeyword(matchText);
   return (
     !!keyword &&
     c.amount_cents >= partCents * MIN_PART &&
-    c.amount_cents <= partCents * MAX_PART &&
+    c.amount_cents <= partCents * maxPart &&
     normalizeMerchant(c.description_raw).includes(keyword)
   );
 }
 
-function eligible(c: Credit, keyword: string, partCents: number, day: number): boolean {
+/**
+ * The biggest income for a keyword (the salary) takes any larger amount —
+ * a prémio or subsídio paid with it can be 3-4×. Smaller ones from the same
+ * payer (500 € expenses) stay capped, so they never take the salary.
+ */
+export function maxPartFor(income: ExpectedIncome, all: ExpectedIncome[]): number {
+  const k = normalizeKeyword(income.match_text ?? "");
+  const part = (i: ExpectedIncome) => i.amount_cents / Math.max(1, i.parts);
+  const biggest = all
+    .filter((i) => i.active && normalizeKeyword(i.match_text ?? "") === k)
+    .every((i) => part(i) <= part(income));
+  return biggest ? Infinity : MAX_PART;
+}
+
+function eligible(c: Credit, keyword: string, partCents: number, day: number, maxPart = MAX_PART): boolean {
   const d = Number(c.booking_date.slice(8, 10));
   return (
     d >= day - DAYS_BEFORE &&
     d <= day + DAYS_AFTER &&
     c.amount_cents >= partCents * MIN_PART &&
-    c.amount_cents <= partCents * MAX_PART &&
+    c.amount_cents <= partCents * maxPart &&
     normalizeMerchant(c.description_raw).includes(keyword)
   );
 }
@@ -156,7 +170,7 @@ export function incomeStatus(
   for (const st of state) {
     if (!st.keyword) continue;
     for (const c of credits) {
-      if (eligible(c, st.keyword, st.part, st.income.day)) pairs.push({ st, c, score: fitScore(c, st.part, st.income.day) });
+      if (eligible(c, st.keyword, st.part, st.income.day, maxPartFor(st.income, incomes))) pairs.push({ st, c, score: fitScore(c, st.part, st.income.day) });
     }
   }
   pairs.sort((x, y) => x.score - y.score || x.c.booking_date.localeCompare(y.c.booking_date));

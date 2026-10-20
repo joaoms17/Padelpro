@@ -81,6 +81,10 @@ describe("incomeStatus", () => {
   it("a salary that varies (here −15%) still counts as arrived", () => {
     expect(incomeStatus([salario], [credit("2026-08-22", 212500)], "2026-08", "2026-08-25")[0]).toMatchObject({ receivedCents: 212500, pendingCents: 0 });
   });
+  it("salary + prémio (~3.9×) is the salary; the 500 € expenses never take it", () => {
+    const st = incomeStatus([salario, { ...repres, anchor_month: "2026-08-01" }], [credit("2026-08-22", 976400)], "2026-08", "2026-08-25");
+    expect(st.map((x) => x.pendingCents)).toEqual([0, 100000]);
+  });
   it("a small NTT refund does not take a 500 € slot", () => {
     const credits = [credit("2026-10-05", 30000), credit("2026-10-10", 50000), credit("2026-10-10", 50000)];
     expect(incomeStatus([repres], credits, "2026-10", "2026-10-12")[0]).toMatchObject({ receivedCents: 100000, pendingCents: 0 });
