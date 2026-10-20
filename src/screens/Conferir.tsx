@@ -192,6 +192,7 @@ export function Conferir() {
                         ))}
                       </tbody>
                     </table>
+                    <IncomeTotal rows={perIncome.get(inc.id) ?? []} />
                   </div>
                 ))}
               </div>
@@ -200,5 +201,19 @@ export function Conferir() {
         </>
       )}
     </div>
+  );
+}
+
+/** Expected vs received over the months shown (the current month only counts once it arrived). */
+function IncomeTotal({ rows }: { rows: { month: string; due: boolean; expectedCents: number; receivedCents: number; missingCents: number }[] }) {
+  const cur = thisMonth();
+  const past = rows.filter((r) => r.due && r.month < cur);
+  const missing = past.reduce((a, r) => a + r.missingCents, 0);
+  const received = rows.reduce((a, r) => a + r.receivedCents, 0);
+  return (
+    <p className={`text-xs mt-2 ${missing > 0 ? "text-terracota" : "text-tinta/50 dark:text-creme/50"}`}>
+      Recebido {formatCents(received)}
+      {missing > 0 ? ` · falta ${formatCents(missing)} dos meses passados` : " · meses passados em dia"}
+    </p>
   );
 }
