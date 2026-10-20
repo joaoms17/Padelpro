@@ -86,6 +86,7 @@ export function Definicoes() {
       {/* Dinheiro */}
       <section className="card p-5">
         <SectionTitle>Dinheiro</SectionTitle>
+        <Row title="Entradas previstas" hint="Ordenado, despesas de representação… para a previsão" to="/entradas-previstas" />
         <Row title="Mesadas" hint="Valor e dia por pessoa" to="/dinheiro" />
         <Row title="Categorias" hint="Separadores e opções: criar, renomear, ordenar" to="/categorias" />
         <Row title="Regras" hint="O que cada regra categoriza — mudar ou apagar" to="/regras" />

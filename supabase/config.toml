@@ -14,6 +14,9 @@ verify_jwt = false
 [functions.categorize]
 verify_jwt = false
 
+[functions.duet-events]
+verify_jwt = false
+
 [functions.eb-auth-start]
 verify_jwt = false
 

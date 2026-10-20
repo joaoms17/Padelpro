@@ -5,6 +5,7 @@ import { useHousehold } from "@/data/household";
 import { assembleMetrics, type MetricsBundle } from "@/data/metrics";
 import { loadMembers } from "@/data/settings";
 import { Card, SectionTitle } from "@/components/ui";
+import { ForecastCard } from "@/components/ForecastCard";
 import { formatCents, formatPct } from "@/lib/format";
 
 const QUICK_LINKS = [
@@ -55,21 +56,30 @@ export function Inicio() {
         <h1 className="text-3xl font-display">Contas a Dois</h1>
       </header>
 
-      <Link to="/metricas" className="block">
+      {m ? (
+        <ForecastCard m={m} />
+      ) : (
         <Card className="bg-petroleo/5 border-petroleo/20">
-          <div className="space-y-1">
-            <div className="text-sm text-tinta/60 dark:text-creme/60">Sobra deste mês</div>
-            <div className={`text-4xl font-display tnum ${m && m.totals.sobraCents < 0 ? "text-terracota" : "text-petroleo"}`}>
-              {m ? formatCents(m.totals.sobraCents) : "—"}
-            </div>
-            {m && (
-              <p className="text-sm text-tinta/50 dark:text-creme/50">
-                Previsão fim do mês: {formatCents(m.previsaoCents)} · poupança {formatPct(m.totals.taxaPoupanca)}
-              </p>
-            )}
-          </div>
+          <div className="text-sm text-tinta/60 dark:text-creme/60">Previsão para o fim do mês</div>
+          <div className="text-5xl font-display tnum text-petroleo">—</div>
         </Card>
-      </Link>
+      )}
+
+      {m && (
+        <Link to="/metricas" className="block">
+          <Card>
+            <div className="flex items-baseline justify-between gap-3">
+              <div className="text-sm text-tinta/60 dark:text-creme/60">Sobra deste mês até agora</div>
+              <div className={`text-2xl font-display tnum ${m.totals.sobraCents < 0 ? "text-terracota" : ""}`}>
+                {formatCents(m.totals.sobraCents)}
+              </div>
+            </div>
+            <p className="text-xs text-tinta/50 dark:text-creme/50">
+              Entradas − despesas do mês · poupança {formatPct(m.totals.taxaPoupanca)}
+            </p>
+          </Card>
+        </Link>
+      )}
 
       {m && (
         <div className="grid grid-cols-2 gap-3">

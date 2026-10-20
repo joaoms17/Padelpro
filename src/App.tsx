@@ -10,6 +10,7 @@ import { Movimentos } from "@/screens/Movimentos";
 import { PorRever } from "@/screens/PorRever";
 import { Regras } from "@/screens/Regras";
 import { Categorias } from "@/screens/Categorias";
+import { EntradasPrevistas } from "@/screens/EntradasPrevistas";
 import { Orcamento } from "@/screens/Orcamento";
 import { Dinheiro } from "@/screens/Dinheiro";
 import { Eventos } from "@/screens/Eventos";
@@ -87,6 +88,7 @@ function Gate() {
           <Route path="/definicoes" element={<Definicoes />} />
           <Route path="/regras" element={<Regras />} />
           <Route path="/categorias" element={<Categorias />} />
+          <Route path="/entradas-previstas" element={<EntradasPrevistas />} />
           <Route path="/dinheiro" element={<Dinheiro />} />
           <Route path="/joana-fontes" element={<JoanaFontes />} />
           <Route path="/apple-pay" element={<ApplePay />} />
