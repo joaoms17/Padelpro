@@ -91,9 +91,6 @@ export function Inicio() {
           <Card>
             <div className="text-sm text-tinta/60 dark:text-creme/60">A receber (eventos)</div>
             <div className="text-2xl font-display tnum">{formatCents(m.eventosAReceberCents)}</div>
-            {m.eventosForaCents > 0 && (
-              <div className="text-xs text-terracota">{formatCents(m.eventosForaCents)} fora da conta</div>
-            )}
           </Card>
         </div>
       )}

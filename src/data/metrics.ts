@@ -12,7 +12,7 @@ import {
   almofadaLivre,
   type MonthTotals,
 } from "@/lib/metrics";
-import { moneyOutsideHouse, aReceber, eventOutstanding, type Payment } from "@/lib/events";
+import { aReceber, eventOutstanding, type Payment } from "@/lib/events";
 import { categoriesWithRole } from "@/lib/categories";
 import { buildForecast, incomeStatus, type Forecast, type ForecastLine, type IncomeStatus } from "@/lib/forecast";
 import { formatCents } from "@/lib/format";
@@ -39,7 +39,6 @@ export interface MetricsBundle {
   /** Joana's events this month from the Duet app (null: not connected). */
   duetMonthEvents: DuetEvent[] | null;
   duetError: string | null;
-  eventosForaCents: number;
   eventosAReceberCents: number;
   goalsReservedCents: number;
   monthlySeries: { month: string; entradas: number; despesas: number }[];
@@ -210,7 +209,6 @@ export async function assembleMetrics(
     incomes: statuses,
     duetMonthEvents,
     duetError: duet.error ?? null,
-    eventosForaCents: moneyOutsideHouse(payments),
     eventosAReceberCents: eventosAReceber,
     goalsReservedCents: goalsReserved,
     monthlySeries,

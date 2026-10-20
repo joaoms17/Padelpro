@@ -14,7 +14,7 @@ export async function listPayments(eventIds: string[]): Promise<Payment[]> {
   if (eventIds.length === 0) return [];
   const { data } = await supabase
     .from("event_payments")
-    .select("id, event_id, kind, amount_cents, received_at, method, location")
+    .select("id, event_id, kind, amount_cents, received_at, method")
     .in("event_id", eventIds);
   return (data as Payment[]) ?? [];
 }
@@ -70,7 +70,6 @@ export interface NewPayment {
   amountCents: number;
   receivedAt: string;
   method: Payment["method"];
-  location: Payment["location"];
   transactionId?: string | null;
 }
 
@@ -81,18 +80,9 @@ export async function addPayment(p: NewPayment): Promise<void> {
     amount_cents: p.amountCents,
     received_at: p.receivedAt,
     method: p.method,
-    location: p.location,
+    location: "conta_casa", // explícito: todo o dinheiro entra na Conta Casa (Santander)
     transaction_id: p.transactionId ?? null,
   });
-  if (error) throw error;
-}
-
-/** Mark a por_transferir payment as arrived in the Conta Casa. */
-export async function settlePayment(id: string): Promise<void> {
-  const { error } = await supabase
-    .from("event_payments")
-    .update({ location: "conta_casa" })
-    .eq("id", id);
   if (error) throw error;
 }
 

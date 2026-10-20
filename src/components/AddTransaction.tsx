@@ -7,7 +7,7 @@ import { insertManual } from "@/data/transactions";
 import { parseCents } from "@/lib/format";
 import { errorMessage } from "@/lib/errors";
 
-const METHODS = ["", "numerário", "mbway", "transferência", "revolut", "cartão"];
+const METHODS = ["", "cartão", "mbway", "transferência"];
 
 export function AddTransaction({
   open,

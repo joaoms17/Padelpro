@@ -80,7 +80,7 @@ export function Definicoes() {
           hint={member ? "Sessão iniciada" : "A carregar…"}
         />
         <Row title="Membros" hint="João e Joana" milestone="M1" />
-        <Row title="Conta Casa (Santander)" hint="Cotitulares" milestone="M3" />
+        <Row title="Conta Casa (Santander)" hint="Cotitulares · todo o dinheiro entra aqui" milestone="M3" />
       </section>
 
       {/* Dinheiro */}
@@ -97,7 +97,6 @@ export function Definicoes() {
         <SectionTitle>Ligações</SectionTitle>
         <Row title="Ligação ao banco" hint="Enable Banking · Santander" to="/ligar-banco" />
         <Row title="Atalho Apple Pay" hint="Token e URL por iPhone" to="/apple-pay" />
-        <Row title="Contas de origem da Joana" hint="Revolut, numerário" to="/joana-fontes" />
         <Row title="Notificações" hint="Web Push por membro" to="/notificacoes" />
       </section>
 

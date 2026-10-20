@@ -10,7 +10,6 @@ export type NotifyPrefs = Record<string, boolean>;
 // budget 80/100% and fixed-expense changes are not sent yet, so they are
 // not offered as toggles.
 export const NOTIFY_OPTIONS: { key: string; label: string }[] = [
-  { key: "eventos_fora", label: "Dinheiro de eventos por transferir há 7+ dias" },
   { key: "ligacao_banco", label: "Ligação ao banco a expirar" },
   { key: "resumo_semana", label: "Resumo semanal (domingo)" },
   { key: "fecho_mes", label: "Fecho do mês (dia 1)" },

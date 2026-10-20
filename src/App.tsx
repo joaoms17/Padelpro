@@ -14,7 +14,6 @@ import { EntradasPrevistas } from "@/screens/EntradasPrevistas";
 import { Orcamento } from "@/screens/Orcamento";
 import { Dinheiro } from "@/screens/Dinheiro";
 import { Eventos } from "@/screens/Eventos";
-import { JoanaFontes } from "@/screens/JoanaFontes";
 import { Objetivos } from "@/screens/Objetivos";
 import { LigarBanco, LigarBancoCallback } from "@/screens/LigarBanco";
 import { ApplePay } from "@/screens/ApplePay";
@@ -90,7 +89,6 @@ function Gate() {
           <Route path="/categorias" element={<Categorias />} />
           <Route path="/entradas-previstas" element={<EntradasPrevistas />} />
           <Route path="/dinheiro" element={<Dinheiro />} />
-          <Route path="/joana-fontes" element={<JoanaFontes />} />
           <Route path="/apple-pay" element={<ApplePay />} />
           <Route path="/notificacoes" element={<Notificacoes />} />
           <Route path="/ligar-banco" element={<LigarBanco />} />

@@ -6,8 +6,8 @@ Guia passo-a-passo para pôr a app no ar. Faz-se uma vez.
 
 1. **Criar projeto** em [supabase.com](https://supabase.com) → New project (região Europa).
    Guarda a password da base de dados.
-2. **Base de dados**: SQL Editor → cola e corre `supabase/setup.sql` (junta as 6
-   migrações). Cria tabelas, RLS, `ensure_membership()`, categorias e extras.
+2. **Base de dados**: SQL Editor → cola e corre `supabase/setup.sql` (junta as
+   migrações 0001–0012). Cria tabelas, RLS, `ensure_membership()`, categorias e extras.
 3. **Auth (email + password)**: Authentication → Sign In / Providers → **Email**
    ativado, e **desligar "Confirm email"** (para entrar sem precisar de email).
    Não é preciso SMTP nem editar templates. Depois de os dois criarem conta,
