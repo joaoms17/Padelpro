@@ -9,6 +9,8 @@ import { incomeMonths, joanaMonths, type IncomeMonth } from "@/lib/conferir";
 import { addMonth, type Credit, type ExpectedIncome } from "@/lib/forecast";
 import { formatCents, formatMonth } from "@/lib/format";
 import { errorMessage } from "@/lib/errors";
+import { loadMembers } from "@/data/settings";
+import { normalizeKeyword, normalizeMerchant } from "@shared/categorize";
 
 const MONTHS = 6;
 
@@ -32,6 +34,7 @@ export function Conferir() {
   const [credits, setCredits] = useState<Credits>([]);
   const [incomes, setIncomes] = useState<ExpectedIncome[]>([]);
   const [duet, setDuet] = useState<DuetReceiptsResult | null>(null);
+  const [joanaName, setJoanaName] = useState("joana");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,11 +49,14 @@ export function Conferir() {
     setLoading(true);
     setError(null);
     try {
-      const [cr, inc, du] = await Promise.all([
+      const [cr, inc, du, members] = await Promise.all([
         loadCredits(householdId, from),
         listIncomes(householdId),
         loadDuetReceipts(from, todayISO()),
+        loadMembers(householdId).catch(() => []),
       ]);
+      const j = members.find((m) => /joana/i.test(m.display_name ?? ""));
+      setJoanaName(normalizeKeyword(j?.display_name ?? "joana") || "joana");
       setCredits(cr);
       setIncomes(inc);
       setDuet(du);
@@ -73,14 +79,25 @@ export function Conferir() {
   const firstBank = credits.length ? credits[0].booking_date.slice(0, 7) : null;
   const shown = months.filter((m) => firstBank && m >= firstBank);
 
+  // Money in from Joana: credits filed as "Eventos Joana", plus any credit
+  // with her name in the description (her own transfers, whatever category).
+  const fromJoana = useMemo(
+    () =>
+      credits.filter(
+        (c) =>
+          (c.category_id && eventosIds.has(c.category_id)) ||
+          normalizeMerchant(c.description_raw).includes(joanaName),
+      ),
+    [credits, eventosIds, joanaName],
+  );
   const joana = useMemo(
     () =>
       joanaMonths(
         shown,
         duet?.receipts ?? [],
-        credits.filter((c) => c.category_id && eventosIds.has(c.category_id)).map((c) => ({ date: c.booking_date, amount_cents: c.amount_cents })),
+        fromJoana.map((c) => ({ date: c.booking_date, amount_cents: c.amount_cents })),
       ),
-    [shown.join(), duet, credits, eventosIds],
+    [shown.join(), duet, fromJoana],
   );
   const perIncome = useMemo(
     () => incomeMonths(incomes.filter((i) => i.active), credits, shown, todayISO(), credits[0]?.booking_date),
@@ -137,21 +154,20 @@ export function Conferir() {
                   </thead>
                   <tbody>
                     {joana.map((m) => (
-                      <tr key={m.month} className="border-t border-areia/50 dark:border-white/5">
-                        <td className="py-1.5 capitalize">{shortMonth(m.month)}</td>
-                        <td className="text-right">{formatCents(m.duetCents)}</td>
-                        <td className="text-right">{formatCents(m.bankCents)}</td>
-                        <td className={`text-right ${m.diffCents > 100 ? "text-terracota" : ""}`}>
-                          {m.diffCents === 0 ? "—" : formatCents(m.diffCents)}
-                        </td>
-                      </tr>
+                      <JoanaRow
+                        key={m.month}
+                        m={m}
+                        bank={fromJoana.filter((c) => c.booking_date.slice(0, 7) === m.month)}
+                        duet={(duet?.receipts ?? []).filter((r) => r.date.slice(0, 7) === m.month)}
+                      />
                     ))}
                   </tbody>
                 </table>
                 <p className="text-xs text-tinta/50 dark:text-creme/50">
-                  "No Santander" = entradas na categoria «{categoriesWithRole(categories, "eventos")[0]?.name ?? "Eventos Joana"}».
-                  Uma transferência dela noutra categoria não conta —{" "}
-                  <Link to="/regras" className="text-petroleo">cria uma regra</Link> para as apanhar.
+                  "No Santander" = entradas com «{joanaName}» na descrição ou na categoria «
+                  {categoriesWithRole(categories, "eventos")[0]?.name ?? "Eventos Joana"}». Toca num mês para ver as
+                  transferências. Se alguma não aparecer,{" "}
+                  <Link to="/regras" className="text-petroleo">cria uma regra</Link> para «Eventos Joana».
                 </p>
               </div>
             )}
@@ -235,6 +251,60 @@ function IncomeRow({ m }: { m: IncomeMonth }) {
             {m.credits.length === 0
               ? "Nenhum movimento contado — confirma a palavra-chave em Entradas previstas."
               : m.credits.map((c) => `${c.date.slice(8, 10)}/${c.date.slice(5, 7)} · ${formatCents(c.amount_cents)}`).join("  ·  ")}
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/** One month of Joana's money: tap to see the transfers in the Santander and the App1 payments. */
+function JoanaRow({
+  m,
+  bank,
+  duet,
+}: {
+  m: { month: string; duetCents: number; bankCents: number; diffCents: number };
+  bank: (Credit & { category_id: string | null })[];
+  duet: { date: string; amount_cents: number; title: string }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const day = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
+  return (
+    <>
+      <tr className="border-t border-areia/50 dark:border-white/5 cursor-pointer" onClick={() => setOpen((o) => !o)}>
+        <td className="py-1.5 capitalize">{shortMonth(m.month)} {open ? "▾" : "▸"}</td>
+        <td className="text-right">{formatCents(m.duetCents)}</td>
+        <td className="text-right">{formatCents(m.bankCents)}</td>
+        <td className={`text-right ${m.diffCents > 100 ? "text-terracota" : ""}`}>
+          {m.diffCents === 0 ? "—" : formatCents(m.diffCents)}
+        </td>
+      </tr>
+      {open && (
+        <tr>
+          <td colSpan={4} className="pb-3 text-xs text-tinta/60 dark:text-creme/60">
+            <div className="font-medium mt-1">Entradas no Santander</div>
+            {bank.length === 0 ? (
+              <div className="text-tinta/40 dark:text-creme/40">nenhuma</div>
+            ) : (
+              bank.map((c) => (
+                <div key={c.id} className="flex justify-between gap-3">
+                  <span className="truncate">{day(c.booking_date)} · {c.description_raw ?? "—"}</span>
+                  <span className="shrink-0">{formatCents(c.amount_cents)}</span>
+                </div>
+              ))
+            )}
+            <div className="font-medium mt-2">Pago na App1</div>
+            {duet.length === 0 ? (
+              <div className="text-tinta/40 dark:text-creme/40">nada</div>
+            ) : (
+              duet.map((r, i) => (
+                <div key={i} className="flex justify-between gap-3">
+                  <span className="truncate">{day(r.date)} · {r.title}</span>
+                  <span className="shrink-0">{formatCents(r.amount_cents)}</span>
+                </div>
+              ))
+            )}
           </td>
         </tr>
       )}
