@@ -78,6 +78,7 @@ export function Inicio() {
             <p className="text-xs text-tinta/50 dark:text-creme/50">
               Entradas − despesas do mês · poupança {formatPct(m.totals.taxaPoupanca)}
             </p>
+            <SobraComTudo m={m} />
           </Card>
         </Link>
       )}
@@ -107,6 +108,25 @@ export function Inicio() {
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** The month's sobra if every expected income still to come arrives. */
+function SobraComTudo({ m }: { m: MetricsBundle }) {
+  const pending = m.forecast.incoming.reduce((a, l) => a + l.cents, 0);
+  if (pending <= 0) return null;
+  const entradas = m.totals.entradasCents + pending;
+  const sobra = m.totals.sobraCents + pending;
+  return (
+    <div className="mt-2 pt-2 border-t border-areia/50 dark:border-white/5 flex items-baseline justify-between gap-3">
+      <div className="text-sm text-tinta/60 dark:text-creme/60">
+        Se entrar tudo o previsto
+        <span className="block text-xs text-tinta/50 dark:text-creme/50">
+          +{formatCents(pending)} por entrar · poupança {formatPct(entradas > 0 ? sobra / entradas : 0)}
+        </span>
+      </div>
+      <div className={`text-xl font-display tnum ${sobra < 0 ? "text-terracota" : "text-petroleo"}`}>{formatCents(sobra)}</div>
     </div>
   );
 }
