@@ -25,7 +25,7 @@ async function makeJwt(): Promise<string> {
   // Accepts PEM (PKCS#8/PKCS#1, any line breaks), bare base64 DER or a JWK.
   const parsed = parsePrivateKey(pem);
   const key = parsed.kind === "jwk"
-    ? await importJWK(parsed.jwk as JWK, "RS256")
+    ? await importJWK(parsed.jwk as unknown as JWK, "RS256")
     : await importPKCS8(parsed.pem, "RS256");
   const exp = now + 3600; // 1h (max 24h)
   const token = await new SignJWT({})
