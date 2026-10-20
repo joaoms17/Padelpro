@@ -64,6 +64,8 @@ export function nextDueMonth(inc: Pick<ExpectedIncome, "active" | "anchor_month"
 export interface IncomeStatus {
   income: ExpectedIncome;
   receivedCents: number;
+  /** The movements counted for it. */
+  creditIds: string[];
   pendingCents: number;
   /** False when it has no keyword: then it counts as arrived after its day. */
   detectable: boolean;
@@ -79,6 +81,17 @@ const DAYS_BEFORE = 10;
 const DAYS_AFTER = 7;
 const MIN_PART = 0.5;
 const MAX_PART = 2.5;
+
+/** Keyword and amount only, any day: a late or early transfer (catching up two months). */
+export function looselyFits(c: Credit, matchText: string, partCents: number): boolean {
+  const keyword = normalizeKeyword(matchText);
+  return (
+    !!keyword &&
+    c.amount_cents >= partCents * MIN_PART &&
+    c.amount_cents <= partCents * MAX_PART &&
+    normalizeMerchant(c.description_raw).includes(keyword)
+  );
+}
 
 function eligible(c: Credit, keyword: string, partCents: number, day: number): boolean {
   const d = Number(c.booking_date.slice(8, 10));
@@ -105,6 +118,16 @@ export function matchingCredits(matchText: string, partCents: number, day: numbe
 }
 
 /**
+ * A salary is not the same every month: an income has arrived once each of
+ * its parts came in as a transfer of roughly the expected size (≥ 70%), or
+ * (almost) its whole amount did.
+ */
+const WHOLE_PART = 0.7;
+function arrived(st: { income: ExpectedIncome; received: number; whole: number }): boolean {
+  return st.whole >= Math.max(1, st.income.parts) || st.received >= st.income.amount_cents * 0.95;
+}
+
+/**
  * For each income due in `month`: what already arrived (this month's credits)
  * and what is still to come. Each movement counts for one income only, best
  * fits first (closest amount and day), so a refund or a separate subsídio
@@ -125,6 +148,9 @@ export function incomeStatus(
     keyword: normalizeKeyword(income.match_text ?? ""),
     part: income.amount_cents / Math.max(1, income.parts),
     received: 0,
+    ids: [] as string[],
+    /** Transfers that look like a whole part (amounts vary month to month). */
+    whole: 0,
   }));
   const pairs: { st: (typeof state)[number]; c: Credit; score: number }[] = [];
   for (const st of state) {
@@ -136,19 +162,21 @@ export function incomeStatus(
   pairs.sort((x, y) => x.score - y.score || x.c.booking_date.localeCompare(y.c.booking_date));
   const used = new Set<string>();
   for (const { st, c } of pairs) {
-    // Done once (almost) the whole amount arrived; small differences are rounding/fees.
-    if (used.has(c.id) || st.received >= st.income.amount_cents * 0.95) continue;
+    if (used.has(c.id) || arrived(st)) continue;
     used.add(c.id);
     st.received += c.amount_cents;
+    st.ids.push(c.id);
+    if (c.amount_cents >= st.part * WHOLE_PART) st.whole++;
   }
 
-  return state.map(({ income, keyword, received }): IncomeStatus => {
+  return state.map((st): IncomeStatus => {
+    const { income, keyword, received, ids } = st;
     if (!keyword) {
       const arrived = todayDay > income.day;
-      return { income, receivedCents: arrived ? income.amount_cents : 0, pendingCents: arrived ? 0 : income.amount_cents, detectable: false };
+      return { income, receivedCents: arrived ? income.amount_cents : 0, pendingCents: arrived ? 0 : income.amount_cents, detectable: false, creditIds: [] };
     }
-    const pending = received >= income.amount_cents * 0.95 ? 0 : income.amount_cents - received;
-    return { income, receivedCents: received, pendingCents: Math.max(0, pending), detectable: true };
+    const pending = arrived(st) ? 0 : income.amount_cents - received;
+    return { income, receivedCents: received, pendingCents: Math.max(0, pending), detectable: true, creditIds: ids };
   });
 }
 

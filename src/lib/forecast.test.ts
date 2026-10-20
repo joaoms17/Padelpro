@@ -78,6 +78,9 @@ describe("incomeStatus", () => {
     const credits = [credit("2026-06-15", 220000), credit("2026-06-23", 250000)];
     expect(incomeStatus([salario], credits, "2026-06", "2026-06-25")[0]).toMatchObject({ receivedCents: 250000, pendingCents: 0 });
   });
+  it("a salary that varies (here −15%) still counts as arrived", () => {
+    expect(incomeStatus([salario], [credit("2026-08-22", 212500)], "2026-08", "2026-08-25")[0]).toMatchObject({ receivedCents: 212500, pendingCents: 0 });
+  });
   it("a small NTT refund does not take a 500 € slot", () => {
     const credits = [credit("2026-10-05", 30000), credit("2026-10-10", 50000), credit("2026-10-10", 50000)];
     expect(incomeStatus([repres], credits, "2026-10", "2026-10-12")[0]).toMatchObject({ receivedCents: 100000, pendingCents: 0 });
