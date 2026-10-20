@@ -71,15 +71,30 @@ interface GeminiResponse {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// Edge Functions are cut off after ~150 s: bound every call ourselves.
+const CALL_TIMEOUT_MS = 50_000;
+
+/** fetch with a per-call timeout that surfaces as a readable LLMError. */
+async function timedFetch(url: string, init: RequestInit, who: string): Promise<Response> {
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(CALL_TIMEOUT_MS) });
+  } catch (e) {
+    if (e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")) {
+      throw new LLMError(`${who} demorou demasiado a responder — tenta outra vez.`, true);
+    }
+    throw e;
+  }
+}
+
 async function geminiCall(model: string, body: Record<string, unknown>): Promise<GeminiResponse> {
   const key = Deno.env.get("GEMINI_API_KEY")!;
   let req = body;
   for (let attempt = 0; attempt < 3; attempt++) {
-    const res = await fetch(`${GEMINI_API}/${model}:generateContent`, {
+    const res = await timedFetch(`${GEMINI_API}/${model}:generateContent`, {
       method: "POST",
       headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
       body: JSON.stringify(req),
-    });
+    }, "O Gemini");
     if (res.ok) return await res.json() as GeminiResponse;
 
     const text = await res.text();
@@ -120,7 +135,7 @@ async function geminiCall(model: string, body: Record<string, unknown>): Promise
       }
       const retry = details.find((d) => typeof d.retryDelay === "string")?.retryDelay as string | undefined;
       const secs = retry ? Number.parseFloat(retry) : 2 ** (attempt + 1);
-      await sleep(Math.min(20, Number.isFinite(secs) ? secs : 4) * 1000);
+      await sleep(Math.min(10, Number.isFinite(secs) ? secs : 4) * 1000);
       continue;
     }
     if ([500, 502, 503, 504].includes(res.status) && attempt < 2) {
@@ -198,9 +213,14 @@ async function geminiChat(
   tools: ToolDef[],
   run: RunTool,
   maxSteps: number,
+  deadline: number,
 ): Promise<string> {
   const contents: GeminiContent[] = [{ role: "user", parts: [{ text: question }] }];
   for (let step = 0; step < maxSteps; step++) {
+    // Not enough time left for another model call (+ tools) in this request.
+    if (Date.now() > deadline - CALL_TIMEOUT_MS) {
+      throw new LLMError("A pergunta está a demorar demasiado — tenta uma pergunta mais simples.");
+    }
     const last = step === maxSteps - 1;
     const data = await geminiCall(model, {
       systemInstruction: { parts: [{ text: system }] },
@@ -246,7 +266,7 @@ async function anthropicCall(body: Record<string, unknown>): Promise<{
   content?: { type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }[];
   stop_reason?: string;
 }> {
-  const res = await fetch(ANTHROPIC_API, {
+  const res = await timedFetch(ANTHROPIC_API, {
     method: "POST",
     headers: {
       "x-api-key": Deno.env.get("ANTHROPIC_API_KEY")!,
@@ -254,7 +274,7 @@ async function anthropicCall(body: Record<string, unknown>): Promise<{
       "content-type": "application/json",
     },
     body: JSON.stringify(body),
-  });
+  }, "A Anthropic");
   if (!res.ok) {
     throw new LLMError(`Anthropic ${res.status}: ${(await res.text()).slice(0, 200)}`, res.status === 429 || res.status >= 500);
   }
@@ -344,10 +364,12 @@ export async function chatWithTools(opts: {
 
   const smart = modelFor("gemini", "smart");
   const fast = modelFor("gemini", "fast");
+  // One budget for the whole request, fallback included (~150 s Edge limit).
+  const deadline = Date.now() + 120_000;
   try {
-    return await geminiChat(smart, opts.system, opts.question, opts.tools, opts.run, steps);
+    return await geminiChat(smart, opts.system, opts.question, opts.tools, opts.run, steps, deadline);
   } catch (e) {
     if (!(e instanceof LLMError && e.fallback) || smart === fast) throw e;
-    return await geminiChat(fast, opts.system, opts.question, opts.tools, opts.run, steps);
+    return await geminiChat(fast, opts.system, opts.question, opts.tools, opts.run, steps, deadline);
   }
 }

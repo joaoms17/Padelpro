@@ -28,6 +28,7 @@ interface Tx {
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  const started = Date.now();
   try {
     const svc = serviceClient();
     let householdId: string;
@@ -113,9 +114,17 @@ Deno.serve(async (req) => {
     let aiAssigned = 0;
     let aiReview = 0;
     let aiError: string | null = null;
+    let aiPending = 0;
+    // The request is cut off after ~150 s and one AI call may take up to
+    // ~50 s: stop starting batches after ~75 s; the rest waits for the next run.
+    const aiDeadline = started + 75_000;
     for (let i = 0; i < aiItems.length; i += AI_CHUNK) {
       const chunk = aiItems.slice(i, i + AI_CHUNK);
       let results: Awaited<ReturnType<typeof categorizeWithAI>> = [];
+      if (Date.now() > aiDeadline) {
+        aiPending += chunk.length;
+        continue;
+      }
       // After a quota/availability failure, don't spend more calls: the rest
       // simply stays "Por rever" until the next run.
       if (!aiError) {
@@ -177,6 +186,7 @@ Deno.serve(async (req) => {
       ai_assigned: aiAssigned,
       ai_review: aiReview,
       ai_error: aiError,
+      ai_pending: aiPending,
     });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
