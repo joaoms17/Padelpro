@@ -42,7 +42,9 @@ Guarda, de Settings → API: **Project URL**, **anon/publishable key** e
 3. **Environment Variables** (Production + Preview):
    - `VITE_SUPABASE_URL` = Project URL do Supabase
    - `VITE_SUPABASE_ANON_KEY` = anon/publishable key
-   - `VITE_VAPID_PUBLIC_KEY` = a chave pública VAPID
+   - `VITE_JOAO_EMAIL` = email do João · `VITE_JOANA_EMAIL` = email da Joana
+     (definem a identidade e recusam qualquer outro email)
+   - `VITE_VAPID_PUBLIC_KEY` = a chave pública VAPID (só na Fase D)
 4. Deploy → fica `https://…vercel.app`.
 
 > O projeto Vercel antigo (`padelpro-dashboard`) aponta para o código antigo e
