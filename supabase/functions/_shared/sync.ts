@@ -4,7 +4,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import { EBError, ebFetch } from "./eb.ts";
 import { pickBalance, prepareBatch, toCents, type EBBalance, type EBTransaction } from "./normalize.ts";
-import { candidateIds, findStale, planPending, type StoredPending } from "./pending.ts";
+import { candidateIds, fetchStart, findStale, planPending, type StoredPending } from "./pending.ts";
 import { reconcileHousehold, proposeEventMatches, proposeCashSettlements } from "./reconcile.ts";
 
 interface Account {
@@ -12,6 +12,7 @@ interface Account {
   household_id: string;
   name: string;
   eb_account_uid: string | null;
+  eb_last_sync_at: string | null;
 }
 
 function isoDate(d: Date): string {
@@ -40,7 +41,7 @@ export async function syncHousehold(
 
   const { data: accounts } = await svc
     .from("accounts")
-    .select("id, household_id, name, eb_account_uid")
+    .select("id, household_id, name, eb_account_uid, eb_last_sync_at")
     .eq("household_id", householdId)
     .not("eb_account_uid", "is", null);
 
@@ -48,23 +49,15 @@ export async function syncHousehold(
   const today = new Date();
   const todayISO = isoDate(today);
 
-  // First import: full history is only offered for ~1h after the consent, and
-  // only with strategy=longest (date_from is then a lower bound). Afterwards:
-  // from (last successful sync − 5 days), so an outage never drops movements
-  // and pending → booked is caught (spec 4.1).
-  const first = !conn?.last_sync_at;
-  const from = first ? new Date(today) : new Date(conn.last_sync_at);
-  from.setDate(from.getDate() - (first ? 365 : 5));
-  const fromISO = isoDate(from);
-
   let processed = 0;
   const errors: string[] = [];
 
   for (const acc of list) {
     if (!acc.eb_account_uid) continue;
     try {
-      processed += await syncAccount(svc, householdId, acc, fromISO, todayISO, first ? "longest" : "default");
+      processed += await syncAccount(svc, householdId, acc, today, todayISO);
       await updateBalance(svc, acc);
+      await svc.from("accounts").update({ eb_last_sync_at: new Date().toISOString() }).eq("id", acc.id);
     } catch (e) {
       // One account failing must not stop the others.
       errors.push(`${acc.name}: ${e instanceof Error ? e.message : String(e)}`);
@@ -82,8 +75,7 @@ export async function syncHousehold(
 
   const error = errors.length ? errors.join(" · ") : undefined;
   if (conn) {
-    // last_sync_at only moves on full success: it is the start of the next
-    // window, so a failing sync must not skip over the days it missed.
+    // Shown in the app as "Última sincronização": only on full success.
     await svc
       .from("bank_connections")
       .update(error ? { last_error: error } : { last_sync_at: new Date().toISOString(), last_error: null })
@@ -96,10 +88,34 @@ async function syncAccount(
   svc: SupabaseClient,
   householdId: string,
   acc: Account,
-  fromISO: string,
+  today: Date,
   todayISO: string,
-  strategy: Strategy,
 ): Promise<number> {
+  // The window is per account. Never synced (new, or first link): full
+  // history, which banks only offer for ~1h after the consent and only with
+  // strategy=longest (date_from is then a lower bound). Otherwise from the
+  // account's last successful sync − 5 days (an outage never drops movements;
+  // pending → booked is caught), pulled back to cover still-open pending
+  // rows; after a long gap (> ~85 days) the bank may refuse "default".
+  const { data: pend } = await svc
+    .from("transactions")
+    .select("id, external_id, amount_cents, booking_date, description_raw, created_at")
+    .eq("account_id", acc.id)
+    .eq("source", "banco")
+    .eq("status", "provisorio");
+  const pending = (pend ?? []) as StoredPending[];
+
+  let strategy: Strategy;
+  let fromISO: string;
+  if (!acc.eb_last_sync_at) {
+    strategy = "longest";
+    fromISO = isoDate(new Date(today.getTime() - 365 * 86400000));
+  } else {
+    const last = new Date(acc.eb_last_sync_at);
+    fromISO = fetchStart(isoDate(new Date(last.getTime() - 5 * 86400000)), pending, todayISO);
+    strategy = today.getTime() - Date.parse(`${fromISO}T00:00:00Z`) > 85 * 86400000 ? "longest" : "default";
+  }
+
   let txs: EBTransaction[];
   try {
     txs = await fetchAllTransactions(acc.eb_account_uid!, fromISO, todayISO, strategy);
@@ -116,18 +132,19 @@ async function syncAccount(
   const { rows, cancelledIds } = prepareBatch(txs, todayISO);
 
   // Cancelled/rejected: drop the provisional row if we had stored it.
-  if (cancelledIds.length) {
-    const { data: gone } = await svc
-      .from("transactions")
-      .select("id")
-      .eq("account_id", acc.id)
-      .eq("source", "banco")
-      .eq("status", "provisorio")
-      .in("external_id", cancelledIds);
-    await removeRows(svc, householdId, (gone ?? []).map((g) => g.id as string));
-  }
+  const cancelled = new Set(cancelledIds);
+  const gone = pending.filter((p) => cancelled.has(p.external_id));
+  await removeRows(svc, householdId, gone.map((p) => p.id));
 
-  await reconcilePending(svc, householdId, acc, rows, fromISO, todayISO);
+  await reconcilePending(
+    svc,
+    householdId,
+    acc,
+    pending.filter((p) => !cancelled.has(p.external_id)),
+    rows,
+    fromISO,
+    todayISO,
+  );
 
   // Merge on conflict — provided columns update (pending → booked),
   // category_id and note are not provided so they are preserved.
@@ -152,43 +169,94 @@ async function syncAccount(
 
 /**
  * Provisional rows the bank no longer returns are re-pointed to their booked
- * version (kept in place with the user's category/links) or, if the bank
- * dropped them over 10 days ago, removed. See pending.ts.
+ * version (kept in place with the user's category/links), merged into it if
+ * it is already stored, or — if the bank dropped them — removed after a grace
+ * period. See pending.ts.
  */
 async function reconcilePending(
   svc: SupabaseClient,
   householdId: string,
   acc: Account,
-  rows: { external_id: string; amount_cents: number; booking_date: string; status: "confirmado" | "provisorio" }[],
+  pending: StoredPending[],
+  rows: { external_id: string; amount_cents: number; booking_date: string; status: "confirmado" | "provisorio"; description_raw: string }[],
   fromISO: string,
   todayISO: string,
 ): Promise<void> {
-  const { data: pend } = await svc
-    .from("transactions")
-    .select("id, external_id, amount_cents, booking_date")
-    .eq("account_id", acc.id)
-    .eq("source", "banco")
-    .eq("status", "provisorio");
-  const stale = findStale((pend ?? []) as StoredPending[], new Set(rows.map((r) => r.external_id)), fromISO);
+  const { stale, expired } = findStale(pending, new Set(rows.map((r) => r.external_id)), fromISO, todayISO);
+  await removeRows(svc, householdId, expired);
   if (stale.length === 0) return;
 
   const cands = candidateIds(stale, rows);
-  let existing: string[] = [];
+  let stored: { id: string; external_id: string; created_at: string | null }[] = [];
   if (cands.length) {
-    const { data } = await svc
+    const { data, error } = await svc
       .from("transactions")
-      .select("external_id")
+      .select("id, external_id, created_at")
       .eq("account_id", acc.id)
       .in("external_id", cands);
-    existing = (data ?? []).map((d) => d.external_id as string);
+    if (error) throw error;
+    stored = (data ?? []) as typeof stored;
   }
 
-  const plan = planPending(stale, rows, new Set(existing), todayISO);
+  const plan = planPending(stale, rows, stored, todayISO);
   for (const r of plan.relink) {
     const { error } = await svc.from("transactions").update({ external_id: r.external_id }).eq("id", r.id);
     if (error) throw error;
   }
+  for (const m of plan.merge) await mergeInto(svc, householdId, m.id, m.into_id);
   await removeRows(svc, householdId, plan.remove);
+}
+
+/**
+ * Folds a provisional row into the stored booked row of the same movement:
+ * the user's category/note (when the booked row has none), splits, event
+ * payment, Apple Pay match and open review items move over; then it goes.
+ */
+async function mergeInto(svc: SupabaseClient, householdId: string, fromId: string, intoId: string): Promise<void> {
+  const [{ data: from }, { data: into }] = await Promise.all([
+    svc.from("transactions").select("category_id, category_source, confidence, note").eq("id", fromId).maybeSingle(),
+    svc.from("transactions").select("category_id, note").eq("id", intoId).maybeSingle(),
+  ]);
+  if (!from || !into) return;
+
+  const patch: Record<string, unknown> = {};
+  if (from.category_id && !into.category_id) {
+    Object.assign(patch, {
+      category_id: from.category_id,
+      category_source: from.category_source,
+      confidence: from.confidence,
+    });
+  }
+  if (from.note && !into.note) patch.note = from.note;
+  if (Object.keys(patch).length) {
+    const { error } = await svc.from("transactions").update(patch).eq("id", intoId);
+    if (error) throw error;
+  }
+
+  const { count: splitsOnInto } = await svc
+    .from("transaction_splits")
+    .select("id", { count: "exact", head: true })
+    .eq("transaction_id", intoId);
+  if (!splitsOnInto) {
+    await svc.from("transaction_splits").update({ transaction_id: intoId }).eq("transaction_id", fromId);
+  }
+  await svc.from("event_payments").update({ transaction_id: intoId }).eq("transaction_id", fromId);
+  await svc.from("transactions").update({ matched_transaction_id: intoId }).eq("matched_transaction_id", fromId);
+
+  const { data: items } = await svc
+    .from("review_items")
+    .select("id, ref")
+    .eq("household_id", householdId)
+    .eq("status", "aberto")
+    .eq("ref->>transaction_id", fromId);
+  for (const it of items ?? []) {
+    await svc.from("review_items")
+      .update({ ref: { ...(it.ref as Record<string, unknown>), transaction_id: intoId } })
+      .eq("id", it.id);
+  }
+
+  const { error } = await svc.from("transactions").delete().eq("id", fromId);
+  if (error) throw error;
 }
 
 /** Deletes bank rows and closes any open review item that points at them. */

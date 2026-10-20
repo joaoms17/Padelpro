@@ -54,6 +54,15 @@ Deno.serve(async (req) => {
       }, 400);
     }
 
+    // Plan the account mapping before switching the connection: a failed read
+    // must never turn a renewal into duplicate accounts.
+    const { data: existing, error: exErr } = await svc
+      .from("accounts")
+      .select("id, role, eb_account_uid, eb_identification_hash, iban_last4")
+      .eq("household_id", householdId);
+    if (exErr) throw exErr;
+    const plan = planAccountLinks((existing ?? []) as StoredAccount[], sessionAccounts);
+
     await svc.from("bank_connections").upsert(
       {
         household_id: householdId,
@@ -66,12 +75,6 @@ Deno.serve(async (req) => {
       { onConflict: "household_id" },
     );
 
-    const { data: existing } = await svc
-      .from("accounts")
-      .select("id, role, eb_account_uid, eb_identification_hash, iban_last4")
-      .eq("household_id", householdId);
-    const plan = planAccountLinks((existing ?? []) as StoredAccount[], sessionAccounts);
-
     for (const u of plan.update) {
       const { id, ...fields } = u;
       const { error } = await svc.from("accounts").update(fields).eq("id", id);
@@ -82,11 +85,13 @@ Deno.serve(async (req) => {
       if (error) throw error;
     }
     if (plan.unlink.length) {
-      await svc.from("accounts").update({ eb_account_uid: null }).in("id", plan.unlink);
+      const { error } = await svc.from("accounts").update({ eb_account_uid: null }).in("id", plan.unlink);
+      if (error) throw error;
     }
     const linked = plan.update.length + plan.insert.length;
 
-    // Initial pull (within the consent's first hour: full history available) so data shows up immediately.
+    // Initial pull so data shows up immediately (new accounts get their full
+    // history: banks only offer it in the consent's first hour).
     const sync = await syncHousehold(svc, householdId);
 
     return json({ ok: true, accounts: linked, sync });

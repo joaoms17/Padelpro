@@ -63,10 +63,11 @@ export function LigarBanco() {
     setError(null);
     setMsg(null);
     try {
+      // A partial sync (one account failed) still imported the others.
       const r = await syncNow(householdId);
       if (r.error) setError(r.error);
-      else setMsg(`${r.processed} movimentos sincronizados.`);
-      if (!r.error && r.processed > 0) {
+      if (!r.error || r.processed > 0) setMsg(`${r.processed} movimentos sincronizados.`);
+      if (r.processed > 0) {
         await runCategorize(householdId).catch(() => {});
       }
       await Promise.all([refresh(), reload()]);

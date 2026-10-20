@@ -105,6 +105,28 @@ describe("prepareBatch", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].status).toBe("confirmado");
   });
+  it("ids do not depend on cancelled entries being listed", () => {
+    const cncl = mk({ status: "CNCL" });
+    const a = prepareBatch([cncl, mk({})], "2026-01-10");
+    const b = prepareBatch([mk({})], "2026-01-10");
+    expect(a.rows.map((x) => x.external_id)).toEqual(b.rows.map((x) => x.external_id));
+    // ...and the cancelled twin never deletes the live booked row.
+    expect(a.cancelledIds).toEqual([]);
+  });
+  it("collapses a pending twin into its booked movement, whatever the order", () => {
+    const pend = mk({ status: "PDNG" });
+    const book = mk({ status: "BOOK" });
+    for (const batch of [[pend, book], [book, pend]]) {
+      const { rows } = prepareBatch(batch, "2026-01-10");
+      expect(rows).toHaveLength(1);
+      expect(rows[0].status).toBe("confirmado");
+      expect(rows[0].external_id).toBe(prepareBatch([pend], "2026-01-10").rows[0].external_id);
+    }
+  });
+  it("keeps extra pending ones beyond the booked count", () => {
+    const { rows } = prepareBatch([mk({ status: "BOOK" }), mk({ status: "PDNG" }), mk({ status: "PDNG" })], "2026-01-10");
+    expect(rows.map((x) => x.status)).toEqual(["confirmado", "provisorio"]);
+  });
   it("drops cancelled/rejected movements and reports their ids", () => {
     const { rows, cancelledIds } = prepareBatch(
       [mk({ entry_reference: "E1", status: "CNCL" }), mk({ entry_reference: "E2", status: "RJCT" }), mk({})],

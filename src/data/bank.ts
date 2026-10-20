@@ -33,7 +33,11 @@ export async function completeCallback(
 export async function syncNow(
   householdId: string,
 ): Promise<{ processed: number; error?: string }> {
-  return invokeFn<{ processed: number; error?: string }>("eb-sync", { household_id: householdId });
+  return invokeFn<{ processed: number; error?: string }>(
+    "eb-sync",
+    { household_id: householdId },
+    { allowPartial: true },
+  );
 }
 
 /** Days until the consent expires (negative = already expired). */
