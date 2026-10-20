@@ -1,6 +1,6 @@
 // Checking money in: what should have reached the Santander account each
 // month against what did. Pure and testable.
-import { incomeStatus, isDueInMonth, looselyFits, type Credit, type ExpectedIncome } from "./forecast";
+import { incomeStatus, isDueInMonth, looselyFits, maxPartFor, type Credit, type ExpectedIncome } from "./forecast";
 
 export interface JoanaMonth {
   month: string;
@@ -77,7 +77,7 @@ export function incomeMonths(
     for (const c of inMonth) {
       if (used.has(c.id) || c.amount_cents <= 0) continue;
       const fits = incomes
-        .filter((i) => i.match_text && looselyFits(c, i.match_text, i.amount_cents / Math.max(1, i.parts)))
+        .filter((i) => i.match_text && looselyFits(c, i.match_text, i.amount_cents / Math.max(1, i.parts), maxPartFor(i, incomes)))
         .sort((x, y) => partGap(c, x) - partGap(c, y));
       if (fits[0]) got.get(fits[0].id)!.push(c);
     }
