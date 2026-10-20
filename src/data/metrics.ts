@@ -33,6 +33,9 @@ export interface MetricsBundle {
   almofadaMeses: number;
   almofadaLivreCents: number;
   previsaoCents: number;
+  /** Money in / out of the house account so far this month (all movements). */
+  monthInCents: number;
+  monthOutCents: number;
   /** End-of-month forecast with what is behind it. */
   forecast: Forecast;
   incomes: IncomeStatus[];
@@ -65,6 +68,8 @@ export async function assembleMetrics(
   members: Member[],
   balanceCents: number,
   today: string,
+  /** The house account: the month's in/out are counted on it only. */
+  accountId?: string | null,
 ): Promise<MetricsBundle> {
   const group = new Map<string, CategoryGroup>(categories.map((c) => [c.id, c.grp]));
   const nameById = new Map(categories.map((c) => [c.id, c.name.toLowerCase()]));
@@ -83,6 +88,9 @@ export async function assembleMetrics(
   const goals = await listGoals(householdId);
 
   const totals = monthTotals(monthTx, group);
+  const accountTx = accountId ? monthTx.filter((t) => !t.account_id || t.account_id === accountId) : monthTx;
+  const monthInCents = accountTx.reduce((a, t) => a + Math.max(0, t.amount_cents), 0);
+  const monthOutCents = accountTx.reduce((a, t) => a + Math.max(0, -t.amount_cents), 0);
 
   // Base fixa = salário João + renda casa arrendada (most recent monthly value).
   const baseFixaCatIds = [
@@ -205,6 +213,8 @@ export async function assembleMetrics(
     almofadaMeses: almofadaMeses(almofada, avg3m),
     almofadaLivreCents: almofadaLivre(almofada, goalsReserved),
     previsaoCents: forecast.endCents,
+    monthInCents,
+    monthOutCents,
     forecast,
     incomes: statuses,
     duetMonthEvents,

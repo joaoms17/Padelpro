@@ -29,12 +29,12 @@ const ITEMS: Item[] = [
     ),
   },
   {
-    to: "/eventos",
-    label: "Eventos",
+    to: "/conferir",
+    label: "Entradas",
     icon: (a) => (
       <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
-        <rect x="3.5" y="5" width="17" height="15" rx="2.5" stroke={stroke(a)} strokeWidth="1.8" />
-        <path d="M3.5 9.5h17M8 3v4M16 3v4" stroke={stroke(a)} strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M12 4v11M7 10l5 5 5-5" stroke={stroke(a)} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        <path d="M4 19h16" stroke={stroke(a)} strokeWidth="1.8" strokeLinecap="round" />
       </svg>
     ),
   },

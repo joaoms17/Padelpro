@@ -7,6 +7,7 @@ export interface MonthTx {
   booking_date: string;
   counterparty: string | null;
   merchant_clean: string | null;
+  account_id?: string;
 }
 
 export type BudgetLevel = "ok" | "warn" | "over";

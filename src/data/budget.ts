@@ -12,7 +12,7 @@ export async function loadMonthTx(householdId: string, month: string): Promise<M
   const [start, end] = monthRange(month);
   const { data } = await supabase
     .from("transactions")
-    .select("category_id, amount_cents, booking_date, counterparty, merchant_clean")
+    .select("category_id, amount_cents, booking_date, counterparty, merchant_clean, account_id")
     .eq("household_id", householdId)
     .is("matched_transaction_id", null)
     .gte("booking_date", start)
