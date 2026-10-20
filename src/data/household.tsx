@@ -34,14 +34,14 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
   const [customLabels, setCustomLabels] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
 
-  const reload = useCallback(async () => {
+  const load = useCallback(async (silent: boolean) => {
     if (!householdId) {
       setAccounts([]);
       setCategories([]);
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     const [accRes, catRes, setRes] = await Promise.all([
       supabase.from("accounts").select("*").eq("household_id", householdId),
       supabase
@@ -52,6 +52,8 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
         .order("sort"),
       supabase.from("settings").select("group_labels").eq("household_id", householdId).maybeSingle(),
     ]);
+    // A quiet refresh that fails (offline) keeps what is on screen.
+    if (silent && (accRes.error || catRes.error)) return;
     setAccounts((accRes.data as Account[]) ?? []);
     setCategories((catRes.data as Category[]) ?? []);
     // Missing column/row (before migration 0009) simply means defaults.
@@ -59,9 +61,21 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, [householdId]);
 
+  const reload = useCallback(() => load(false), [load]);
+
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Back to the app (the other person may have edited categories meanwhile):
+  // refresh quietly, so nobody files movements under a removed category.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void load(true);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [load]);
 
   const value = useMemo<HouseholdState>(() => {
     const categoriesById = new Map(categories.map((c) => [c.id, c]));

@@ -7,14 +7,15 @@ import { useHousehold } from "@/data/household";
 import {
   categoryUsage,
   createCategory,
-  moveCategoryToGroup,
+  moveCategoryInGroup,
   removeCategory,
-  renameCategory,
   saveGroupLabels,
-  swapCategoryOrder,
+  updateCategory,
 } from "@/data/categories";
-import { GROUP_LABELS, GROUP_ORDER, isProtectedCategory } from "@/lib/categories";
+import { canRenameCategory, GROUP_LABELS, GROUP_ORDER, isProtectedCategory } from "@/lib/categories";
+import { formatCents } from "@/lib/format";
 import type { Category, CategoryGroup } from "@/lib/types";
+import { errorMessage } from "@/lib/errors";
 
 export function Categorias() {
   const navigate = useNavigate();
@@ -23,17 +24,25 @@ export function Categorias() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function run(fn: () => Promise<void>) {
+  /** Run a change and reload; true if it worked (the error is shown otherwise). */
+  async function run(fn: () => Promise<void>): Promise<boolean> {
     setBusy(true);
     setError(null);
     try {
       await fn();
       await reload();
+      return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
+      return false;
     } finally {
       setBusy(false);
     }
+  }
+
+  function edit(c: Category | null) {
+    setError(null);
+    setEditing(c);
   }
 
   return (
@@ -49,7 +58,7 @@ export function Categorias() {
         subtitle="Os separadores e as opções que aparecem ao categorizar um movimento."
       />
 
-      {error && <p className="text-sm text-terracota">{error}</p>}
+      {error && !editing && <p className="text-sm text-terracota">{error}</p>}
 
       {GROUP_ORDER.map((grp) => (
         <GroupSection
@@ -62,23 +71,24 @@ export function Categorias() {
             run(() => saveGroupLabels(householdId!, { ...groupLabels, [grp]: name }))
           }
           onAdd={(name) => run(() => createCategory(householdId!, categories, grp, name))}
-          onSwap={(a, b) => run(() => swapCategoryOrder(a, b))}
-          onEdit={setEditing}
+          onMove={(c, delta) => run(() => moveCategoryInGroup(categories, c, delta))}
+          onEdit={edit}
         />
       ))}
 
       <p className="text-xs text-tinta/40 dark:text-creme/40 leading-relaxed">
         🔒 Categorias que a app usa nos cálculos (salário e renda para a base fixa,
-        eventos, mesadas): podes reordená-las, mas não mudar o nome nem removê-las.
+        eventos, mesadas): podes mudar a ordem e o nome (menos o das mesadas), mas
+        não o separador nem removê-las.
       </p>
 
       <EditCategory
         category={editing}
         busy={busy}
-        onClose={() => setEditing(null)}
-        onRename={(c, name) => run(() => renameCategory(c.id, name))}
-        onMove={(c, grp) => run(() => moveCategoryToGroup(categories, c.id, grp))}
-        onRemove={(c, target) => run(() => removeCategory(householdId!, c.id, target))}
+        error={error}
+        onClose={() => edit(null)}
+        onSave={(c, patch) => run(() => updateCategory(categories, c, patch))}
+        onRemove={(c, target) => run(() => removeCategory(c.id, target))}
       />
     </div>
   );
@@ -91,16 +101,16 @@ function GroupSection({
   busy,
   onRenameGroup,
   onAdd,
-  onSwap,
+  onMove,
   onEdit,
 }: {
   grp: CategoryGroup;
   label: string;
   items: Category[];
   busy: boolean;
-  onRenameGroup: (name: string) => Promise<void>;
-  onAdd: (name: string) => Promise<void>;
-  onSwap: (a: Category, b: Category) => Promise<void>;
+  onRenameGroup: (name: string) => Promise<boolean>;
+  onAdd: (name: string) => Promise<boolean>;
+  onMove: (c: Category, delta: -1 | 1) => Promise<boolean>;
   onEdit: (c: Category) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
@@ -126,8 +136,7 @@ function GroupSection({
               className="text-sm text-petroleo font-medium shrink-0"
               disabled={busy}
               onClick={async () => {
-                await onRenameGroup(groupName);
-                setRenaming(false);
+                if (await onRenameGroup(groupName)) setRenaming(false);
               }}
             >
               Guardar
@@ -151,14 +160,15 @@ function GroupSection({
       <div className="card divide-y divide-areia/50 dark:divide-white/5">
         {items.map((c, i) => {
           const locked = isProtectedCategory(c);
+          const editable = canRenameCategory(c);
           return (
             <div key={c.id} className="flex items-center gap-2 px-4 py-2.5">
               <button
                 className="flex-1 min-w-0 text-left text-sm truncate disabled:opacity-100"
-                disabled={locked}
+                disabled={!editable}
                 onClick={() => onEdit(c)}
               >
-                {locked && <span aria-label="protegida">🔒 </span>}
+                {locked && <span aria-label="usada nos cálculos">🔒 </span>}
                 {c.name}
               </button>
               <div className="flex shrink-0">
@@ -166,7 +176,7 @@ function GroupSection({
                   className="w-8 h-8 text-tinta/50 dark:text-creme/50 disabled:opacity-20"
                   aria-label="Subir"
                   disabled={busy || i === 0}
-                  onClick={() => onSwap(c, items[i - 1])}
+                  onClick={() => onMove(c, -1)}
                 >
                   ↑
                 </button>
@@ -174,11 +184,11 @@ function GroupSection({
                   className="w-8 h-8 text-tinta/50 dark:text-creme/50 disabled:opacity-20"
                   aria-label="Descer"
                   disabled={busy || i === items.length - 1}
-                  onClick={() => onSwap(c, items[i + 1])}
+                  onClick={() => onMove(c, 1)}
                 >
                   ↓
                 </button>
-                {!locked && (
+                {editable && (
                   <button
                     className="text-xs text-petroleo font-medium pl-2"
                     onClick={() => onEdit(c)}
@@ -204,7 +214,7 @@ function GroupSection({
               className="text-sm text-petroleo font-medium shrink-0"
               disabled={busy || !newName.trim()}
               onClick={async () => {
-                await onAdd(newName);
+                if (!(await onAdd(newName))) return;
                 setNewName("");
                 setAdding(false);
               }}
@@ -228,19 +238,19 @@ function GroupSection({
 function EditCategory({
   category,
   busy,
+  error,
   onClose,
-  onRename,
-  onMove,
+  onSave,
   onRemove,
 }: {
   category: Category | null;
   busy: boolean;
+  error: string | null;
   onClose: () => void;
-  onRename: (c: Category, name: string) => Promise<void>;
-  onMove: (c: Category, grp: CategoryGroup) => Promise<void>;
-  onRemove: (c: Category, targetId: string) => Promise<void>;
+  onSave: (c: Category, patch: { name: string; grp: CategoryGroup }) => Promise<boolean>;
+  onRemove: (c: Category, targetId: string) => Promise<boolean>;
 }) {
-  const { householdId, groupLabels } = useHousehold();
+  const { householdId, groupLabels, categoriesById } = useHousehold();
   const [name, setName] = useState("");
   const [grp, setGrp] = useState<CategoryGroup>("variavel");
   const [removing, setRemoving] = useState(false);
@@ -267,14 +277,10 @@ function EditCategory({
   }, [removing, category, householdId]);
 
   if (!category) return null;
+  const locked = isProtectedCategory(category);
   const changed = name.trim() !== category.name || grp !== category.grp;
-
-  async function save() {
-    if (!category) return;
-    if (name.trim() && name.trim() !== category.name) await onRename(category, name);
-    if (grp !== category.grp) await onMove(category, grp);
-    onClose();
-  }
+  const budget = category.budget_cents ?? 0;
+  const targetCat = target ? categoriesById.get(target) : undefined;
 
   return (
     <Sheet open={!!category} onClose={onClose} title="Categoria">
@@ -292,8 +298,9 @@ function EditCategory({
           <label className="label" htmlFor="cat-grp">Separador</label>
           <select
             id="cat-grp"
-            className="input appearance-none"
+            className="input appearance-none disabled:opacity-60"
             value={grp}
+            disabled={locked}
             onChange={(e) => setGrp(e.target.value as CategoryGroup)}
           >
             {GROUP_ORDER.map((g) => (
@@ -303,45 +310,58 @@ function EditCategory({
             ))}
           </select>
           <p className="text-xs text-tinta/40 dark:text-creme/40 mt-1">
-            O separador conta para as métricas: entradas, fixas, variáveis, etc.
+            {locked
+              ? "🔒 A app usa esta categoria nos cálculos: fica neste separador."
+              : "O separador conta para as métricas: entradas, fixas, variáveis, etc."}
           </p>
         </div>
         <button
           className="btn-primary w-full"
           disabled={busy || !changed || !name.trim()}
-          onClick={save}
+          onClick={async () => {
+            if (await onSave(category, { name, grp })) onClose();
+          }}
         >
           Guardar
         </button>
 
-        <div className="pt-2 border-t border-areia/50 dark:border-white/5 space-y-3">
-          {!removing ? (
-            <button className="text-sm text-terracota" onClick={() => setRemoving(true)}>
-              Remover esta categoria…
-            </button>
-          ) : (
-            <>
-              <p className="text-sm text-tinta/70 dark:text-creme/70">
-                {usage == null
-                  ? "A contar…"
-                  : `Tem ${usage.movements} movimento${usage.movements === 1 ? "" : "s"} e ${usage.rules} regra${usage.rules === 1 ? "" : "s"}.`}{" "}
-                Para onde passam?
-              </p>
-              <CategoryPicker value={target} allowNone={false} onChange={setTarget} />
-              <button
-                className="btn-ghost w-full text-terracota"
-                disabled={busy || !target || target === category.id}
-                onClick={async () => {
-                  if (!target) return;
-                  await onRemove(category, target);
-                  onClose();
-                }}
-              >
-                Remover e passar tudo para a categoria escolhida
+        {error && <p className="text-sm text-terracota">{error}</p>}
+
+        {!locked && (
+          <div className="pt-2 border-t border-areia/50 dark:border-white/5 space-y-3">
+            {!removing ? (
+              <button className="text-sm text-terracota" onClick={() => setRemoving(true)}>
+                Remover esta categoria…
               </button>
-            </>
-          )}
-        </div>
+            ) : (
+              <>
+                <p className="text-sm text-tinta/70 dark:text-creme/70">
+                  {usage == null
+                    ? "A contar…"
+                    : `Tem ${usage.movements} movimento${usage.movements === 1 ? "" : "s"} e ${usage.rules} regra${usage.rules === 1 ? "" : "s"}.`}{" "}
+                  Para onde passam?
+                </p>
+                <CategoryPicker value={target} allowNone={false} onChange={setTarget} />
+                {budget > 0 && targetCat && targetCat.id !== category.id && (
+                  <p className="text-xs text-tinta/50 dark:text-creme/50">
+                    {targetCat.grp === category.grp
+                      ? `O orçamento (${formatCents(budget)}) junta-se ao de «${targetCat.name}».`
+                      : `O orçamento (${formatCents(budget)}) deixa de contar: «${targetCat.name}» está noutro separador.`}
+                  </p>
+                )}
+                <button
+                  className="btn-ghost w-full text-terracota"
+                  disabled={busy || !target || target === category.id}
+                  onClick={async () => {
+                    if (target && (await onRemove(category, target))) onClose();
+                  }}
+                >
+                  Remover e passar tudo para a categoria escolhida
+                </button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </Sheet>
   );

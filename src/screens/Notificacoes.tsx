@@ -14,6 +14,7 @@ import {
   VAPID_PUBLIC_KEY,
   type NotifyPrefs,
 } from "@/data/push";
+import { errorMessage } from "@/lib/errors";
 
 export function Notificacoes() {
   const navigate = useNavigate();
@@ -47,7 +48,7 @@ export function Notificacoes() {
         setSubscribed(true);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -68,7 +69,7 @@ export function Notificacoes() {
       await sendTestNotification(householdId);
       setMsg("Notificação de teste enviada.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }
 

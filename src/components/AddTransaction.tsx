@@ -5,6 +5,7 @@ import { useAuth } from "@/auth/AuthProvider";
 import { useHousehold } from "@/data/household";
 import { insertManual } from "@/data/transactions";
 import { parseCents } from "@/lib/format";
+import { errorMessage } from "@/lib/errors";
 
 const METHODS = ["", "numerário", "mbway", "transferência", "revolut", "cartão"];
 
@@ -65,7 +66,7 @@ export function AddTransaction({
       onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

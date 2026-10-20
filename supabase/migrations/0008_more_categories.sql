@@ -2,15 +2,32 @@
 -- (separada de "Restaurantes e saídas"). Idempotente — aplicada pelo workflow
 -- "Supabase deploy" em cada execução (ver 0007).
 
--- Agregados existentes: acrescenta só as que faltam.
-insert into categories (household_id, grp, name, sort)
-select h.id, 'variavel', v.name, v.sort
-from households h
-cross join (values ('Uber Eats e entregas', 225), ('Compras online', 315)) as v(name, sort)
-where not exists (
-  select 1 from categories c
-  where c.household_id = h.id and lower(c.name) = lower(v.name)
+-- Correções de dados que só podem correr uma vez (o workflow volta a aplicar
+-- todas as migrações em cada deploy): cada uma fica aqui registada.
+create table if not exists app_patches (
+  id text primary key,
+  applied_at timestamptz not null default now()
 );
+-- Só para o servidor: sem políticas, nenhum utilizador da app lhe acede.
+alter table app_patches enable row level security;
+
+-- Agregados existentes: acrescenta só as que faltam — uma vez, para não as
+-- recriar se depois as mudarem de nome ou removerem.
+do $$
+begin
+  if not exists (select 1 from app_patches where id = '0008_more_categories') then
+    insert into categories (household_id, grp, name, sort)
+    select h.id, 'variavel', v.name, v.sort
+    from households h
+    cross join (values ('Uber Eats e entregas', 225), ('Compras online', 315)) as v(name, sort)
+    where not exists (
+      select 1 from categories c
+      where c.household_id = h.id and lower(c.name) = lower(v.name)
+    );
+    insert into app_patches (id) values ('0008_more_categories');
+  end if;
+end
+$$;
 
 -- Agregados novos: o seed passa a incluí-las.
 create or replace function public.seed_default_categories(p_household uuid)

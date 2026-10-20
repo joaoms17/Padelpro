@@ -14,6 +14,7 @@ import {
   type MonthTotals,
 } from "@/lib/metrics";
 import { moneyOutsideHouse, aReceber, type Payment } from "@/lib/events";
+import { categoriesWithRole } from "@/lib/categories";
 import type { Category, Member } from "@/lib/types";
 import type { CategoryGroup } from "@/lib/types";
 
@@ -66,9 +67,10 @@ export async function assembleMetrics(
   const totals = monthTotals(monthTx, group);
 
   // Base fixa = salário João + renda casa arrendada (most recent monthly value).
-  const baseFixaCatIds = categories
-    .filter((c) => c.grp === "entrada" && /sal[áa]rio|renda casa/.test(c.name.toLowerCase()))
-    .map((c) => c.id);
+  const baseFixaCatIds = [
+    ...categoriesWithRole(categories, "salario"),
+    ...categoriesWithRole(categories, "renda"),
+  ].map((c) => c.id);
   const baseFixaCents = latestMonthlyEntrada(recentTx, baseFixaCatIds, today);
 
   // Fixas previstas from recurring expenses; paid-so-far from this month's fixa txs.

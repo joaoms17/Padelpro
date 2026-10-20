@@ -9,7 +9,8 @@ import {
   normalizeMerchant,
   displayMerchant,
   type Rule,
-  type MesadaRule,
+  mesadaRules,
+  type CategoryRow,
 } from "../_shared/categorize.ts";
 import { parseAppleAmount } from "../_shared/match.ts";
 
@@ -64,17 +65,12 @@ Deno.serve(async (req) => {
     // Best-effort local categorization (rules → mesada → history; no AI here).
     const [rulesRes, catsRes, membersRes, histRes] = await Promise.all([
       svc.from("rules").select("field, match_type, pattern, category_id, priority").eq("household_id", householdId),
-      svc.from("categories").select("id, name, grp").eq("household_id", householdId).eq("archived", false),
+      svc.from("categories").select("id, name, grp, sort, system_role").eq("household_id", householdId).eq("archived", false),
       svc.from("members").select("display_name, mesada_cents, mesada_day").eq("household_id", householdId),
       svc.from("transactions").select("description_raw, category_id").eq("household_id", householdId).not("category_id", "is", null).in("category_source", ["manual", "rule", "mesada"]).order("booking_date", { ascending: false }).limit(500),
     ]);
-    const categories = (catsRes.data ?? []) as { id: string; name: string; grp: string }[];
-    const mesadas: MesadaRule[] = [];
-    for (const m of membersRes.data ?? []) {
-      if (!m.mesada_cents || m.mesada_cents <= 0) continue;
-      const cat = categories.find((c) => c.grp === "mesada" && c.name.toLowerCase().includes(String(m.display_name).toLowerCase()));
-      if (cat) mesadas.push({ category_id: cat.id, mesada_cents: m.mesada_cents, mesada_day: m.mesada_day });
-    }
+    const categories = (catsRes.data ?? []) as CategoryRow[];
+    const mesadas = mesadaRules(categories, membersRes.data ?? []);
     const history = new Map<string, string>();
     for (const h of histRes.data ?? []) {
       const key = normalizeMerchant(h.description_raw);

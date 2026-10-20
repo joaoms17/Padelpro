@@ -1,5 +1,18 @@
 import { supabase } from "@/lib/supabase";
+import { categoriesWithRole } from "@/lib/categories";
+import type { Category } from "@/lib/types";
 import { addPayment } from "./events";
+
+/** The household's "Eventos Joana" category (role "eventos"), if any. */
+async function eventosCategory(householdId: string): Promise<Category | null> {
+  const { data } = await supabase
+    .from("categories")
+    .select("*")
+    .eq("household_id", householdId)
+    .eq("grp", "entrada")
+    .eq("archived", false);
+  return categoriesWithRole((data as Category[]) ?? [], "eventos")[0] ?? null;
+}
 
 export interface EventMatchRef {
   transaction_id: string;
@@ -59,13 +72,7 @@ export async function confirmEventProposal(
   });
 
   // Category the bank credit as "Eventos Joana" if that category exists.
-  const { data: cat } = await supabase
-    .from("categories")
-    .select("id")
-    .eq("household_id", householdId)
-    .eq("grp", "entrada")
-    .ilike("name", "%eventos%")
-    .maybeSingle();
+  const cat = await eventosCategory(householdId);
   if (cat) {
     await supabase
       .from("transactions")
@@ -114,13 +121,7 @@ export async function confirmSettlement(
     .update({ location: "conta_casa", transaction_id: r.transaction_id })
     .in("id", r.payment_ids);
 
-  const { data: cat } = await supabase
-    .from("categories")
-    .select("id")
-    .eq("household_id", householdId)
-    .eq("grp", "entrada")
-    .ilike("name", "%eventos%")
-    .maybeSingle();
+  const cat = await eventosCategory(householdId);
   if (cat) {
     await supabase
       .from("transactions")

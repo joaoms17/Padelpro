@@ -12,9 +12,10 @@ import {
   listRules,
   updateRule,
 } from "@/data/rules";
-import { isUsableKeyword } from "@shared/categorize";
+import { isUsableKeyword, normalizeKeyword } from "@shared/categorize";
 import { GROUP_ORDER } from "@/lib/categories";
 import type { Rule } from "@/lib/types";
+import { errorMessage } from "@/lib/errors";
 
 const FIELD_LABEL: Record<Rule["field"], string> = {
   merchant: "Descrição",
@@ -59,7 +60,8 @@ export function Regras() {
     void load();
   }, [load]);
 
-  async function act(fn: () => Promise<string | void>) {
+  /** Run a change and reload; true if it worked (the error is shown otherwise). */
+  async function act(fn: () => Promise<string | void>): Promise<boolean> {
     setBusy(true);
     setError(null);
     setMsg(null);
@@ -67,11 +69,18 @@ export function Regras() {
       const m = await fn();
       if (m) setMsg(m);
       await load();
+      return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
+      return false;
     } finally {
       setBusy(false);
     }
+  }
+
+  function edit(r: Rule | null) {
+    setError(null);
+    setEditing(r);
   }
 
   function add() {
@@ -145,7 +154,7 @@ export function Regras() {
       </div>
 
       {msg && <p className="text-sm text-petroleo">{msg}</p>}
-      {error && <p className="text-sm text-terracota">{error}</p>}
+      {error && !editing && <p className="text-sm text-terracota">{error}</p>}
 
       {rules.length > 0 && (
         <input
@@ -181,7 +190,7 @@ export function Regras() {
                   <button
                     key={r.id}
                     className="w-full text-left px-4 py-3 text-sm flex items-center justify-between gap-3"
-                    onClick={() => setEditing(r)}
+                    onClick={() => edit(r)}
                   >
                     <span className="min-w-0 truncate">
                       {!isKeywordRule(r) && (
@@ -203,26 +212,28 @@ export function Regras() {
       <EditRule
         rule={editing}
         busy={busy}
-        onClose={() => setEditing(null)}
+        error={error}
+        onClose={() => edit(null)}
         onSave={(r, patch) =>
           act(async () => {
-            await updateRule(r, patch);
-            if (patch.reapply && householdId && isKeywordRule(r)) {
+            const reapply = patch.reapply && !!householdId && isKeywordRule(r);
+            await updateRule(r, { ...patch, toTop: reapply });
+            if (reapply) {
               const n = await applyKeywordToPast(
-                householdId,
-                patch.pattern ?? r.pattern,
+                householdId!,
+                patch.pattern != null ? normalizeKeyword(patch.pattern) : r.pattern,
                 patch.categoryId ?? r.category_id,
               );
               return `Regra guardada · ${n} movimento${n === 1 ? "" : "s"} atualizado${n === 1 ? "" : "s"}.`;
             }
             return "Regra guardada.";
-          }).then(() => setEditing(null))
+          })
         }
         onDelete={(r) =>
           act(async () => {
             await deleteRule(r.id);
             return "Regra apagada. Os movimentos já categorizados ficam como estão.";
-          }).then(() => setEditing(null))
+          })
         }
       />
     </div>
@@ -232,16 +243,19 @@ export function Regras() {
 function EditRule({
   rule,
   busy,
+  error,
   onClose,
   onSave,
   onDelete,
 }: {
   rule: Rule | null;
   busy: boolean;
+  error: string | null;
   onClose: () => void;
-  onSave: (r: Rule, patch: { pattern?: string; categoryId?: string; reapply: boolean }) => void;
-  onDelete: (r: Rule) => void;
+  onSave: (r: Rule, patch: { pattern?: string; categoryId?: string; reapply: boolean }) => Promise<boolean>;
+  onDelete: (r: Rule) => Promise<boolean>;
 }) {
+  const { categoriesById } = useHousehold();
   const [pattern, setPattern] = useState("");
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [reapply, setReapply] = useState(true);
@@ -249,14 +263,20 @@ function EditRule({
 
   useEffect(() => {
     setPattern(rule?.pattern ?? "");
-    setCategoryId(rule?.category_id ?? null);
+    // A rule whose category was removed must get a new one chosen.
+    setCategoryId(rule && categoriesById.has(rule.category_id) ? rule.category_id : null);
     setReapply(true);
     setConfirmDelete(false);
+    // Reset only when another rule opens, not on a background category reload.
   }, [rule]);
 
   if (!rule) return null;
   const keyword = isKeywordRule(rule);
-  const valid = keyword ? isUsableKeyword(pattern) : !!pattern.trim();
+  const patternChanged = pattern !== rule.pattern;
+  // Only a changed text is checked: an old rule that is fine as it is stays editable.
+  const valid = !patternChanged || (keyword ? isUsableKeyword(pattern) : !!pattern.trim());
+  const categoryChanged = !!categoryId && categoryId !== rule.category_id;
+  const canReapply = keyword && reapply;
 
   return (
     <Sheet open={!!rule} onClose={onClose} title="Regra">
@@ -271,11 +291,18 @@ function EditRule({
             value={pattern}
             onChange={(e) => setPattern(e.target.value)}
           />
-          {!valid && <p className="text-xs text-terracota mt-1">Pelo menos 3 letras, sem códigos.</p>}
+          {!valid && (
+            <p className="text-xs text-terracota mt-1">
+              {keyword ? "Pelo menos 3 letras, sem códigos." : "Não pode ficar vazia."}
+            </p>
+          )}
         </div>
         <div>
           <label className="label" htmlFor="rule-cat">Vai para a categoria</label>
           <CategoryPicker id="rule-cat" value={categoryId} allowNone={false} onChange={setCategoryId} />
+          {!categoriesById.has(rule.category_id) && (
+            <p className="text-xs text-terracota mt-1">A categoria desta regra foi removida — escolhe outra.</p>
+          )}
         </div>
         {keyword && (
           <label className="flex items-center gap-2 text-sm text-tinta/70 dark:text-creme/70">
@@ -285,22 +312,25 @@ function EditRule({
               checked={reapply}
               onChange={(e) => setReapply(e.target.checked)}
             />
-            Aplicar também aos movimentos que já existem
+            Aplicar também aos movimentos que já existem — e passa a ter prioridade sobre as outras regras
           </label>
         )}
         <button
           className="btn-primary w-full"
-          disabled={busy || !valid || !categoryId}
-          onClick={() =>
-            onSave(rule, {
-              pattern: pattern !== rule.pattern ? pattern : undefined,
-              categoryId: categoryId && categoryId !== rule.category_id ? categoryId : undefined,
-              reapply: keyword && reapply,
-            })
-          }
+          disabled={busy || !valid || !categoryId || (!patternChanged && !categoryChanged && !canReapply)}
+          onClick={async () => {
+            const ok = await onSave(rule, {
+              pattern: patternChanged ? pattern : undefined,
+              categoryId: categoryChanged ? categoryId! : undefined,
+              reapply: canReapply,
+            });
+            if (ok) onClose();
+          }}
         >
           Guardar
         </button>
+
+        {error && <p className="text-sm text-terracota">{error}</p>}
 
         <div className="pt-2 border-t border-areia/50 dark:border-white/5">
           {!confirmDelete ? (
@@ -311,7 +341,9 @@ function EditRule({
             <button
               className="btn-ghost w-full text-terracota"
               disabled={busy}
-              onClick={() => onDelete(rule)}
+              onClick={async () => {
+                if (await onDelete(rule)) onClose();
+              }}
             >
               Confirmar: apagar esta regra
             </button>

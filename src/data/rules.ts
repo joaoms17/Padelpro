@@ -33,12 +33,29 @@ export async function createRule(input: {
   if (error) throw error;
 }
 
-/** Change a rule's text (keyword rules are normalised) and/or its category. */
+/**
+ * Change a rule's text (keyword rules are normalised) and/or its category.
+ * `toTop` puts it ahead of every other rule — used when it is re-applied to
+ * past movements, so new movements are filed the same way.
+ */
 export async function updateRule(
   rule: Rule,
-  patch: { pattern?: string; categoryId?: string },
+  patch: { pattern?: string; categoryId?: string; toTop?: boolean },
 ): Promise<void> {
   const update: Record<string, unknown> = {};
+  if (patch.toTop) {
+    const { data: top, error } = await supabase
+      .from("rules")
+      .select("priority")
+      .eq("household_id", rule.household_id)
+      .neq("id", rule.id)
+      .order("priority", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    const best = top?.priority as number | undefined;
+    if (best != null && rule.priority >= best) update.priority = best - 1;
+  }
   if (patch.categoryId) update.category_id = patch.categoryId;
   if (patch.pattern != null) {
     const keywordRule = rule.field === "merchant" && rule.match_type === "contains";

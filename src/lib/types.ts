@@ -66,7 +66,13 @@ export interface Category {
   rollover: boolean;
   sort: number;
   archived: boolean;
+  /** Role in the app's calculations (migration 0010); undefined before it. */
+  system_role?: SystemRole | null;
+  /** Where an archived (removed) category's movements went. */
+  merged_into?: string | null;
 }
+
+export type SystemRole = "salario" | "renda" | "eventos" | "mesada";
 
 export interface Transaction {
   id: string;

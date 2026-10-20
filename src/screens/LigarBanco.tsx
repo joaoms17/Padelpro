@@ -12,6 +12,7 @@ import {
 import { runCategorize } from "@/data/rules";
 import { formatCents } from "@/lib/format";
 import type { BankConnection } from "@/lib/types";
+import { errorMessage } from "@/lib/errors";
 
 function fmtDateTime(iso: string | null): string {
   if (!iso) return "—";
@@ -77,7 +78,7 @@ export function LigarBanco() {
     try {
       window.location.href = await startAuth();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
       setBusy(null);
     }
   }
@@ -97,7 +98,7 @@ export function LigarBanco() {
       }
       await Promise.all([refresh(), reload()]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(null);
     }
@@ -283,7 +284,7 @@ export function LigarBancoCallback() {
     }
     completeCallback(code, state)
       .then(() => navigate("/ligar-banco", { replace: true }))
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)));
+      .catch((e) => setError(errorMessage(e)));
   }, [params, navigate]);
 
   return (

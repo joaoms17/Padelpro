@@ -8,6 +8,7 @@ import { learnKeywordRule, previewKeyword } from "@/data/rules";
 import { displayMerchant, isUsableKeyword, normalizeKeyword, suggestRuleKeyword } from "@shared/categorize";
 import { formatSigned, formatDate, parseCents, formatCents } from "@/lib/format";
 import type { Transaction } from "@/lib/types";
+import { errorMessage } from "@/lib/errors";
 
 interface SplitRow {
   categoryId: string | null;
@@ -129,7 +130,7 @@ export function TransactionSheet({
       onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }
