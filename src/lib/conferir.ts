@@ -6,9 +6,13 @@ export interface JoanaMonth {
   month: string;
   /** Marked as received in the Duet app (by payment date). */
   duetCents: number;
-  /** Credits in the "Eventos Joana" category in the Santander account. */
+  /** Her money that reached the Santander account. */
   bankCents: number;
-  /** duet − bank: positive = still to transfer (or to categorize). */
+  /** Part of the difference that is not owed (set by hand, or before she started transferring). */
+  waivedCents: number;
+  /** Before her transfers started: the whole difference is not owed. */
+  autoWaived: boolean;
+  /** duet − bank − waived: positive = still to transfer. */
   diffCents: number;
   /** Running difference since the first month shown. */
   runningCents: number;
@@ -24,6 +28,9 @@ export function joanaMonths(
   months: string[],
   duet: { date: string; amount_cents: number }[],
   bank: { date: string; amount_cents: number }[],
+  waivers: Record<string, number> = {},
+  /** First month her money goes to the Santander account (earlier ones are not owed). */
+  from?: string,
 ): JoanaMonth[] {
   const d = sumByMonth(duet);
   const b = sumByMonth(bank);
@@ -31,8 +38,12 @@ export function joanaMonths(
   return months.map((month) => {
     const duetCents = d.get(month) ?? 0;
     const bankCents = b.get(month) ?? 0;
-    running += duetCents - bankCents;
-    return { month, duetCents, bankCents, diffCents: duetCents - bankCents, runningCents: running };
+    const gap = Math.max(0, duetCents - bankCents);
+    const autoWaived = !!from && month < from;
+    const waivedCents = autoWaived ? gap : Math.min(gap, Math.max(0, waivers[month] ?? 0));
+    const diffCents = duetCents - bankCents - waivedCents;
+    running += diffCents;
+    return { month, duetCents, bankCents, waivedCents, autoWaived, diffCents, runningCents: running };
   });
 }
 

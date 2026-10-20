@@ -12,7 +12,7 @@ import {
   almofadaLivre,
   type MonthTotals,
 } from "@/lib/metrics";
-import { aReceber, eventOutstanding, type Payment } from "@/lib/events";
+import { aReceber, eventOutstanding, type Payment, JOANA_TRANSFERS_FROM } from "@/lib/events";
 import { categoriesWithRole } from "@/lib/categories";
 import { buildForecast, incomeStatus, type Forecast, type ForecastLine, type IncomeStatus } from "@/lib/forecast";
 import { formatCents } from "@/lib/format";
@@ -157,12 +157,17 @@ export async function assembleMetrics(
     });
   }
 
-  // Joana's events this month: from the Duet app when connected, else the ones registered here.
+  // Joana's events this month: from the Duet app when connected, else the
+  // ones registered here — only once her money goes to the Santander account.
   const monthEnd = lastDay(month);
-  const duetMonthEvents = duet.configured
+  const joanaFrom = `${JOANA_TRANSFERS_FROM}-01`;
+  const joanaCounts = month >= JOANA_TRANSFERS_FROM;
+  const duetMonthEvents = duet.configured && joanaCounts
     ? duet.events.filter((e) => e.date >= monthStart && e.date <= monthEnd)
     : null;
-  if (duetMonthEvents) {
+  if (!joanaCounts) {
+    // Nothing expected from her events yet.
+  } else if (duetMonthEvents) {
     const toReceive = duetMonthEvents.filter((e) => e.missing_cents > 0);
     incoming.push({
       key: "duet",
@@ -195,8 +200,8 @@ export async function assembleMetrics(
   // "A receber (eventos)": overdue + the next 3 months.
   const horizon = lastDay(shiftMonth(month, 3));
   const eventosAReceber = duet.configured
-    ? duet.events.filter((e) => e.date <= horizon).reduce((a, e) => a + e.missing_cents, 0)
-    : aReceber(events, paymentsByEvent, today, 3);
+    ? duet.events.filter((e) => e.date >= joanaFrom && e.date <= horizon).reduce((a, e) => a + e.missing_cents, 0)
+    : aReceber(events.filter((e) => e.date >= joanaFrom), paymentsByEvent, today, 3);
 
   // 12-month entradas vs despesas series.
   const monthlySeries = buildSeries(recentTx, group, month, 12);

@@ -123,3 +123,10 @@ function addMonths(iso: string, months: number): string {
   const date = new Date(Date.UTC(y, m - 1 + months, d));
   return date.toISOString().slice(0, 10);
 }
+
+/**
+ * Joana's event money only goes to the Santander account from this month
+ * on: before it, nothing is expected in the forecast or checked against the
+ * bank.
+ */
+export const JOANA_TRANSFERS_FROM = "2026-11";

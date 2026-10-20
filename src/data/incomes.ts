@@ -62,3 +62,27 @@ export async function loadCredits(
   if (error) throw error;
   return (data as (Credit & { category_id: string | null })[]) ?? [];
 }
+
+/** Per month, the part of Joana's App1-vs-bank gap that is not owed (cents). */
+export async function loadJoanaWaivers(householdId: string): Promise<Record<string, number>> {
+  const { data, error } = await supabase
+    .from("settings")
+    .select("joana_waivers")
+    .eq("household_id", householdId)
+    .maybeSingle();
+  // Before migration 0013 the column does not exist: nothing waived.
+  if (error) return {};
+  return ((data as { joana_waivers?: Record<string, number> } | null)?.joana_waivers) ?? {};
+}
+
+/** Set (or clear, with null/0) a month's waiver. */
+export async function saveJoanaWaiver(householdId: string, month: string, cents: number | null): Promise<void> {
+  const current = await loadJoanaWaivers(householdId);
+  const next = { ...current };
+  if (cents && cents > 0) next[month] = Math.round(cents);
+  else delete next[month];
+  const { error } = await supabase
+    .from("settings")
+    .upsert({ household_id: householdId, joana_waivers: next }, { onConflict: "household_id" });
+  if (error) throw error;
+}
