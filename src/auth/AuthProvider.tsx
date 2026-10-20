@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { nameForEmail, allowlistConfigured } from "@/lib/members";
 import type { Member } from "@/lib/types";
 
 interface AuthState {
@@ -75,23 +76,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      // No member yet → create the household (first person) or join it (second).
-      // The name chosen at sign-up ("João"/"Joana") is stashed in localStorage.
-      let chosen = "";
-      try {
-        chosen = localStorage.getItem("cad.name") ?? "";
-      } catch {
-        /* ignore */
+      // Fixed identity from the email (João / Joana). Any other email is
+      // rejected when the allowlist is configured.
+      const mapped = nameForEmail(user!.email);
+      if (allowlistConfigured && !mapped) {
+        if (active) setMemberError("Esta app é só para o João e a Joana.");
+        return;
       }
       const fallback = (user!.email ?? "Membro").split("@")[0];
-      const display = chosen.trim() || fallback.charAt(0).toUpperCase() + fallback.slice(1);
+      const display = mapped || fallback.charAt(0).toUpperCase() + fallback.slice(1);
 
       const { error: rpcErr } = await supabase.rpc("ensure_membership", { p_display: display });
-      try {
-        localStorage.removeItem("cad.name");
-      } catch {
-        /* ignore */
-      }
       if (rpcErr) {
         // e.g. "o agregado já tem 2 membros" — this app is only for two people.
         if (active) setMemberError(rpcErr.message);

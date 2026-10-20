@@ -4,7 +4,6 @@ import { useAuth } from "@/auth/AuthProvider";
 export function Login() {
   const { signIn, signUp, configured } = useAuth();
   const [mode, setMode] = useState<"in" | "up">("in");
-  const [who, setWho] = useState<string>("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -12,10 +11,6 @@ export function Login() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (mode === "up" && !who) {
-      setError("Escolhe quem és.");
-      return;
-    }
     if (password.length < 6) {
       setError("A password tem de ter pelo menos 6 caracteres.");
       return;
@@ -23,16 +18,8 @@ export function Login() {
     setBusy(true);
     setError(null);
     try {
-      if (mode === "up") {
-        try {
-          localStorage.setItem("cad.name", who);
-        } catch {
-          /* ignore */
-        }
-        await signUp(email, password);
-      } else {
-        await signIn(email, password);
-      }
+      if (mode === "up") await signUp(email, password);
+      else await signIn(email, password);
     } catch (err) {
       setError(messageFor(err));
     } finally {
@@ -62,27 +49,6 @@ export function Login() {
         )}
 
         <form onSubmit={submit} className="space-y-4">
-          {mode === "up" && (
-            <div>
-              <label className="label">Quem és?</label>
-              <div className="flex gap-2">
-                {["João", "Joana"].map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    onClick={() => setWho(name)}
-                    className={`flex-1 py-3 rounded-2xl border text-sm font-medium ${
-                      who === name
-                        ? "bg-terracota text-creme border-terracota"
-                        : "border-areia dark:border-white/10 text-tinta/70 dark:text-creme/70"
-                    }`}
-                  >
-                    Sou {name === "João" ? "o" : "a"} {name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
           <div>
             <label className="label" htmlFor="email">Email</label>
             <input
