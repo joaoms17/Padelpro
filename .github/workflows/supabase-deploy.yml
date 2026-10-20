@@ -158,7 +158,7 @@ jobs:
 
           # 3. Fase B — the Anthropic key works and the models exist.
           if [ -n "$ANTHROPIC_API_KEY" ]; then
-            models=$(curl -sS https://api.anthropic.com/v1/models?limit=100 \
+            models=$(curl -sS 'https://api.anthropic.com/v1/models?limit=100' \
               -H "x-api-key: $ANTHROPIC_API_KEY" -H 'anthropic-version: 2023-06-01')
             if jq -e '.data' <<<"$models" > /dev/null; then
               for m in claude-haiku-5-5 claude-sonnet-5-5; do
