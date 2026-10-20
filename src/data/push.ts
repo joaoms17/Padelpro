@@ -5,11 +5,11 @@ export const VAPID_PUBLIC_KEY = (import.meta.env.VITE_VAPID_PUBLIC_KEY ?? "").tr
 
 export type NotifyPrefs = Record<string, boolean>;
 
+// Only notifications the server actually sends (alerts, notify and
+// monthly-close functions). Salary/rent arrivals, event-payment matches,
+// budget 80/100% and fixed-expense changes are not sent yet, so they are
+// not offered as toggles.
 export const NOTIFY_OPTIONS: { key: string; label: string }[] = [
-  { key: "salario_renda", label: "Entrada de salário ou renda" },
-  { key: "evento_match", label: "Entrada parecida com pagamento de evento" },
-  { key: "orcamento", label: "Orçamento a 80% / 100%" },
-  { key: "fixa", label: "Fixa mudou ou falhou" },
   { key: "eventos_fora", label: "Dinheiro de eventos por transferir há 7+ dias" },
   { key: "ligacao_banco", label: "Ligação ao banco a expirar" },
   { key: "resumo_semana", label: "Resumo semanal (domingo)" },

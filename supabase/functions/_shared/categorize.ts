@@ -146,16 +146,29 @@ export function normalizeKeyword(text: string): string {
     .trim();
 }
 
+const keep = (w: string) => w.length > 1 && !/\d/.test(w) && !NOISE_WORDS.has(w);
+
 /**
  * Suggest the part of a description worth matching on for an "always apply"
- * rule, dropping reference codes ("nk8yt9dq4") and noise words:
+ * rule: the first run of consecutive meaningful words (max 3), skipping
+ * reference codes and noise words. It is always a substring of the normalised
+ * description, so the rule matches the movement it was made from:
  * "Estrang Www Amazon Nk8yt9dq4" → "amazon", "UBER *EATS PORTUGAL" → "uber eats".
+ * Empty when nothing usable is left (e.g. an MB WAY to a phone number).
  */
 export function suggestRuleKeyword(desc: string | null): string {
-  const words = normalizeMerchant(desc)
-    .split(" ")
-    .filter((w) => w.length > 1 && !/\d/.test(w) && !NOISE_WORDS.has(w));
-  return words.slice(0, 3).join(" ") || normalizeMerchant(desc);
+  const words = normalizeMerchant(desc).split(" ");
+  const start = words.findIndex(keep);
+  if (start < 0) return "";
+  const run: string[] = [];
+  for (let i = start; i < words.length && run.length < 3 && keep(words[i]); i++) run.push(words[i]);
+  return run.join(" ");
+}
+
+/** A keyword specific enough to be a rule (at least 3 letters, not just noise). */
+export function isUsableKeyword(keyword: string): boolean {
+  const k = normalizeKeyword(keyword);
+  return (k.match(/\p{L}/gu)?.length ?? 0) >= 3 && k.split(" ").some(keep);
 }
 
 /** Does a description match a "contains" keyword rule (merchant field)? */

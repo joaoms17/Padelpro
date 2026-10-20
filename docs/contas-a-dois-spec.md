@@ -133,7 +133,7 @@ Campos: data, tipo, cliente, local, valor do serviço, ajudas de despesas (quand
 
 - **Tipos** (lista editável, valores iniciais): `Noiva`, `Convidadas`, `Concerto`, `Outro`.
 - **Estados**: `pedido` → `confirmado` → `realizado` → `pago` (ou `cancelado`).
-- **Tabela de preços opcional** (Definições, editável) para sugerir o valor ao criar o evento. Valores iniciais a confirmar com a Joana: noiva (prova + dia) 200 €, convidada 50 €, deslocação 0,40 €/km.
+- ~~Tabela de preços opcional~~ — **removida** (out. 2026, a pedido do João): o valor do evento é sempre escrito à mão.
 
 ### 5.2 Pagamentos do evento
 Cada evento tem um ou mais pagamentos: `sinal`, `restante`, `outro`.
@@ -234,7 +234,7 @@ Enquanto não houver 3 meses de histórico, a média usa os meses que existirem 
 
 1. **Início**
    - Cartão "Sobra este mês" + previsão de fim de mês.
-   - Almofada disponível, em euros e em meses, face ao alvo.
+   - Almofada disponível, em euros e em meses (sem alvo configurável — removido em out. 2026).
    - Barras de orçamento por categoria (as que têm mais movimento primeiro).
    - Alertas ativos e contador de "Por rever".
    - Próximos eventos da Joana, valor a receber e dinheiro fora da Conta Casa (se > 0).
@@ -246,7 +246,7 @@ Enquanto não houver 3 meses de histórico, a média usa os meses que existirem 
 6. **Métricas**: mês atual, fecho dos meses anteriores, evolução de 12 meses (entradas vs despesas), evolução da almofada, tendência por categoria, sazonalidade dos eventos.
 7. **Objetivos**: progresso, reservar valor da almofada, quanto falta por mês.
 8. **Pergunta à app**: chat (secção 11).
-9. **Definições**: membros, conta, mesadas (valor, dia, conta de destino), contas de origem da Joana (Revolut), alvo da almofada, tabela de preços dos eventos, categorias e regras, ligação ao banco, Atalho Apple Pay, notificações, PIN, importar extrato, exportar dados (CSV).
+9. **Definições**: membros, conta, mesadas (valor, dia, conta de destino), contas de origem da Joana (Revolut), categorias e regras, ligação ao banco, Atalho Apple Pay, notificações, PIN, importar extrato, exportar dados (CSV).
 
 **Visual** (igual à apresentação "Contas a Dois"):
 - Cores: creme `#F6F1EA`, areia `#EAE1D3`, tinta `#1E2B2F`, terracota `#A64B25`, verde-petróleo `#2E6B66`; modo claro e escuro.
@@ -265,7 +265,6 @@ Web Push (iPhone com iOS 16.4+, app adicionada ao ecrã principal, permissão pe
 | Entrada parecida com pagamento de evento | "Recebeste 150 €. É o sinal da noiva X?" |
 | Orçamento a 80% / 100% | "Supermercado já vai em 85%" |
 | Fixa mudou ou falhou | "A prestação mudou de valor" |
-| Almofada abaixo do alvo | "A almofada está em 1,5 meses (alvo: 3)" |
 | Dinheiro de eventos fora da Conta Casa há 7+ dias | "Há 300 € de eventos por transferir" |
 | Ligação ao banco a expirar | "A ligação ao Santander expira em 3 dias" |
 | Domingo 20:00 | Resumo da semana |
@@ -373,10 +372,8 @@ Em todos os marcos:
 | Valor | Onde |
 |---|---|
 | Mesada do João e da Joana: `[€__]`, dia `[__]` | Definições > Mesadas |
-| Alvo da almofada: `[__]` meses (fica na conta à ordem) | Definições > Almofada |
 | Orçamento por categoria de variáveis: `[€__]` | Orçamento |
 | Objetivos 2027 (férias, concertos, amortização) | Objetivos |
-| Tabela de preços dos eventos (confirmar valores iniciais) | Definições > Atividade |
 
 ---
 
@@ -396,3 +393,9 @@ Em todos os marcos:
 - Calendário dos eventos em `.ics` para subscrever no iPhone.
 - Ajuda para o IRS da atividade (totais anuais por categoria).
 - Widget no ecrã principal com a sobra do mês.
+
+> **Alterações (out. 2026):** removidos das Definições, a pedido do João, o alvo
+> da almofada (e o alerta "almofada abaixo do alvo"), a tabela de preços dos
+> eventos e a reserva para impostos. As colunas `settings.cushion_target_months`,
+> `price_table` e `tax_rate` ficam na base de dados mas não são usadas.
+> Acrescentadas as categorias "Compras online" e "Uber Eats e entregas".

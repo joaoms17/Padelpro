@@ -5,7 +5,7 @@
 --
 -- Horas em UTC. Lisboa = UTC+1 no verão (WEST) e UTC no inverno (WET).
 --   eb-sync-morning / eb-sync-evening  06:00 e 18:00  sincronizar o banco
---   daily-alerts                       08:30          orçamento/almofada/consentimento
+--   daily-alerts                       08:30          consentimento/eventos por transferir
 --   monthly-close                      dia 1, 08:00   fecho do mês + resumo IA
 --   weekly-summary                     domingo 19:00  resumo semanal (push)
 --   cron-cleanup                       domingo 03:00  limpa o histórico dos crons

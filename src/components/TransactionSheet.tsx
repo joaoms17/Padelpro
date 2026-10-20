@@ -5,7 +5,7 @@ import { useAuth } from "@/auth/AuthProvider";
 import { useHousehold } from "@/data/household";
 import { setCategory, setNote, setSplits } from "@/data/transactions";
 import { learnKeywordRule, previewKeyword } from "@/data/rules";
-import { displayMerchant, suggestRuleKeyword } from "@shared/categorize";
+import { displayMerchant, isUsableKeyword, normalizeKeyword, suggestRuleKeyword } from "@shared/categorize";
 import { formatSigned, formatDate, parseCents, formatCents } from "@/lib/format";
 import type { Transaction } from "@/lib/types";
 
@@ -31,7 +31,9 @@ export function TransactionSheet({
   const [splits, setSplitRows] = useState<SplitRow[]>([]);
   const [applyAlways, setApplyAlways] = useState(false);
   const [keyword, setKeyword] = useState("");
-  const [preview, setPreview] = useState<{ matches: number; willChange: number } | null>(null);
+  const [preview, setPreview] = useState<
+    { keyword: string; matches: number; willChange: number } | "error" | null
+  >(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,14 +48,17 @@ export function TransactionSheet({
     setError(null);
   }, [tx]);
 
-  // Live count of the movements the keyword catches (debounced).
+  // Live count of the movements the keyword catches (debounced). The preview
+  // records which keyword it is for, so a stale count is never shown/saved.
   useEffect(() => {
     if (!applyAlways || !householdId) return;
+    setPreview(null);
+    if (!isUsableKeyword(keyword)) return;
     let active = true;
     const t = setTimeout(() => {
       previewKeyword(householdId, keyword)
         .then((p) => active && setPreview(p))
-        .catch(() => active && setPreview(null));
+        .catch(() => active && setPreview("error"));
     }, 350);
     return () => {
       active = false;
@@ -65,6 +70,11 @@ export function TransactionSheet({
 
   const merchant = tx.merchant_clean || displayMerchant(tx.description_raw);
   const categoryChanged = categoryId !== (tx.category_id ?? null);
+  // "Aplicar sempre" is only saved once the count shown is for this keyword.
+  const previewFresh =
+    preview != null && preview !== "error" && preview.keyword === normalizeKeyword(keyword);
+  const ruleBlocked =
+    applyAlways && !splitting && categoryChanged && (!isUsableKeyword(keyword) || !previewFresh);
 
   const totalCents = Math.abs(tx.amount_cents);
   const splitSum = splits.reduce((a, s) => a + (parseCents(s.amount) ?? 0), 0);
@@ -105,7 +115,7 @@ export function TransactionSheet({
       } else {
         await setCategory(tx.id, categoryId);
         await setSplits(tx.id, []); // clear any prior split
-        if (applyAlways && categoryId && householdId && keyword.trim()) {
+        if (applyAlways && categoryId && householdId) {
           await learnKeywordRule({
             householdId,
             keyword,
@@ -175,15 +185,17 @@ export function TransactionSheet({
                       aria-label="Texto que a descrição tem de conter"
                     />
                     <p className="text-xs text-tinta/50 dark:text-creme/50">
-                      {!keyword.trim()
-                        ? "Escreve uma parte da descrição (sem códigos)."
-                        : preview == null
-                          ? "A contar…"
-                          : `Apanha ${preview.matches} movimento${preview.matches === 1 ? "" : "s"}` +
-                            (preview.willChange > 0
-                              ? ` · ${preview.willChange} passa${preview.willChange === 1 ? "" : "m"} a esta categoria`
-                              : "") +
-                            ". Os que categorizaste à mão ficam como estão."}
+                      {!isUsableKeyword(keyword)
+                        ? "Escreve uma parte da descrição com pelo menos 3 letras (sem códigos)."
+                        : preview === "error"
+                          ? "Não consegui contar os movimentos — tenta outra vez."
+                          : !previewFresh
+                            ? "A contar…"
+                            : `Apanha ${preview.matches} movimento${preview.matches === 1 ? "" : "s"}` +
+                              (preview.willChange > 0
+                                ? ` · ${preview.willChange} passa${preview.willChange === 1 ? "" : "m"} a esta categoria`
+                                : "") +
+                              ". Os que categorizaste à mão ficam como estão."}
                     </p>
                   </div>
                 )}
@@ -269,7 +281,7 @@ export function TransactionSheet({
 
         {error && <p className="text-sm text-terracota">{error}</p>}
 
-        <button className="btn-primary w-full" disabled={busy} onClick={save}>
+        <button className="btn-primary w-full" disabled={busy || ruleBlocked} onClick={save}>
           {busy ? "A guardar…" : "Guardar"}
         </button>
         {tx.category_id && categoriesById.get(tx.category_id) && (

@@ -1,6 +1,6 @@
 import { supabase } from "@/lib/supabase";
 import { invokeFn } from "@/lib/invoke";
-import { matchesKeyword, normalizeKeyword } from "@shared/categorize";
+import { isUsableKeyword, matchesKeyword, normalizeKeyword } from "@shared/categorize";
 import type { Rule } from "@/lib/types";
 
 export async function listRules(householdId: string): Promise<Rule[]> {
@@ -45,35 +45,46 @@ interface PastTx {
   category_source: string | null;
 }
 
-/** A category the user did not set by hand (so a rule may replace it). */
-const replaceable = (t: PastTx) => !t.category_id || t.category_source === "ai" || t.category_source === "history";
+// A new "Aplicar sempre" may replace what was categorized automatically or by
+// an older rule — never a category set by hand, a mesada or an Apple Pay match.
+const REPLACEABLE_SOURCES = ["ai", "history", "rule"];
+const replaceable = (t: PastTx) => !t.category_id || REPLACEABLE_SOURCES.includes(t.category_source ?? "");
 
+/** Every movement of the household matching the keyword (paged: no row cap). */
 async function pastMatches(householdId: string, keyword: string): Promise<PastTx[]> {
-  const { data } = await supabase
-    .from("transactions")
-    .select("id, description_raw, category_id, category_source")
-    .eq("household_id", householdId)
-    .is("matched_transaction_id", null)
-    .order("booking_date", { ascending: false })
-    .limit(5000);
-  return ((data as PastTx[]) ?? []).filter((t) => matchesKeyword(t.description_raw, keyword));
+  const out: PastTx[] = [];
+  const PAGE = 1000;
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("id, description_raw, category_id, category_source")
+      .eq("household_id", householdId)
+      .is("matched_transaction_id", null)
+      .order("id")
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data as PastTx[]) ?? [];
+    out.push(...rows.filter((t) => matchesKeyword(t.description_raw, keyword)));
+    if (rows.length < PAGE) break;
+  }
+  return out;
 }
 
 /** How many movements a keyword catches, and how many it would re-categorize. */
 export async function previewKeyword(
   householdId: string,
   keyword: string,
-): Promise<{ matches: number; willChange: number }> {
-  if (!normalizeKeyword(keyword)) return { matches: 0, willChange: 0 };
-  const rows = await pastMatches(householdId, keyword);
-  return { matches: rows.length, willChange: rows.filter(replaceable).length };
+): Promise<{ keyword: string; matches: number; willChange: number }> {
+  const k = normalizeKeyword(keyword);
+  if (!isUsableKeyword(k)) return { keyword: k, matches: 0, willChange: 0 };
+  const rows = await pastMatches(householdId, k);
+  return { keyword: k, matches: rows.length, willChange: rows.filter(replaceable).length };
 }
 
 /**
  * Apply a keyword rule to past movements, matching exactly like the server
- * rule engine does. Only touches movements that are uncategorized or were
- * categorized automatically (ai/history) — never a category the user set by
- * hand, a rule/mesada match, or a split.
+ * rule engine does. The "not set by hand" condition is re-checked in each
+ * UPDATE, so a category someone sets meanwhile is never overwritten.
  */
 export async function applyKeywordToPast(
   householdId: string,
@@ -81,17 +92,25 @@ export async function applyKeywordToPast(
   categoryId: string,
 ): Promise<number> {
   const ids = (await pastMatches(householdId, keyword)).filter(replaceable).map((t) => t.id);
+  let updated = 0;
   for (let i = 0; i < ids.length; i += 100) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("transactions")
       .update({ category_id: categoryId, category_source: "rule", updated_at: new Date().toISOString() })
-      .in("id", ids.slice(i, i + 100));
+      .in("id", ids.slice(i, i + 100))
+      .or(`category_id.is.null,category_source.in.(${REPLACEABLE_SOURCES.join(",")})`)
+      .select("id");
     if (error) throw error;
+    updated += data?.length ?? 0;
   }
-  return ids.length;
+  return updated;
 }
 
-/** Create an "always categorize movements containing <keyword>" rule. */
+/**
+ * Create an "always categorize movements containing <keyword>" rule. It is
+ * placed ahead of every existing rule, so re-filing a merchant (e.g. Uber
+ * Eats out of Restaurantes) wins over an older rule for it.
+ */
 export async function learnKeywordRule(input: {
   householdId: string;
   keyword: string;
@@ -100,13 +119,21 @@ export async function learnKeywordRule(input: {
   applyToPast: boolean;
 }): Promise<number> {
   const pattern = normalizeKeyword(input.keyword);
-  if (!pattern) return 0;
+  if (!isUsableKeyword(pattern)) throw new Error("A palavra-chave tem de ter pelo menos 3 letras.");
+  const { data: top } = await supabase
+    .from("rules")
+    .select("priority")
+    .eq("household_id", input.householdId)
+    .order("priority", { ascending: true })
+    .limit(1)
+    .maybeSingle();
   await createRule({
     householdId: input.householdId,
     field: "merchant",
     matchType: "contains",
     pattern,
     categoryId: input.categoryId,
+    priority: Math.min(100, ((top?.priority as number | undefined) ?? 100) - 1),
     createdBy: input.createdBy,
   });
   return input.applyToPast ? await applyKeywordToPast(input.householdId, pattern, input.categoryId) : 0;

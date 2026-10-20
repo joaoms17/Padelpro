@@ -12,6 +12,7 @@ import {
   type MesadaRule,
   suggestRuleKeyword,
   matchesKeyword,
+  isUsableKeyword,
 } from "./categorize";
 
 const tx = (over: Partial<TxLite>): TxLite => ({
@@ -144,9 +145,38 @@ describe("suggestRuleKeyword", () => {
     expect(suggestRuleKeyword("COMPRA 4521 WWW.AMAZON.ES MKTP 12/10")).toBe("amazon");
     expect(suggestRuleKeyword("Continente Bom Dia Lisboa")).toBe("continente bom dia");
   });
-  it("falls back to the normalised description when nothing is left", () => {
-    expect(suggestRuleKeyword("WWW 123456")).toBe("www");
+  it("is empty when nothing usable is left", () => {
+    expect(suggestRuleKeyword("WWW 123456")).toBe("");
+    expect(suggestRuleKeyword("MB WAY P/ 912345678")).toBe("");
     expect(suggestRuleKeyword(null)).toBe("");
+  });
+  it("only joins consecutive words, so it always matches its own movement", () => {
+    const samples = [
+      "Compra Aliexpress.com Dublin Ie",
+      "Estrang Www Shein Com Dublin Ie",
+      "NETFLIX.COM AMSTERDAM",
+      "SPOTIFY P1A2B3C4D5 STOCKHOLM",
+      "Estrang Www Amazon Nk8yt9dq4 Lu",
+      "COMPRA 4521 ZARA LISBOA 12/10",
+      "UBER *EATS PORTUGAL",
+      "Estrang Www Amazon Nk8yt9dq4",
+    ];
+    for (const d of samples) {
+      const k = suggestRuleKeyword(d);
+      expect(k, d).not.toBe("");
+      expect(matchesKeyword(d, k), `${d} → ${k}`).toBe(true);
+    }
+    expect(suggestRuleKeyword("NETFLIX.COM AMSTERDAM")).toBe("netflix");
+  });
+});
+
+describe("isUsableKeyword", () => {
+  it("rejects keywords too short or made of noise", () => {
+    expect(isUsableKeyword("p")).toBe(false);
+    expect(isUsableKeyword("e ")).toBe(false);
+    expect(isUsableKeyword("www")).toBe(false);
+    expect(isUsableKeyword("amazon")).toBe(true);
+    expect(isUsableKeyword("uber eats")).toBe(true);
   });
 });
 
