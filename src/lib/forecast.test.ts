@@ -3,6 +3,7 @@ import {
   buildForecast,
   incomeStatus,
   isDueInMonth,
+  matchingCredits,
   nextDueMonth,
   suggestIncomes,
   variaveisRestantes,
@@ -56,10 +57,35 @@ describe("incomeStatus", () => {
     const st = incomeStatus([salario, repres, { ...salario, id: "dup" }], credits, "2026-10", "2026-10-25");
     expect(st.map((x) => x.pendingCents)).toEqual([0, 0, 250000]);
   });
+  it("salary paid with the subsídio (~2×) near its day is the salary, not counted twice", () => {
+    const credits = [credit("2026-12-18", 475000)];
+    const [s, r] = incomeStatus([salario, repres], credits, "2026-12", "2026-12-20");
+    expect(s).toMatchObject({ receivedCents: 475000, pendingCents: 0 });
+    expect(r).toMatchObject({ receivedCents: 0, pendingCents: 100000 });
+  });
+  it("a big movement far from the income's day does not count for it", () => {
+    // Only the 500 € expenses (day 10) are set up; the salary on the 23rd is something else.
+    const [r] = incomeStatus([repres], [credit("2026-10-23", 250000)], "2026-10", "2026-10-25");
+    expect(r).toMatchObject({ receivedCents: 0, pendingCents: 100000 });
+  });
+  it("size-matching movements go first, so the expenses keep their 500 € transfers", () => {
+    const credits = [credit("2026-10-09", 50000), credit("2026-10-10", 50000), credit("2026-10-22", 500000)];
+    const [s, r] = incomeStatus([salario, repres], credits, "2026-10", "2026-10-25");
+    expect(s.pendingCents).toBe(0);
+    expect(r).toMatchObject({ receivedCents: 100000, pendingCents: 0 });
+  });
   it("only incomes due this month; without keyword it counts as arrived after its day", () => {
     const noKw = income({ id: "renda", label: "Renda", amount_cents: 65000, day: 8, match_text: null });
     expect(incomeStatus([repres, noKw], [], "2026-11", "2026-11-05").map((x) => [x.income.id, x.pendingCents])).toEqual([["renda", 65000]]);
     expect(incomeStatus([noKw], [], "2026-11", "2026-11-09")[0]).toMatchObject({ pendingCents: 0, detectable: false });
+  });
+});
+
+describe("matchingCredits", () => {
+  it("previews size matches and a bigger one near the day", () => {
+    const cs = [credit("2026-12-18", 475000), credit("2026-11-23", 250000), credit("2026-11-10", 50000)];
+    expect(matchingCredits("NTT Data", 250000, 23, cs).map((c) => c.amount_cents)).toEqual([475000, 250000]);
+    expect(matchingCredits("ntt data", 50000, 10, cs).map((c) => c.amount_cents)).toEqual([50000]);
   });
 });
 

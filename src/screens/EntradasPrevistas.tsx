@@ -260,8 +260,8 @@ function EditIncome({
   const dayN = Number(day);
   const valid = !!label.trim() && amountCents > 0 && dayN >= 1 && dayN <= 31;
   const matches = useMemo(
-    () => (keyword.trim() && amountCents > 0 ? matchingCredits(keyword, amountCents / parts, credits) : []),
-    [keyword, amountCents, parts, credits],
+    () => (keyword.trim() && amountCents > 0 ? matchingCredits(keyword, amountCents / parts, dayN, credits) : []),
+    [keyword, amountCents, parts, dayN, credits],
   );
 
   if (!draft) return null;

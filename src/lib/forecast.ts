@@ -78,18 +78,38 @@ function fitsPart(c: Credit, keyword: string, partCents: number): boolean {
   );
 }
 
-/** Credits that would count for an income with this keyword and part size (newest first). */
-export function matchingCredits(matchText: string, partCents: number, credits: Credit[]): Credit[] {
+/** How many days a movement is from the income's usual day of the month. */
+const LARGE_WINDOW_DAYS = 7;
+const daysFrom = (c: Credit, day: number) => Math.abs(Number(c.booking_date.slice(8, 10)) - day);
+
+/**
+ * A bigger movement with the keyword near the income's day also counts: the
+ * salary paid together with the subsídio de Natal or de férias (~2×) is
+ * still the salary. Far from the day it is something else (e.g. the salary
+ * is not the 500 € representation expenses paid on the 10th).
+ */
+function fitsLarge(c: Credit, keyword: string, partCents: number, day: number): boolean {
+  return (
+    c.amount_cents > partCents * 1.5 &&
+    daysFrom(c, day) <= LARGE_WINDOW_DAYS &&
+    normalizeMerchant(c.description_raw).includes(keyword)
+  );
+}
+
+/** Credits that would count for an income with this keyword, part size and day (newest first). */
+export function matchingCredits(matchText: string, partCents: number, day: number, credits: Credit[]): Credit[] {
   const keyword = normalizeKeyword(matchText);
   if (!keyword || !(partCents > 0)) return [];
   return credits
-    .filter((c) => fitsPart(c, keyword, partCents))
+    .filter((c) => fitsPart(c, keyword, partCents) || fitsLarge(c, keyword, partCents, day))
     .sort((a, b) => b.booking_date.localeCompare(a.booking_date));
 }
 
 /**
  * For each income due in `month`: what already arrived (this month's credits)
- * and what is still to come. Each movement counts for one income only.
+ * and what is still to come. Each movement counts for one income only:
+ * first movements of about the expected size, then — for what is still
+ * missing — a bigger one with the keyword near the income's day.
  */
 export function incomeStatus(
   incomes: ExpectedIncome[],
@@ -106,21 +126,29 @@ export function incomeStatus(
   const used = new Set<string>();
   const todayDay = today.slice(0, 7) === month ? Number(today.slice(8, 10)) : today.slice(0, 7) > month ? 99 : 0;
 
-  const out = due.map((income): IncomeStatus => {
-    const keyword = normalizeKeyword(income.match_text ?? "");
+  const state = due.map((income) => ({
+    income,
+    keyword: normalizeKeyword(income.match_text ?? ""),
+    part: income.amount_cents / Math.max(1, income.parts),
+    received: 0,
+    n: 0,
+  }));
+  const take = (st: (typeof state)[number], fits: (c: Credit) => boolean) => {
+    for (const c of credits) {
+      if (st.n >= Math.max(1, st.income.parts) || st.received >= st.income.amount_cents) return;
+      if (used.has(c.id) || !fits(c)) continue;
+      used.add(c.id);
+      st.received += c.amount_cents;
+      st.n++;
+    }
+  };
+  for (const st of state) if (st.keyword) take(st, (c) => fitsPart(c, st.keyword, st.part));
+  for (const st of state) if (st.keyword) take(st, (c) => fitsLarge(c, st.keyword, st.part, st.income.day));
+
+  const out = state.map(({ income, keyword, received }): IncomeStatus => {
     if (!keyword) {
       const arrived = todayDay > income.day;
       return { income, receivedCents: arrived ? income.amount_cents : 0, pendingCents: arrived ? 0 : income.amount_cents, detectable: false };
-    }
-    const part = income.amount_cents / Math.max(1, income.parts);
-    let received = 0;
-    let n = 0;
-    for (const c of credits) {
-      if (n >= Math.max(1, income.parts) || received >= income.amount_cents) break;
-      if (used.has(c.id) || !fitsPart(c, keyword, part)) continue;
-      used.add(c.id);
-      received += c.amount_cents;
-      n++;
     }
     return { income, receivedCents: received, pendingCents: Math.max(0, income.amount_cents - received), detectable: true };
   });
