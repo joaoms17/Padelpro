@@ -56,12 +56,16 @@ export function incomeMonths(
   months: string[],
   today: string,
 ): Map<string, IncomeMonth[]> {
-  const received = new Map<string, number>(incomes.map((i) => [i.id, 0]));
+  // Every transfer counted for each income, oldest first.
+  const got = new Map<string, Credit[]>(incomes.map((i) => [i.id, []]));
+  const byId = new Map(credits.map((c) => [c.id, c]));
   for (const month of months) {
-    const inMonth = credits.filter((c) => c.booking_date.slice(0, 7) === month);
+    const inMonth = credits
+      .filter((c) => c.booking_date.slice(0, 7) === month)
+      .sort((x, y) => x.booking_date.localeCompare(y.booking_date));
     const statuses = incomeStatus(incomes, inMonth, month, today);
     const used = new Set(statuses.flatMap((s) => s.creditIds));
-    for (const s of statuses) received.set(s.income.id, received.get(s.income.id)! + s.receivedCents);
+    for (const s of statuses) got.get(s.income.id)!.push(...s.creditIds.map((id) => byId.get(id)!));
     // Extra transfers (catching up, or in a month it isn't due) go to the
     // income they fit best, whatever the day.
     for (const c of inMonth) {
@@ -69,22 +73,38 @@ export function incomeMonths(
       const fits = incomes
         .filter((i) => i.match_text && looselyFits(c, i.match_text, i.amount_cents / Math.max(1, i.parts)))
         .sort((x, y) => partGap(c, x) - partGap(c, y));
-      if (fits[0]) received.set(fits[0].id, received.get(fits[0].id)! + c.amount_cents);
+      if (fits[0]) got.get(fits[0].id)!.push(c);
     }
   }
 
   const out = new Map<string, IncomeMonth[]>();
   for (const inc of incomes) {
-    let pool = received.get(inc.id)!;
+    const parts = Math.max(1, inc.parts);
+    const part = inc.amount_cents / parts;
+    const queue = got.get(inc.id)!.sort((x, y) => x.booking_date.localeCompare(y.booking_date));
+    let next = 0;
     out.set(
       inc.id,
       months.map((month) => {
         const due = isDueInMonth(inc, month);
         if (!due) return { month, due, expectedCents: 0, receivedCents: 0, missingCents: 0 };
-        const covered = Math.min(inc.amount_cents, pool);
-        pool -= covered;
-        const missing = covered >= inc.amount_cents * 0.95 ? 0 : inc.amount_cents - covered;
-        return { month, due, expectedCents: inc.amount_cents, receivedCents: covered, missingCents: missing };
+        // Each due month takes its parts from the oldest transfers left; the
+        // amounts may vary (salary), a part counts once it looks like one.
+        let received = 0;
+        let whole = 0;
+        while (next < queue.length && whole < parts && received < inc.amount_cents * 0.95) {
+          const c = queue[next++];
+          received += c.amount_cents;
+          if (c.amount_cents >= part * 0.7) whole++;
+        }
+        const done = whole >= parts || received >= inc.amount_cents * 0.95;
+        return {
+          month,
+          due,
+          expectedCents: inc.amount_cents,
+          receivedCents: received,
+          missingCents: done ? 0 : Math.max(0, inc.amount_cents - received),
+        };
       }),
     );
   }

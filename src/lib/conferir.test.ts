@@ -37,4 +37,9 @@ describe("incomeMonths", () => {
     const r = incomeMonths([sal], c, ["2026-09", "2026-10"], "2026-10-20").get("s")!;
     expect(r.map((m) => m.missingCents)).toEqual([0, 0]);
   });
+  it("a lower salary month is still ✓, with the real amount", () => {
+    const c = [{ id: "1", booking_date: "2026-08-22", amount_cents: 210000, description_raw: "TRF NTT DATA" }];
+    const r = incomeMonths([sal], c, ["2026-08"], "2026-10-20").get("s")!;
+    expect(r[0]).toMatchObject({ receivedCents: 210000, missingCents: 0 });
+  });
 });

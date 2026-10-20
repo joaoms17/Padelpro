@@ -118,6 +118,16 @@ export function matchingCredits(matchText: string, partCents: number, day: numbe
 }
 
 /**
+ * A salary is not the same every month: an income has arrived once each of
+ * its parts came in as a transfer of roughly the expected size (≥ 70%), or
+ * (almost) its whole amount did.
+ */
+const WHOLE_PART = 0.7;
+function arrived(st: { income: ExpectedIncome; received: number; whole: number }): boolean {
+  return st.whole >= Math.max(1, st.income.parts) || st.received >= st.income.amount_cents * 0.95;
+}
+
+/**
  * For each income due in `month`: what already arrived (this month's credits)
  * and what is still to come. Each movement counts for one income only, best
  * fits first (closest amount and day), so a refund or a separate subsídio
@@ -139,6 +149,8 @@ export function incomeStatus(
     part: income.amount_cents / Math.max(1, income.parts),
     received: 0,
     ids: [] as string[],
+    /** Transfers that look like a whole part (amounts vary month to month). */
+    whole: 0,
   }));
   const pairs: { st: (typeof state)[number]; c: Credit; score: number }[] = [];
   for (const st of state) {
@@ -150,19 +162,20 @@ export function incomeStatus(
   pairs.sort((x, y) => x.score - y.score || x.c.booking_date.localeCompare(y.c.booking_date));
   const used = new Set<string>();
   for (const { st, c } of pairs) {
-    // Done once (almost) the whole amount arrived; small differences are rounding/fees.
-    if (used.has(c.id) || st.received >= st.income.amount_cents * 0.95) continue;
+    if (used.has(c.id) || arrived(st)) continue;
     used.add(c.id);
     st.received += c.amount_cents;
     st.ids.push(c.id);
+    if (c.amount_cents >= st.part * WHOLE_PART) st.whole++;
   }
 
-  return state.map(({ income, keyword, received, ids }): IncomeStatus => {
+  return state.map((st): IncomeStatus => {
+    const { income, keyword, received, ids } = st;
     if (!keyword) {
       const arrived = todayDay > income.day;
       return { income, receivedCents: arrived ? income.amount_cents : 0, pendingCents: arrived ? 0 : income.amount_cents, detectable: false, creditIds: [] };
     }
-    const pending = received >= income.amount_cents * 0.95 ? 0 : income.amount_cents - received;
+    const pending = arrived(st) ? 0 : income.amount_cents - received;
     return { income, receivedCents: received, pendingCents: Math.max(0, pending), detectable: true, creditIds: ids };
   });
 }
