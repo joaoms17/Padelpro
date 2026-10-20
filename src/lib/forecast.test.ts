@@ -74,6 +74,21 @@ describe("incomeStatus", () => {
     expect(s.pendingCents).toBe(0);
     expect(r).toMatchObject({ receivedCents: 100000, pendingCents: 0 });
   });
+  it("a separate subsídio or refund does not replace the salary once it lands", () => {
+    const credits = [credit("2026-06-15", 220000), credit("2026-06-23", 250000)];
+    expect(incomeStatus([salario], credits, "2026-06", "2026-06-25")[0]).toMatchObject({ receivedCents: 250000, pendingCents: 0 });
+  });
+  it("a small NTT refund does not take a 500 € slot", () => {
+    const credits = [credit("2026-10-05", 30000), credit("2026-10-10", 50000), credit("2026-10-10", 50000)];
+    expect(incomeStatus([repres], credits, "2026-10", "2026-10-12")[0]).toMatchObject({ receivedCents: 100000, pendingCents: 0 });
+  });
+  it("last month's late salary on the 1st is not this month's", () => {
+    expect(incomeStatus([salario], [credit("2026-10-01", 250000)], "2026-10", "2026-10-05")[0].pendingCents).toBe(250000);
+  });
+  it("an early December payroll (salary + Natal) is the salary, never the 500 € expenses", () => {
+    const st = incomeStatus([salario, { ...repres, anchor_month: "2026-12-01" }], [credit("2026-12-15", 500000)], "2026-12", "2026-12-16");
+    expect(st.map((x) => x.pendingCents)).toEqual([0, 100000]);
+  });
   it("only incomes due this month; without keyword it counts as arrived after its day", () => {
     const noKw = income({ id: "renda", label: "Renda", amount_cents: 65000, day: 8, match_text: null });
     expect(incomeStatus([repres, noKw], [], "2026-11", "2026-11-05").map((x) => [x.income.id, x.pendingCents])).toEqual([["renda", 65000]]);
