@@ -1,15 +1,5 @@
 import { useHousehold } from "@/data/household";
-import { GROUP_LABELS } from "@/lib/categories";
-import type { CategoryGroup } from "@/lib/types";
-
-const GROUP_ORDER: CategoryGroup[] = [
-  "entrada",
-  "fixa",
-  "variavel",
-  "atividade",
-  "mesada",
-  "interna",
-];
+import { GROUP_ORDER } from "@/lib/categories";
 
 export function CategoryPicker({
   value,
@@ -24,7 +14,7 @@ export function CategoryPicker({
   placeholder?: string;
   id?: string;
 }) {
-  const { categories } = useHousehold();
+  const { categories, groupLabels } = useHousehold();
 
   return (
     <select
@@ -46,7 +36,7 @@ export function CategoryPicker({
         const inGroup = categories.filter((c) => c.grp === grp);
         if (inGroup.length === 0) return null;
         return (
-          <optgroup key={grp} label={GROUP_LABELS[grp]}>
+          <optgroup key={grp} label={groupLabels[grp]}>
             {inGroup.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}

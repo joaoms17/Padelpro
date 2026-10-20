@@ -33,6 +33,25 @@ export async function createRule(input: {
   if (error) throw error;
 }
 
+/** Change a rule's text (keyword rules are normalised) and/or its category. */
+export async function updateRule(
+  rule: Rule,
+  patch: { pattern?: string; categoryId?: string },
+): Promise<void> {
+  const update: Record<string, unknown> = {};
+  if (patch.categoryId) update.category_id = patch.categoryId;
+  if (patch.pattern != null) {
+    const keywordRule = rule.field === "merchant" && rule.match_type === "contains";
+    const p = keywordRule ? normalizeKeyword(patch.pattern) : patch.pattern.trim();
+    if (keywordRule && !isUsableKeyword(p)) throw new Error("A regra tem de ter pelo menos 3 letras.");
+    if (!p) throw new Error("A regra não pode ficar vazia.");
+    update.pattern = p;
+  }
+  if (Object.keys(update).length === 0) return;
+  const { error } = await supabase.from("rules").update(update).eq("id", rule.id);
+  if (error) throw error;
+}
+
 export async function deleteRule(id: string): Promise<void> {
   const { error } = await supabase.from("rules").delete().eq("id", id);
   if (error) throw error;

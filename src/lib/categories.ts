@@ -7,6 +7,10 @@ export interface SeedCategory {
   name: string;
 }
 
+/** Order of the groups ("separadores") everywhere in the app. */
+export const GROUP_ORDER: CategoryGroup[] = ["entrada", "fixa", "variavel", "atividade", "mesada", "interna"];
+
+/** Default group names; each household can rename them (settings.group_labels). */
 export const GROUP_LABELS: Record<CategoryGroup, string> = {
   entrada: "Entradas",
   fixa: "Fixas",
@@ -37,6 +41,7 @@ export const SEED_CATEGORIES: SeedCategory[] = [
   // Variáveis do casal
   { grp: "variavel", name: "Supermercado" },
   { grp: "variavel", name: "Restaurantes e saídas" },
+  { grp: "variavel", name: "Uber Eats e entregas" },
   { grp: "variavel", name: "Combustível e carregamentos" },
   { grp: "variavel", name: "Transportes e portagens" },
   { grp: "variavel", name: "Casa e manutenção" },
@@ -46,6 +51,7 @@ export const SEED_CATEGORIES: SeedCategory[] = [
   { grp: "variavel", name: "Lazer e concertos" },
   { grp: "variavel", name: "Viagens" },
   { grp: "variavel", name: "Prendas" },
+  { grp: "variavel", name: "Compras online" },
   { grp: "variavel", name: "Outras variáveis" },
   // Atividade Joana
   { grp: "atividade", name: "Material" },
@@ -58,3 +64,25 @@ export const SEED_CATEGORIES: SeedCategory[] = [
   // Transferências internas
   { grp: "interna", name: "Entre contas" },
 ];
+
+/** Default group names overridden by the household's own (blank = default). */
+export function mergeGroupLabels(
+  custom: Partial<Record<string, string>> | null | undefined,
+): Record<CategoryGroup, string> {
+  const out = { ...GROUP_LABELS };
+  for (const g of GROUP_ORDER) {
+    const v = custom?.[g]?.trim();
+    if (v) out[g] = v;
+  }
+  return out;
+}
+
+/**
+ * Categories the app recognises by name or group (base fixa = salário + renda,
+ * event payments = "Eventos…", mesadas by member name). Renaming, moving or
+ * removing them would silently break those calculations, so they are locked.
+ */
+export function isProtectedCategory(c: { grp: CategoryGroup; name: string }): boolean {
+  if (c.grp === "mesada") return true;
+  return c.grp === "entrada" && /sal[áa]rio|renda casa|eventos/i.test(c.name);
+}
