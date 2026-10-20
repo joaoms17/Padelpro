@@ -128,6 +128,42 @@ export function displayMerchant(desc: string | null): string {
     .join(" ");
 }
 
+// Words that say nothing about the merchant: card/foreign-purchase markers,
+// web prefixes, legal forms and country names.
+const NOISE_WORDS = new Set([
+  "estrang", "estrangeiro", "www", "http", "https", "com", "net", "org", "pt",
+  "eu", "sa", "lda", "unipessoal", "sl", "ltd", "inc", "gmbh", "bv", "portugal",
+  "lisboa", "porto", "europe", "intl", "online", "store", "shop", "pay", "payments",
+  "es", "de", "fr", "it", "uk", "nl", "ie", "us", "co", "mktp", "marketplace",
+]);
+
+/** Normalise a user-typed rule keyword the same way descriptions are. */
+export function normalizeKeyword(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N} ]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Suggest the part of a description worth matching on for an "always apply"
+ * rule, dropping reference codes ("nk8yt9dq4") and noise words:
+ * "Estrang Www Amazon Nk8yt9dq4" → "amazon", "UBER *EATS PORTUGAL" → "uber eats".
+ */
+export function suggestRuleKeyword(desc: string | null): string {
+  const words = normalizeMerchant(desc)
+    .split(" ")
+    .filter((w) => w.length > 1 && !/\d/.test(w) && !NOISE_WORDS.has(w));
+  return words.slice(0, 3).join(" ") || normalizeMerchant(desc);
+}
+
+/** Does a description match a "contains" keyword rule (merchant field)? */
+export function matchesKeyword(desc: string | null, keyword: string): boolean {
+  const k = normalizeKeyword(keyword);
+  return !!k && normalizeMerchant(desc).includes(k);
+}
+
 function fieldValue(tx: TxLite, field: RuleField): string {
   switch (field) {
     case "merchant":

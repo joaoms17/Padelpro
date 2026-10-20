@@ -4,8 +4,8 @@ import { CategoryPicker } from "./CategoryPicker";
 import { useAuth } from "@/auth/AuthProvider";
 import { useHousehold } from "@/data/household";
 import { setCategory, setNote, setSplits } from "@/data/transactions";
-import { learnMerchantRule } from "@/data/rules";
-import { displayMerchant } from "@shared/categorize";
+import { learnKeywordRule, previewKeyword } from "@/data/rules";
+import { displayMerchant, suggestRuleKeyword } from "@shared/categorize";
 import { formatSigned, formatDate, parseCents, formatCents } from "@/lib/format";
 import type { Transaction } from "@/lib/types";
 
@@ -30,6 +30,8 @@ export function TransactionSheet({
   const [splitting, setSplitting] = useState(false);
   const [splits, setSplitRows] = useState<SplitRow[]>([]);
   const [applyAlways, setApplyAlways] = useState(false);
+  const [keyword, setKeyword] = useState("");
+  const [preview, setPreview] = useState<{ matches: number; willChange: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,8 +41,25 @@ export function TransactionSheet({
     setSplitting(false);
     setSplitRows([]);
     setApplyAlways(false);
+    setKeyword(suggestRuleKeyword(tx?.description_raw ?? null));
+    setPreview(null);
     setError(null);
   }, [tx]);
+
+  // Live count of the movements the keyword catches (debounced).
+  useEffect(() => {
+    if (!applyAlways || !householdId) return;
+    let active = true;
+    const t = setTimeout(() => {
+      previewKeyword(householdId, keyword)
+        .then((p) => active && setPreview(p))
+        .catch(() => active && setPreview(null));
+    }, 350);
+    return () => {
+      active = false;
+      clearTimeout(t);
+    };
+  }, [applyAlways, keyword, householdId]);
 
   if (!tx) return null;
 
@@ -86,10 +105,10 @@ export function TransactionSheet({
       } else {
         await setCategory(tx.id, categoryId);
         await setSplits(tx.id, []); // clear any prior split
-        if (applyAlways && categoryId && householdId && merchant) {
-          await learnMerchantRule({
+        if (applyAlways && categoryId && householdId && keyword.trim()) {
+          await learnKeywordRule({
             householdId,
-            descriptionRaw: tx.description_raw,
+            keyword,
             categoryId,
             createdBy: session?.user.id ?? null,
             applyToPast: true,
@@ -136,15 +155,39 @@ export function TransactionSheet({
               <CategoryPicker id="cat" value={categoryId} onChange={setCategoryId} />
             </div>
             {categoryChanged && categoryId && merchant && (
-              <label className="flex items-center gap-2 text-sm text-tinta/70 dark:text-creme/70">
-                <input
-                  type="checkbox"
-                  className="w-4 h-4 accent-terracota"
-                  checked={applyAlways}
-                  onChange={(e) => setApplyAlways(e.target.checked)}
-                />
-                Aplicar sempre a «{merchant}»
-              </label>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm text-tinta/70 dark:text-creme/70">
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 accent-terracota"
+                    checked={applyAlways}
+                    onChange={(e) => setApplyAlways(e.target.checked)}
+                  />
+                  Aplicar sempre a movimentos que contêm…
+                </label>
+                {applyAlways && (
+                  <div className="pl-6 space-y-1">
+                    <input
+                      className="input"
+                      value={keyword}
+                      onChange={(e) => setKeyword(e.target.value)}
+                      placeholder="ex.: amazon"
+                      aria-label="Texto que a descrição tem de conter"
+                    />
+                    <p className="text-xs text-tinta/50 dark:text-creme/50">
+                      {!keyword.trim()
+                        ? "Escreve uma parte da descrição (sem códigos)."
+                        : preview == null
+                          ? "A contar…"
+                          : `Apanha ${preview.matches} movimento${preview.matches === 1 ? "" : "s"}` +
+                            (preview.willChange > 0
+                              ? ` · ${preview.willChange} passa${preview.willChange === 1 ? "" : "m"} a esta categoria`
+                              : "") +
+                            ". Os que categorizaste à mão ficam como estão."}
+                    </p>
+                  </div>
+                )}
+              </div>
             )}
             <button className="btn-ghost w-full text-sm" onClick={startSplit}>
               Dividir por várias categorias

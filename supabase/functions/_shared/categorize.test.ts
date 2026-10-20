@@ -10,6 +10,8 @@ import {
   type Rule,
   type TxLite,
   type MesadaRule,
+  suggestRuleKeyword,
+  matchesKeyword,
 } from "./categorize";
 
 const tx = (over: Partial<TxLite>): TxLite => ({
@@ -132,5 +134,30 @@ describe("matchHistory", () => {
   it("keys on the normalized merchant", () => {
     const h = new Map([["fnac", "lazer"]]);
     expect(matchHistory(tx({ description_raw: "COMPRA 55 FNAC 01/02" }), h)).toBe("lazer");
+  });
+});
+
+describe("suggestRuleKeyword", () => {
+  it("drops reference codes and noise words", () => {
+    expect(suggestRuleKeyword("Estrang Www Amazon Nk8yt9dq4")).toBe("amazon");
+    expect(suggestRuleKeyword("UBER *EATS PORTUGAL")).toBe("uber eats");
+    expect(suggestRuleKeyword("COMPRA 4521 WWW.AMAZON.ES MKTP 12/10")).toBe("amazon");
+    expect(suggestRuleKeyword("Continente Bom Dia Lisboa")).toBe("continente bom dia");
+  });
+  it("falls back to the normalised description when nothing is left", () => {
+    expect(suggestRuleKeyword("WWW 123456")).toBe("www");
+    expect(suggestRuleKeyword(null)).toBe("");
+  });
+});
+
+describe("matchesKeyword", () => {
+  it("matches every purchase of a merchant regardless of the code", () => {
+    expect(matchesKeyword("Estrang Www Amazon Nk8yt9dq4", "amazon")).toBe(true);
+    expect(matchesKeyword("Estrang Www Amazon Zz91kk2", "Amazon")).toBe(true);
+    expect(matchesKeyword("UBER   *EATS help.uber.com", "uber eats")).toBe(true);
+    expect(matchesKeyword("UBER *TRIP", "uber eats")).toBe(false);
+  });
+  it("never matches an empty keyword", () => {
+    expect(matchesKeyword("anything", "  ")).toBe(false);
   });
 });
