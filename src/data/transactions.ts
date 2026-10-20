@@ -60,7 +60,7 @@ export interface ManualInput {
   bookingDate: string; // ISO
   categoryId: string | null;
   note?: string;
-  method?: string; // informativo (numerário, mbway, ...)
+  method?: string; // informativo (cartão, mbway, transferência)
   createdBy?: string | null;
 }
 

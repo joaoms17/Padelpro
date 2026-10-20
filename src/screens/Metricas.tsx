@@ -115,7 +115,6 @@ export function Metricas() {
         <Row k="Despesas da casa" v={formatCents(m.totals.despesasCasaCents)} />
         <Row k="Mesadas" v={formatCents(m.totals.mesadasCents)} />
         <Row k="Comprometido no dia 1" v={formatPct(m.comprometido)} />
-        {m.eventosForaCents > 0 && <Row k="Eventos fora da conta" v={formatCents(m.eventosForaCents)} />}
         {m.eventosAReceberCents > 0 && <Row k="A receber de eventos (3m)" v={formatCents(m.eventosAReceberCents)} />}
       </Card>
 

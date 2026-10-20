@@ -1,15 +1,10 @@
 // alerts — daily checks that push notifications (spec 10): bank consent
-// expiring and event money sitting outside the Conta Casa for 7+ days.
-// Cron-driven (service role) or per-household.
+// expiring. Cron-driven (service role) or per-household.
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { householdFromRequest, serviceClient } from "../_shared/db.ts";
 import { isCronRequest } from "../_shared/auth.ts";
 import { pushToHousehold } from "../_shared/push.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
-
-function eur(cents: number): string {
-  return (cents / 100).toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
-}
 
 async function checkHousehold(svc: SupabaseClient, householdId: string): Promise<number> {
   let sent = 0;
@@ -31,28 +26,6 @@ async function checkHousehold(svc: SupabaseClient, householdId: string): Promise
         householdId,
         { title: "Ligação ao banco", body: `A ligação ao Santander expira em ${days} dias.`, url: "/ligar-banco" },
         "ligacao_banco",
-      );
-    }
-  }
-
-  // 2) Event money outside the Conta Casa for 7+ days.
-  const { data: events } = await svc.from("events").select("id").eq("household_id", householdId);
-  const eventIds = (events ?? []).map((e) => e.id as string);
-  if (eventIds.length) {
-    const cutoff = new Date(now - 7 * 86400000).toISOString().slice(0, 10);
-    const { data: pays } = await svc
-      .from("event_payments")
-      .select("amount_cents, received_at")
-      .in("event_id", eventIds)
-      .eq("location", "por_transferir");
-    const overdue = (pays ?? []).filter((p) => (p.received_at ?? "9999") <= cutoff);
-    const total = overdue.reduce((a, p) => a + (p.amount_cents as number), 0);
-    if (total > 0) {
-      sent += await pushToHousehold(
-        svc,
-        householdId,
-        { title: "Eventos por transferir", body: `Há ${eur(total)} de eventos por transferir há mais de 7 dias.`, url: "/eventos" },
-        "eventos_fora",
       );
     }
   }

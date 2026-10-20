@@ -1,11 +1,9 @@
-// Reconcile Apple Pay provisionals against real bank movements.
-// Runs at the end of each eb-sync (spec 4.2). On a match the bank movement is
+// Reconcile Apple Pay provisionals against real bank movements, and propose
+// event-payment matches for bank credits. Runs at the end of each eb-sync (spec 4.2). On a match the bank movement is
 // the source of truth; the provisional is linked and stops counting.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import { reconcile, type ApplePayTx, type BankTx } from "./match.ts";
 import { matchEntradaToEvents, type OpenEvent } from "./eventmatch.ts";
-import { proposeSettlement, type Pending } from "./settle.ts";
-import { merchantSimilarity } from "./match.ts";
 
 export interface ReconcileResult {
   matched: number;
@@ -187,90 +185,6 @@ export async function proposeEventMatches(
         kind: proposal.kind,
         amount_cents: proposal.amount_cents,
         method: /mb\s?way/i.test(desc) ? "mbway" : "transferencia",
-      },
-    });
-    created++;
-  }
-  return created;
-}
-
-/**
- * Propose cash/Revolut settlements (spec 5.2): when a deposit/transfer from one
- * of Joana's configured source accounts arrives, find the "por_transferir"
- * event payments it settles and write a "settlement" review_item.
- */
-export async function proposeCashSettlements(
-  svc: SupabaseClient,
-  householdId: string,
-): Promise<number> {
-  const { data: sources } = await svc
-    .from("joana_source_accounts")
-    .select("name_pattern")
-    .eq("household_id", householdId);
-  const patterns = (sources ?? [])
-    .map((s) => (s.name_pattern as string | null)?.toLowerCase().trim())
-    .filter((p): p is string => Boolean(p));
-  if (patterns.length === 0) return 0;
-
-  // Outstanding por_transferir payments across the household's events.
-  const { data: events } = await svc
-    .from("events")
-    .select("id")
-    .eq("household_id", householdId);
-  const eventIds = (events ?? []).map((e) => e.id as string);
-  if (eventIds.length === 0) return 0;
-
-  const { data: pays } = await svc
-    .from("event_payments")
-    .select("id, amount_cents, received_at, location")
-    .in("event_id", eventIds)
-    .eq("location", "por_transferir");
-  const pending: Pending[] = (pays ?? []).map((p) => ({
-    id: p.id as string,
-    amount_cents: p.amount_cents as number,
-    received_at: p.received_at as string | null,
-  }));
-  if (pending.length === 0) return 0;
-
-  const from = new Date(Date.now() - 45 * 86400000).toISOString().slice(0, 10);
-  const { data: credits } = await svc
-    .from("transactions")
-    .select("id, amount_cents, counterparty, description_raw")
-    .eq("household_id", householdId)
-    .in("source", ["banco", "extrato"])
-    .gt("amount_cents", 0)
-    .gte("booking_date", from);
-
-  const { data: existing } = await svc
-    .from("review_items")
-    .select("ref")
-    .eq("household_id", householdId)
-    .eq("type", "settlement");
-  const proposedTxIds = new Set(
-    (existing ?? []).map((r) => (r.ref as { transaction_id?: string })?.transaction_id).filter(Boolean),
-  );
-
-  const used = new Set<string>();
-  let created = 0;
-  for (const c of credits ?? []) {
-    if (proposedTxIds.has(c.id as string)) continue;
-    const name = ((c.counterparty as string) || (c.description_raw as string) || "").toLowerCase();
-    const fromJoana = patterns.some((p) => name.includes(p) || merchantSimilarity(name, p) >= 0.5);
-    if (!fromJoana) continue;
-
-    const avail = pending.filter((p) => !used.has(p.id));
-    const picked = proposeSettlement(avail, c.amount_cents as number);
-    if (picked.length === 0) continue;
-
-    picked.forEach((p) => used.add(p.id));
-    await svc.from("review_items").insert({
-      household_id: householdId,
-      type: "settlement",
-      status: "aberto",
-      ref: {
-        transaction_id: c.id,
-        payment_ids: picked.map((p) => p.id),
-        amount_cents: c.amount_cents,
       },
     });
     created++;

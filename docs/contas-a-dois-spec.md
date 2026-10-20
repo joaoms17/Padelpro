@@ -12,7 +12,7 @@ A app:
 - lê automaticamente os movimentos do Santander (open banking, só leitura);
 - recebe em tempo real os pagamentos feitos com Apple Pay nos dois iPhones;
 - categoriza tudo com regras + IA e aprende com as correções;
-- gere os **eventos da Joana** (sinal, restante, numerário, MB Way, Revolut);
+- gere os **eventos da Joana** (sinal, restante, transferência, MB Way);
 - mostra orçamento do mês, sobra, taxa de poupança, almofada e objetivos;
 - avisa por notificação quando algo merece atenção.
 
@@ -35,7 +35,7 @@ A app:
 ### 2.2 Entradas
 - Salário e extras do João (cai no Santander).
 - Renda da casa arrendada (cai no Santander).
-- Ganhos dos eventos da Joana: podem chegar por transferência, MB Way, numerário ou Revolut. Numerário e Revolut chegam ao Santander mais tarde, quando a Joana deposita ou transfere.
+- Ganhos dos eventos da Joana: chegam por transferência ou MB Way, sempre ao Santander (Conta Casa). Só existe o Santander: é lá que é feita a gestão toda.
 
 ### 2.3 Saídas
 - **Fixas e prestações** (débitos diretos: crédito habitação, luz, água, internet, seguros...).
@@ -137,18 +137,13 @@ Campos: data, tipo, cliente, local, valor do serviço, ajudas de despesas (quand
 
 ### 5.2 Pagamentos do evento
 Cada evento tem um ou mais pagamentos: `sinal`, `restante`, `outro`.
-Campos: valor, data, método (`transferencia`, `mbway`, `numerario`, `revolut`), onde está o dinheiro (`conta_casa` ou `por_transferir`), movimento ligado.
+Campos: valor, data, método (`transferencia`, `mbway`; `numerario`/`revolut` só em registos antigos), movimento ligado.
 
 - **Transferência e MB Way** chegam diretamente ao Santander:
   - a app tenta casar cada entrada com pagamentos em aberto (valor igual ao sinal ou ao restante, nome do ordenante parecido com o cliente, texto "MB WAY");
   - se houver correspondência provável, cria um cartão em "Por rever": "Isto é o sinal da noiva X?" (confirmar com um toque);
   - se a Joana já tiver registado o pagamento, a entrada liga-se a esse registo.
-- Se o MB Way da Joana estiver associado à Revolut, esses pagamentos tratam-se como `revolut`.
-- **Numerário e Revolut** ficam como `por_transferir` até chegarem ao Santander:
-  - quando entra um depósito em numerário ou uma transferência vinda da Joana (contas de origem configuradas em Definições), a app propõe liquidar os pagamentos `por_transferir` mais antigos cuja soma bata com o valor;
-  - a Joana confirma; o movimento fica categorizado como `Eventos Joana`.
-  - Se a transferência da Joana não corresponder a eventos, vai para "Por rever" (pode ser dinheiro pessoal).
-- **Indicador**: "Dinheiro dos eventos ainda fora da Conta Casa: X €" (com alerta se houver valores há mais de 7 dias).
+- ~~Numerário/Revolut "por transferir", acertos e contas de origem da Joana~~ — **removidos** (out. 2026): todo o dinheiro entra diretamente no Santander.
 
 ### 5.3 Métricas da atividade
 - Receita por mês (por data do evento e por data de recebimento).
@@ -218,7 +213,6 @@ Todas por mês civil, em `Europe/Lisbon`, excluindo transferências internas e p
 | **Almofada disponível** | Saldo atual da Conta Casa - compromissos por sair |
 | **Almofada (meses)** | Almofada disponível / média mensal de (Despesas da casa + Mesadas) dos últimos 3 meses |
 | Almofada livre | Almofada disponível - total reservado em objetivos |
-| Dinheiro fora da Conta Casa | Pagamentos de eventos em `por_transferir` |
 | A receber de eventos | Eventos confirmados nos próximos 3 meses: total - pago |
 | **Previsão de fim de mês** | Saldo atual da Conta Casa + entradas esperadas (base fixa ainda não recebida + pagamentos de eventos previstos) - fixas por sair - mesadas por sair - variáveis projetadas ao ritmo do mês |
 
@@ -237,7 +231,7 @@ Enquanto não houver 3 meses de histórico, a média usa os meses que existirem 
    - Almofada disponível, em euros e em meses (sem alvo configurável — removido em out. 2026).
    - Barras de orçamento por categoria (as que têm mais movimento primeiro).
    - Alertas ativos e contador de "Por rever".
-   - Próximos eventos da Joana, valor a receber e dinheiro fora da Conta Casa (se > 0).
+   - Próximos eventos da Joana e valor a receber.
    - Estado da ligação ao banco (última sync, dias até expirar).
 2. **Movimentos**: lista por dia, filtros (mês, categoria, origem, por rever), pesquisa; etiqueta de origem (Banco, Apple Pay, Manual, Extrato); tocar para mudar categoria, dividir, nota.
 3. **Por rever**: categorias com baixa confiança, propostas de correspondência evento ↔ entrada, Apple Pay sem par, fixas que mudaram, transferências desconhecidas. Resolver com um toque.
@@ -246,7 +240,7 @@ Enquanto não houver 3 meses de histórico, a média usa os meses que existirem 
 6. **Métricas**: mês atual, fecho dos meses anteriores, evolução de 12 meses (entradas vs despesas), evolução da almofada, tendência por categoria, sazonalidade dos eventos.
 7. **Objetivos**: progresso, reservar valor da almofada, quanto falta por mês.
 8. **Pergunta à app**: chat (secção 11).
-9. **Definições**: membros, conta, mesadas (valor, dia, conta de destino), contas de origem da Joana (Revolut), categorias e regras, ligação ao banco, Atalho Apple Pay, notificações, PIN, importar extrato, exportar dados (CSV).
+9. **Definições**: membros, conta, mesadas (valor, dia, conta de destino), categorias e regras, ligação ao banco, Atalho Apple Pay, notificações, PIN, importar extrato, exportar dados (CSV).
 
 **Visual** (igual à apresentação "Contas a Dois"):
 - Cores: creme `#F6F1EA`, areia `#EAE1D3`, tinta `#1E2B2F`, terracota `#A64B25`, verde-petróleo `#2E6B66`; modo claro e escuro.
@@ -265,7 +259,6 @@ Web Push (iPhone com iOS 16.4+, app adicionada ao ecrã principal, permissão pe
 | Entrada parecida com pagamento de evento | "Recebeste 150 €. É o sinal da noiva X?" |
 | Orçamento a 80% / 100% | "Supermercado já vai em 85%" |
 | Fixa mudou ou falhou | "A prestação mudou de valor" |
-| Dinheiro de eventos fora da Conta Casa há 7+ dias | "Há 300 € de eventos por transferir" |
 | Ligação ao banco a expirar | "A ligação ao Santander expira em 3 dias" |
 | Domingo 20:00 | Resumo da semana |
 | Dia 1, 09:00 | Fecho do mês |
@@ -320,7 +313,7 @@ events (id, household_id, date, type, client_name, location, service_cents,
         expense_allowance_cents, km, expected_costs_cents, status, notes)
 event_payments (id, event_id, kind, amount_cents, received_at, method, location,
                 transaction_id)
-joana_source_accounts (id, household_id, label, iban_hash, name_pattern)
+joana_source_accounts (id, household_id, label, iban_hash, name_pattern) -- sem uso desde 0012 (mantida por histórico)
 goals (id, household_id, name, target_cents, due_date, reserved_cents)
 settings (household_id, cushion_target_months, price_table jsonb)
 ingest_tokens (id, member_id, token_hash, created_at, last_used_at, revoked_at)
@@ -343,7 +336,7 @@ Criar views SQL para as métricas da secção 8 (`v_month_metrics`, `v_budget_pr
 | M4 Categorização | Regras, histórico, IA, Por rever, aprender | 90%+ dos movimentos de um mês categorizados sem toque humano |
 | M5 Apple Pay | Atalho + `ingest-applepay` + reconciliação | Compra aparece em segundos e funde-se com o movimento do banco sem contar a dobrar |
 | M6 Orçamentos | Orçamentos, fixas recorrentes, alertas | Alerta a 80% e alerta de fixa alterada funcionam com dados de teste |
-| M7 Eventos | Eventos, pagamentos, correspondências, dinheiro fora da Conta Casa | Sinal por MB Way e restante em numerário fecham corretamente o evento |
+| M7 Eventos | Eventos, pagamentos, correspondências | Sinal por MB Way e restante por transferência fecham corretamente o evento |
 | M8 Métricas | Início, Métricas, almofada, previsão, objetivos, fecho do mês | Valores batem certo com cálculo manual de um mês de teste |
 | M9 Notificações | Web Push e resumos | Os dois iPhones recebem as notificações da secção 10 |
 | M10 IA | Pergunta à app e resumo do fecho | Responde corretamente a 10 perguntas de teste |
@@ -389,7 +382,6 @@ Em todos os marcos:
 
 - Reserva para impostos dos eventos da Joana, com taxa configurável, se vier a ser precisa.
 - Conta poupança separada para a almofada, se um dia a quiserem tirar da conta à ordem.
-- Ligar a Revolut da Joana à app, só se ela quiser, para os pagamentos de eventos aparecerem sozinhos.
 - Calendário dos eventos em `.ics` para subscrever no iPhone.
 - Ajuda para o IRS da atividade (totais anuais por categoria).
 - Widget no ecrã principal com a sobra do mês.

@@ -23,8 +23,8 @@ export type EventStatus =
   | "cancelado";
 
 export type PaymentKind = "sinal" | "restante" | "outro";
+// numerario/revolut: legacy values only (DB check still allows them)
 export type PaymentMethod = "transferencia" | "mbway" | "numerario" | "revolut";
-export type PaymentWhere = "conta_casa" | "por_transferir";
 
 export interface Household {
   id: string;

@@ -8,7 +8,6 @@ import {
   listActivityExpenses,
   createEvent,
   addPayment,
-  settlePayment,
   deletePayment,
   deleteEvent,
   updateEventStatus,
@@ -19,7 +18,6 @@ import {
   eventDue,
   eventPaid,
   eventOutstanding,
-  moneyOutsideHouse,
   activityMetrics,
   aReceber,
   suggestStatus,
@@ -31,7 +29,7 @@ import {
 import { formatCents, formatSigned, formatDate, formatPct, parseCents } from "@/lib/format";
 
 const TYPES = ["Noiva", "Convidadas", "Concerto", "Outro"];
-const METHODS: PaymentMethod[] = ["transferencia", "mbway", "numerario", "revolut"];
+const METHODS: PaymentMethod[] = ["transferencia", "mbway"];
 const STATUS_LABEL: Record<EventStatus, string> = {
   pedido: "Pedido",
   confirmado: "Confirmado",
@@ -122,7 +120,6 @@ export function Eventos() {
     return activityMetrics(events, payments, start, end, 0);
   }, [events, payments]);
 
-  const outside = useMemo(() => moneyOutsideHouse(payments), [payments]);
   const toReceive = useMemo(
     () => aReceber(events, paymentsByEvent, todayISO(), 3),
     [events, paymentsByEvent],
@@ -150,15 +147,6 @@ export function Eventos() {
         <Card><Stat label="Recebido este mês" value={formatCents(metrics.receitaCents)} tone="positive" /></Card>
         <Card><Stat label="A receber (3 meses)" value={formatCents(toReceive)} /></Card>
       </div>
-
-      {outside > 0 && (
-        <Card className="border-terracota/30 bg-terracota/5">
-          <div className="text-sm text-terracota">
-            Dinheiro dos eventos ainda fora da Conta Casa:{" "}
-            <b className="tnum">{formatCents(outside)}</b>
-          </div>
-        </Card>
-      )}
 
       <section>
         <SectionTitle>Eventos</SectionTitle>
@@ -350,8 +338,7 @@ function EventDetail({
     if (!cents || cents <= 0) return;
     setBusy(true);
     try {
-      const location = method === "numerario" || method === "revolut" ? "por_transferir" : "conta_casa";
-      await addPayment({ eventId: event.id, kind, amountCents: cents, receivedAt: todayISO(), method, location });
+      await addPayment({ eventId: event.id, kind, amountCents: cents, receivedAt: todayISO(), method });
       // Auto-advance to "pago" when this payment fully covers the event.
       const newPaid = eventPaid(payments) + cents;
       if (newPaid >= eventDue(event) && event.status !== "pago" && event.status !== "cancelado") {
@@ -428,16 +415,10 @@ function EventDetail({
                     <div className="capitalize">{p.kind} · {p.method}</div>
                     <div className="text-xs text-tinta/50 dark:text-creme/50">
                       {p.received_at ? formatDate(p.received_at) : "—"}
-                      {p.location === "por_transferir" && <span className="text-terracota"> · por transferir</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="tnum text-petroleo">{formatSigned(p.amount_cents)}</span>
-                    {p.location === "por_transferir" && (
-                      <button className="text-xs text-petroleo" onClick={async () => { await settlePayment(p.id); onChanged(); }}>
-                        Entrou
-                      </button>
-                    )}
                     <button className="text-xs text-terracota" onClick={async () => { await deletePayment(p.id); onChanged(); }}>✕</button>
                   </div>
                 </div>

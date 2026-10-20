@@ -5,8 +5,6 @@ import {
   eventOutstanding,
   isFullyPaid,
   suggestStatus,
-  moneyOutsideHouse,
-  proposeSettlement,
   activityMetrics,
   aReceber,
   type EventRow,
@@ -32,7 +30,6 @@ const pay = (over: Partial<Payment>): Payment => ({
   amount_cents: 5000,
   received_at: "2026-04-01",
   method: "mbway",
-  location: "conta_casa",
   ...over,
 });
 
@@ -52,32 +49,14 @@ describe("event totals", () => {
   });
 });
 
-describe("acceptance: sinal MB Way + restante numerário close the event", () => {
-  it("a sinal in conta_casa plus a restante por_transferir fully pay it", () => {
+describe("acceptance: sinal MB Way + restante por transferência close the event", () => {
+  it("a sinal plus a restante fully pay it", () => {
     const payments = [
-      pay({ id: "s", kind: "sinal", amount_cents: 5000, method: "mbway", location: "conta_casa" }),
-      pay({ id: "r", kind: "restante", amount_cents: 15000, method: "numerario", location: "por_transferir" }),
+      pay({ id: "s", kind: "sinal", amount_cents: 5000, method: "mbway" }),
+      pay({ id: "r", kind: "restante", amount_cents: 15000, method: "transferencia" }),
     ];
     expect(isFullyPaid(ev({}), payments)).toBe(true);
     expect(suggestStatus(ev({ status: "realizado" }), payments)).toBe("pago");
-    expect(moneyOutsideHouse(payments)).toBe(15000); // the cash not yet deposited
-  });
-});
-
-describe("proposeSettlement", () => {
-  const payments = [
-    pay({ id: "a", amount_cents: 5000, location: "por_transferir", received_at: "2026-04-01" }),
-    pay({ id: "b", amount_cents: 15000, location: "por_transferir", received_at: "2026-04-10" }),
-    pay({ id: "c", amount_cents: 3000, location: "conta_casa", received_at: "2026-04-05" }),
-  ];
-  it("matches a single payment exactly", () => {
-    expect(proposeSettlement(payments, 15000).map((p) => p.id)).toEqual(["b"]);
-  });
-  it("accumulates oldest-first to the exact sum", () => {
-    expect(proposeSettlement(payments, 20000).map((p) => p.id).sort()).toEqual(["a", "b"]);
-  });
-  it("returns nothing when no combination matches", () => {
-    expect(proposeSettlement(payments, 9999)).toEqual([]);
   });
 });
 

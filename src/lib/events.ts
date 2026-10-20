@@ -7,8 +7,8 @@ export type EventStatus =
   | "realizado"
   | "pago"
   | "cancelado";
+// numerario/revolut: legacy values still allowed by the DB check; no longer offered (Santander only).
 export type PaymentMethod = "transferencia" | "mbway" | "numerario" | "revolut";
-export type PaymentWhere = "conta_casa" | "por_transferir";
 export type PaymentKind = "sinal" | "restante" | "outro";
 
 export interface EventRow {
@@ -29,7 +29,6 @@ export interface Payment {
   amount_cents: number;
   received_at: string | null;
   method: PaymentMethod | null;
-  location: PaymentWhere;
 }
 
 /** What the client owes for an event: the service plus any expense allowance. */
@@ -54,41 +53,6 @@ export function suggestStatus(ev: EventRow, payments: Payment[]): EventStatus {
   if (ev.status === "cancelado") return "cancelado";
   if (isFullyPaid(ev, payments)) return "pago";
   return ev.status;
-}
-
-/** Money from events already received but not yet in the Conta Casa. */
-export function moneyOutsideHouse(payments: Payment[]): number {
-  return payments
-    .filter((p) => p.location === "por_transferir")
-    .reduce((a, p) => a + p.amount_cents, 0);
-}
-
-/**
- * Propose which "por_transferir" payments a deposit of `amountCents` settles,
- * oldest first, when their sum matches the deposit (spec 5.2).
- */
-export function proposeSettlement(
-  payments: Payment[],
-  amountCents: number,
-): Payment[] {
-  const pending = payments
-    .filter((p) => p.location === "por_transferir")
-    .sort((a, b) => (a.received_at ?? "") < (b.received_at ?? "") ? -1 : 1);
-
-  // Exact single match first.
-  const single = pending.find((p) => p.amount_cents === amountCents);
-  if (single) return [single];
-
-  // Greedy oldest-first accumulation to the exact amount.
-  const picked: Payment[] = [];
-  let sum = 0;
-  for (const p of pending) {
-    if (sum + p.amount_cents > amountCents) continue;
-    picked.push(p);
-    sum += p.amount_cents;
-    if (sum === amountCents) return picked;
-  }
-  return sum === amountCents ? picked : [];
 }
 
 function inRange(iso: string | null, start: string, end: string): boolean {
