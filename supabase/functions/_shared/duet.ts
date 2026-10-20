@@ -11,6 +11,7 @@ export interface DuetEventRow {
   start_time?: string | null;
   value: number | string | null;
   paid?: boolean | null;
+  paid_at?: string | null;
   zero_confirmed?: boolean | null;
 }
 export interface DuetPaymentRow {
@@ -79,6 +80,52 @@ export function toDuetEvents(
       state,
     };
   });
+}
+
+/** Money Joana marked as received in Duet, on the day it was received. */
+export interface DuetReceipt {
+  date: string;
+  amount_cents: number;
+  title: string;
+  project: string | null;
+}
+
+/**
+ * What was received between `from` and `to`, by payment date: the payments
+ * dated in the range, plus — for old events without payments — the whole
+ * value of events flagged paid whose paid_at (or, without it, event date)
+ * falls in the range. `events` must include every event referenced by
+ * `payments` and the paid-flag candidates; `withPayments` lists the ids of
+ * events that have any payment (those never count by the flag).
+ */
+export function toDuetReceipts(
+  events: DuetEventRow[],
+  payments: DuetPaymentRow[],
+  withPayments: Set<string>,
+  projects: DuetProjectRow[],
+  from: string,
+  to: string,
+): DuetReceipt[] {
+  const byId = new Map(events.map((e) => [e.id, e]));
+  const project = new Map(projects.map((p) => [p.id, p.name]));
+  const label = (e: DuetEventRow | undefined) => ({
+    title: (e?.title ?? "").trim() || "Evento",
+    project: e?.project_id ? project.get(e.project_id) ?? null : null,
+  });
+  const out: DuetReceipt[] = [];
+  for (const p of payments) {
+    const d = (p.paid_at ?? "").slice(0, 10);
+    if (!d || d < from || d > to) continue;
+    out.push({ date: d, amount_cents: cents(p.amount), ...label(byId.get(p.event_id)) });
+  }
+  for (const e of events) {
+    if (!e.paid || withPayments.has(e.id)) continue;
+    const d = (e.paid_at ?? e.event_date ?? "").slice(0, 10);
+    if (d < from || d > to) continue;
+    const v = cents(e.value);
+    if (v > 0) out.push({ date: d, amount_cents: v, ...label(e) });
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
 }
 
 /** A from/to date range the function accepts (ISO dates, at most ~13 months). */

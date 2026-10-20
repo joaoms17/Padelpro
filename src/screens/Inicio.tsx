@@ -10,6 +10,7 @@ import { formatCents, formatPct } from "@/lib/format";
 
 const QUICK_LINKS = [
   { to: "/por-rever", label: "Por rever", hint: "Correções e correspondências" },
+  { to: "/conferir", label: "Conferir entradas", hint: "App1 e ordenado vs Santander" },
   { to: "/orcamento", label: "Orçamento", hint: "Limites por categoria" },
   { to: "/objetivos", label: "Objetivos", hint: "Reservas da almofada" },
   { to: "/pergunta", label: "Pergunta à app", hint: "Chat sobre as contas" },
