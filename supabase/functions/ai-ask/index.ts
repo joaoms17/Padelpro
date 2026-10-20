@@ -155,10 +155,13 @@ async function runTool(
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
-    if (!llmProvider()) return json({ error: "Nenhuma chave de IA configurada (GEMINI_API_KEY)." }, 500);
-
+    // Authenticate first: configuration details are only for members.
     const ctx = await householdFromRequest(req);
     if (!ctx) return json({ error: "não autenticado" }, 401);
+
+    if (!llmProvider()) {
+      return json({ error: "A IA ainda não está ligada (falta a GEMINI_API_KEY nos secrets do GitHub)." }, 503);
+    }
 
     const { question } = await req.json().catch(() => ({}));
     if (!question) return json({ error: "pergunta em falta" }, 400);
