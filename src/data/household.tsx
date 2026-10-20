@@ -26,6 +26,11 @@ interface HouseholdState {
 
 const Ctx = createContext<HouseholdState | null>(null);
 
+/** State updater that keeps the previous value when the new one is equal. */
+function keepIfSame<T>(next: T): (prev: T) => T {
+  return (prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next);
+}
+
 export function HouseholdProvider({ children }: { children: ReactNode }) {
   const { member } = useAuth();
   const householdId = member?.household_id ?? null;
@@ -54,10 +59,12 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
     ]);
     // A quiet refresh that fails (offline) keeps what is on screen.
     if (silent && (accRes.error || catRes.error)) return;
-    setAccounts((accRes.data as Account[]) ?? []);
-    setCategories((catRes.data as Category[]) ?? []);
+    // Unchanged data keeps its identity: screens that reload on a new
+    // categories list (and would reset an open form) are left alone.
+    if (!silent) setAccounts((accRes.data as Account[]) ?? []);
+    setCategories(keepIfSame((catRes.data as Category[]) ?? []));
     // Missing column/row (before migration 0009) simply means defaults.
-    setCustomLabels(((setRes.data as { group_labels?: Record<string, string> } | null)?.group_labels) ?? {});
+    setCustomLabels(keepIfSame(((setRes.data as { group_labels?: Record<string, string> } | null)?.group_labels) ?? {}));
     setLoading(false);
   }, [householdId]);
 
@@ -68,7 +75,9 @@ export function HouseholdProvider({ children }: { children: ReactNode }) {
   }, [reload]);
 
   // Back to the app (the other person may have edited categories meanwhile):
-  // refresh quietly, so nobody files movements under a removed category.
+  // refresh the categories quietly, so nobody files movements under a
+  // removed one. Accounts are left as they are (a balance change would
+  // reload the screens that depend on it).
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState === "visible") void load(true);
