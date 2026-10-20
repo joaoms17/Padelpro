@@ -87,8 +87,6 @@ export function Definicoes() {
       <section className="card p-5">
         <SectionTitle>Dinheiro</SectionTitle>
         <Row title="Mesadas" hint="Valor e dia por pessoa" to="/dinheiro" />
-        <Row title="Alvo da almofada" hint="Em meses de despesas" to="/dinheiro" />
-        <Row title="Tabela de preços dos eventos" hint="Noiva, convidada, €/km" to="/dinheiro" />
         <Row title="Categorias e regras" hint="Editar e criar regras" to="/regras" />
       </section>
 

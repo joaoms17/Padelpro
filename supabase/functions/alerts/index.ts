@@ -1,6 +1,6 @@
 // alerts — daily checks that push notifications (spec 10): bank consent
-// expiring, event money sitting outside the Conta Casa for 7+ days, and the
-// cushion dropping below target. Cron-driven (service role) or per-household.
+// expiring and event money sitting outside the Conta Casa for 7+ days.
+// Cron-driven (service role) or per-household.
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { householdFromRequest, serviceClient } from "../_shared/db.ts";
 import { isCronRequest } from "../_shared/auth.ts";
@@ -53,30 +53,6 @@ async function checkHousehold(svc: SupabaseClient, householdId: string): Promise
         householdId,
         { title: "Eventos por transferir", body: `Há ${eur(total)} de eventos por transferir há mais de 7 dias.`, url: "/eventos" },
         "eventos_fora",
-      );
-    }
-  }
-
-  // 3) Cushion below target (proxy: balance / avg monthly despesas from snapshots).
-  const [{ data: acc }, { data: snaps }, { data: settings }] = await Promise.all([
-    svc.from("accounts").select("balance_cents").eq("household_id", householdId).eq("role", "casa").maybeSingle(),
-    svc.from("monthly_snapshots").select("metrics").eq("household_id", householdId).order("month", { ascending: false }).limit(3),
-    svc.from("settings").select("cushion_target_months").eq("household_id", householdId).maybeSingle(),
-  ]);
-  const target = settings?.cushion_target_months ?? 3;
-  const balance = acc?.balance_cents ?? 0;
-  const despesas = (snaps ?? [])
-    .map((s) => (s.metrics as { despesas_casa_cents?: number; mesadas_cents?: number }))
-    .map((m) => (m.despesas_casa_cents ?? 0) + (m.mesadas_cents ?? 0));
-  const avg = despesas.length ? despesas.reduce((a, b) => a + b, 0) / despesas.length : 0;
-  if (avg > 0) {
-    const months = balance / avg;
-    if (months < target) {
-      sent += await pushToHousehold(
-        svc,
-        householdId,
-        { title: "Almofada", body: `A almofada está em ${months.toFixed(1)} meses (alvo: ${target}).`, url: "/metricas" },
-        "almofada",
       );
     }
   }

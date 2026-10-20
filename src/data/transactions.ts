@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { matchBankCovered } from "@/lib/import";
 import type { Transaction, TransactionSource } from "@/lib/types";
 import type { ParsedTx } from "@/lib/import";
 
@@ -139,17 +140,63 @@ export interface ImportOutcome {
   total: number;
   inserted: number;
   duplicates: number;
+  /** Statement rows the bank sync already brought (same amount, ±3 days). */
+  coveredByBank: number;
 }
 
-/** Insert parsed statement rows, skipping any that already exist (dedup). */
+const DAY_MS = 86400000;
+const dayMs = (iso: string) => Date.parse(`${iso.slice(0, 10)}T00:00:00Z`);
+
+/**
+ * Statement rows that the bank sync already stored, matched one-to-one by
+ * amount and a booking date within ±3 days (card payments are booked a day
+ * or two after the purchase; statement and bank ids never coincide).
+ */
+async function bankCovered(accountId: string, items: ParsedTx[]): Promise<Set<ParsedTx>> {
+  const covered = new Set<ParsedTx>();
+  if (items.length === 0) return covered;
+  const dates = items.map((i) => dayMs(i.booking_date));
+  const from = new Date(Math.min(...dates) - 3 * DAY_MS).toISOString().slice(0, 10);
+  const to = new Date(Math.max(...dates) + 3 * DAY_MS).toISOString().slice(0, 10);
+
+  const bank: { booking_date: string; amount_cents: number }[] = [];
+  for (let off = 0; ; off += 1000) {
+    const { data, error } = await supabase
+      .from("transactions")
+      .select("booking_date, amount_cents")
+      .eq("account_id", accountId)
+      .eq("source", "banco")
+      .gte("booking_date", from)
+      .lte("booking_date", to)
+      .order("id")
+      .range(off, off + 999);
+    if (error) throw error;
+    bank.push(...((data as typeof bank) ?? []));
+    if (!data || data.length < 1000) break;
+  }
+  if (bank.length === 0) return covered;
+
+  return matchBankCovered(items, bank);
+}
+
+/**
+ * Insert parsed statement rows, skipping any that already exist (dedup) and
+ * any the bank sync already brought — so a statement can fill the history
+ * before the bank link, a gap, or the time after a link lapsed.
+ */
 export async function importTransactions(
   householdId: string,
   accountId: string,
   items: ParsedTx[],
 ): Promise<ImportOutcome> {
-  if (items.length === 0) return { total: 0, inserted: 0, duplicates: 0 };
+  const covered = await bankCovered(accountId, items);
+  const before = items.filter((it) => !covered.has(it));
+  const coveredByBank = covered.size;
+  if (before.length === 0) {
+    return { total: items.length, inserted: 0, duplicates: 0, coveredByBank };
+  }
 
-  const rows = items.map((it) => ({
+  const rows = before.map((it) => ({
     household_id: householdId,
     account_id: accountId,
     source: "extrato" as TransactionSource,
@@ -170,5 +217,10 @@ export async function importTransactions(
   if (error) throw error;
 
   const inserted = data?.length ?? 0;
-  return { total: items.length, inserted, duplicates: items.length - inserted };
+  return {
+    total: items.length,
+    inserted,
+    duplicates: before.length - inserted,
+    coveredByBank,
+  };
 }

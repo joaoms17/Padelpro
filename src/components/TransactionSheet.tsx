@@ -4,8 +4,8 @@ import { CategoryPicker } from "./CategoryPicker";
 import { useAuth } from "@/auth/AuthProvider";
 import { useHousehold } from "@/data/household";
 import { setCategory, setNote, setSplits } from "@/data/transactions";
-import { learnMerchantRule } from "@/data/rules";
-import { displayMerchant } from "@shared/categorize";
+import { learnKeywordRule, previewKeyword } from "@/data/rules";
+import { displayMerchant, isUsableKeyword, normalizeKeyword, suggestRuleKeyword } from "@shared/categorize";
 import { formatSigned, formatDate, parseCents, formatCents } from "@/lib/format";
 import type { Transaction } from "@/lib/types";
 
@@ -30,6 +30,10 @@ export function TransactionSheet({
   const [splitting, setSplitting] = useState(false);
   const [splits, setSplitRows] = useState<SplitRow[]>([]);
   const [applyAlways, setApplyAlways] = useState(false);
+  const [keyword, setKeyword] = useState("");
+  const [preview, setPreview] = useState<
+    { keyword: string; matches: number; willChange: number } | "error" | null
+  >(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,13 +43,38 @@ export function TransactionSheet({
     setSplitting(false);
     setSplitRows([]);
     setApplyAlways(false);
+    setKeyword(suggestRuleKeyword(tx?.description_raw ?? null));
+    setPreview(null);
     setError(null);
   }, [tx]);
+
+  // Live count of the movements the keyword catches (debounced). The preview
+  // records which keyword it is for, so a stale count is never shown/saved.
+  useEffect(() => {
+    if (!applyAlways || !householdId) return;
+    setPreview(null);
+    if (!isUsableKeyword(keyword)) return;
+    let active = true;
+    const t = setTimeout(() => {
+      previewKeyword(householdId, keyword)
+        .then((p) => active && setPreview(p))
+        .catch(() => active && setPreview("error"));
+    }, 350);
+    return () => {
+      active = false;
+      clearTimeout(t);
+    };
+  }, [applyAlways, keyword, householdId]);
 
   if (!tx) return null;
 
   const merchant = tx.merchant_clean || displayMerchant(tx.description_raw);
   const categoryChanged = categoryId !== (tx.category_id ?? null);
+  // "Aplicar sempre" is only saved once the count shown is for this keyword.
+  const previewFresh =
+    preview != null && preview !== "error" && preview.keyword === normalizeKeyword(keyword);
+  const ruleBlocked =
+    applyAlways && !splitting && categoryChanged && (!isUsableKeyword(keyword) || !previewFresh);
 
   const totalCents = Math.abs(tx.amount_cents);
   const splitSum = splits.reduce((a, s) => a + (parseCents(s.amount) ?? 0), 0);
@@ -86,10 +115,10 @@ export function TransactionSheet({
       } else {
         await setCategory(tx.id, categoryId);
         await setSplits(tx.id, []); // clear any prior split
-        if (applyAlways && categoryId && householdId && merchant) {
-          await learnMerchantRule({
+        if (applyAlways && categoryId && householdId) {
+          await learnKeywordRule({
             householdId,
-            descriptionRaw: tx.description_raw,
+            keyword,
             categoryId,
             createdBy: session?.user.id ?? null,
             applyToPast: true,
@@ -136,15 +165,41 @@ export function TransactionSheet({
               <CategoryPicker id="cat" value={categoryId} onChange={setCategoryId} />
             </div>
             {categoryChanged && categoryId && merchant && (
-              <label className="flex items-center gap-2 text-sm text-tinta/70 dark:text-creme/70">
-                <input
-                  type="checkbox"
-                  className="w-4 h-4 accent-terracota"
-                  checked={applyAlways}
-                  onChange={(e) => setApplyAlways(e.target.checked)}
-                />
-                Aplicar sempre a «{merchant}»
-              </label>
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-sm text-tinta/70 dark:text-creme/70">
+                  <input
+                    type="checkbox"
+                    className="w-4 h-4 accent-terracota"
+                    checked={applyAlways}
+                    onChange={(e) => setApplyAlways(e.target.checked)}
+                  />
+                  Aplicar sempre a movimentos que contêm…
+                </label>
+                {applyAlways && (
+                  <div className="pl-6 space-y-1">
+                    <input
+                      className="input"
+                      value={keyword}
+                      onChange={(e) => setKeyword(e.target.value)}
+                      placeholder="ex.: amazon"
+                      aria-label="Texto que a descrição tem de conter"
+                    />
+                    <p className="text-xs text-tinta/50 dark:text-creme/50">
+                      {!isUsableKeyword(keyword)
+                        ? "Escreve uma parte da descrição com pelo menos 3 letras (sem códigos)."
+                        : preview === "error"
+                          ? "Não consegui contar os movimentos — tenta outra vez."
+                          : !previewFresh
+                            ? "A contar…"
+                            : `Apanha ${preview.matches} movimento${preview.matches === 1 ? "" : "s"}` +
+                              (preview.willChange > 0
+                                ? ` · ${preview.willChange} passa${preview.willChange === 1 ? "" : "m"} a esta categoria`
+                                : "") +
+                              ". Os que categorizaste à mão ficam como estão."}
+                    </p>
+                  </div>
+                )}
+              </div>
             )}
             <button className="btn-ghost w-full text-sm" onClick={startSplit}>
               Dividir por várias categorias
@@ -226,7 +281,7 @@ export function TransactionSheet({
 
         {error && <p className="text-sm text-terracota">{error}</p>}
 
-        <button className="btn-primary w-full" disabled={busy} onClick={save}>
+        <button className="btn-primary w-full" disabled={busy || ruleBlocked} onClick={save}>
           {busy ? "A guardar…" : "Guardar"}
         </button>
         {tx.category_id && categoriesById.get(tx.category_id) && (

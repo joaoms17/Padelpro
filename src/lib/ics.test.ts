@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildICS } from "./ics";
-import { activityYearReport, taxReserve } from "./activityYear";
+import { activityYearReport } from "./activityYear";
 
 describe("buildICS", () => {
   const ics = buildICS(
@@ -61,13 +61,5 @@ describe("activityYearReport", () => {
     const r = activityYearReport(events, payments, expenses, 2026);
     expect(r.receitaPorMes[4]).toBe(20000); // May
     expect(r.receitaPorMes[6]).toBe(5000); // July
-  });
-});
-
-describe("taxReserve", () => {
-  it("reserves rate × rentabilidade when positive", () => {
-    expect(taxReserve(19500, 0.25)).toBe(4875);
-    expect(taxReserve(19500, 0)).toBe(0);
-    expect(taxReserve(-100, 0.25)).toBe(0);
   });
 });

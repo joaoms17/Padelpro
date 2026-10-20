@@ -77,8 +77,7 @@ Vercel). A service_role/secret key nunca sai do Supabase.
 
 ## 5. Valores a preencher (na app)
 
-Definições → Dinheiro: mesadas (valor + dia), alvo da almofada, tabela de preços
-dos eventos, taxa de reserva para impostos. Orçamento: limites por categoria.
+Definições → Mesadas: valor e dia de cada um. Orçamento: limites por categoria.
 
 ## Verificar
 

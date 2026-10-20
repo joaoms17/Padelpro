@@ -227,3 +227,39 @@ export function buildImport(
 
   return { items, skippedRows: skipped };
 }
+
+const DAY = 86400000;
+const toDayMs = (iso: string) => Date.parse(`${iso.slice(0, 10)}T00:00:00Z`);
+
+/**
+ * Statement rows the bank sync already stored: matched one-to-one with a bank
+ * row of the same amount and a booking date within ±maxDays (card payments
+ * are booked a day or two after the purchase). Each bank row covers at most
+ * one statement row, so two identical purchases stay two.
+ */
+export function matchBankCovered<T extends { booking_date: string; amount_cents: number }>(
+  items: T[],
+  bank: { booking_date: string; amount_cents: number }[],
+  maxDays = 3,
+): Set<T> {
+  const covered = new Set<T>();
+  const claimed = new Set<number>();
+  for (const it of [...items].sort((x, y) => x.booking_date.localeCompare(y.booking_date))) {
+    const t = toDayMs(it.booking_date);
+    let best = -1;
+    let bestD = Infinity;
+    for (let i = 0; i < bank.length; i++) {
+      if (claimed.has(i) || bank[i].amount_cents !== it.amount_cents) continue;
+      const d = Math.abs(toDayMs(bank[i].booking_date) - t);
+      if (d <= maxDays * DAY && d < bestD) {
+        best = i;
+        bestD = d;
+      }
+    }
+    if (best >= 0) {
+      claimed.add(best);
+      covered.add(it);
+    }
+  }
+  return covered;
+}

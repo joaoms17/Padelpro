@@ -5,6 +5,7 @@ import {
   parseDateToISO,
   computeExternalId,
   buildImport,
+  matchBankCovered,
 } from "./import";
 
 const SANTANDER_CSV = `Conta: PT50 0000 ...
@@ -101,5 +102,27 @@ describe("computeExternalId", () => {
     const a = computeExternalId("2026-01-05", -4520, "COMPRA  CONTINENTE!", 0);
     const b = computeExternalId("2026-01-05", -4520, "compra continente", 0);
     expect(a).toBe(b);
+  });
+});
+
+describe("matchBankCovered", () => {
+  const row = (d: string, c: number) => ({ booking_date: d, amount_cents: c });
+  it("skips statement rows the bank already has (same amount, ±3 days)", () => {
+    const items = [row("2026-07-20", -1250), row("2026-07-21", -4000), row("2026-05-02", -900)];
+    const bank = [row("2026-07-22", -1250), row("2026-07-21", -4000)];
+    const covered = matchBankCovered(items, bank);
+    expect([...covered]).toEqual([items[0], items[1]]);
+  });
+  it("keeps two identical purchases when the bank has only one", () => {
+    const items = [row("2026-08-01", -150), row("2026-08-01", -150)];
+    expect(matchBankCovered(items, [row("2026-08-01", -150)]).size).toBe(1);
+  });
+  it("does not match beyond the window or on a different amount", () => {
+    const items = [row("2026-08-01", -150)];
+    expect(matchBankCovered(items, [row("2026-08-06", -150), row("2026-08-01", -151)]).size).toBe(0);
+  });
+  it("fills a gap after the bank link lapsed (no bank rows there)", () => {
+    const items = [row("2027-05-10", -3000)];
+    expect(matchBankCovered(items, [row("2026-10-01", -3000)]).size).toBe(0);
   });
 });

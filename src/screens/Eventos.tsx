@@ -13,9 +13,8 @@ import {
   deleteEvent,
   updateEventStatus,
 } from "@/data/events";
-import { loadSettings } from "@/data/settings";
 import { buildICS } from "@/lib/ics";
-import { activityYearReport, taxReserve, type YearReport } from "@/lib/activityYear";
+import { activityYearReport, type YearReport } from "@/lib/activityYear";
 import {
   eventDue,
   eventPaid,
@@ -23,7 +22,6 @@ import {
   moneyOutsideHouse,
   activityMetrics,
   aReceber,
-  suggestPrice,
   suggestStatus,
   type EventRow,
   type Payment,
@@ -63,9 +61,7 @@ export function Eventos() {
   const { householdId, categories } = useHousehold();
   const [events, setEvents] = useState<EventRow[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [priceTable, setPriceTable] = useState<Record<string, number>>({});
   const [yearReport, setYearReport] = useState<YearReport | null>(null);
-  const [taxRate, setTaxRate] = useState(0);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [openEvent, setOpenEvent] = useState<EventRow | null>(null);
@@ -76,11 +72,8 @@ export function Eventos() {
     try {
       const evs = await listEvents(householdId);
       const pays = await listPayments(evs.map((e) => e.id));
-      const s = await loadSettings(householdId);
       setEvents(evs);
       setPayments(pays);
-      setPriceTable(s?.price_table ?? {});
-      setTaxRate(s?.tax_rate ?? 0);
 
       // Annual activity summary (current year).
       const year = new Date().getFullYear();
@@ -224,12 +217,6 @@ export function Eventos() {
           <Line k="Gastos da atividade" v={formatCents(yearReport.gastosCents)} />
           <Line k="Rentabilidade" v={formatCents(yearReport.rentabilidadeCents)} />
           <Line k="Margem" v={formatPct(yearReport.margem)} />
-          {taxRate > 0 && (
-            <Line
-              k={`Reservar p/ impostos (${Math.round(taxRate * 100)}%)`}
-              v={formatCents(taxReserve(yearReport.rentabilidadeCents, taxRate))}
-            />
-          )}
           {yearReport.gastosPorCategoria.length > 0 && (
             <div className="pt-2 mt-1 border-t border-areia/50 dark:border-white/5 space-y-1">
               {yearReport.gastosPorCategoria.map((g) => (
@@ -248,7 +235,6 @@ export function Eventos() {
 
       {creating && (
         <CreateEvent
-          priceTable={priceTable}
           householdId={householdId!}
           onClose={() => setCreating(false)}
           onSaved={load}
@@ -279,12 +265,10 @@ function Line({ k, v }: { k: string; v: string }) {
 }
 
 function CreateEvent({
-  priceTable,
   householdId,
   onClose,
   onSaved,
 }: {
-  priceTable: Record<string, number>;
   householdId: string;
   onClose: () => void;
   onSaved: () => void;
@@ -292,16 +276,11 @@ function CreateEvent({
   const [type, setType] = useState("Noiva");
   const [client, setClient] = useState("");
   const [date, setDate] = useState(todayISO());
-  const [service, setService] = useState(() => {
-    const s = suggestPrice(priceTable, "Noiva");
-    return s ? (s / 100).toString() : "";
-  });
+  const [service, setService] = useState("");
   const [busy, setBusy] = useState(false);
 
   function onType(t: string) {
     setType(t);
-    const s = suggestPrice(priceTable, t);
-    if (s) setService((s / 100).toString());
   }
 
   async function save() {

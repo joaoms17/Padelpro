@@ -159,15 +159,3 @@ function addMonths(iso: string, months: number): string {
   const date = new Date(Date.UTC(y, m - 1 + months, d));
   return date.toISOString().slice(0, 10);
 }
-
-/** Suggest a service price from the editable price table, by event type. */
-export function suggestPrice(
-  priceTable: Record<string, number>,
-  type: string,
-): number | null {
-  const key = type.toLowerCase();
-  for (const [k, v] of Object.entries(priceTable)) {
-    if (k.toLowerCase() === key) return v;
-  }
-  return null;
-}

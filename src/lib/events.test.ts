@@ -9,7 +9,6 @@ import {
   proposeSettlement,
   activityMetrics,
   aReceber,
-  suggestPrice,
   type EventRow,
   type Payment,
 } from "./events";
@@ -109,12 +108,5 @@ describe("aReceber", () => {
       ["e2", []],
     ]);
     expect(aReceber(events, byEv, "2026-05-15", 3)).toBe(15000); // only e1, 20000−5000
-  });
-});
-
-describe("suggestPrice", () => {
-  it("looks up by event type case-insensitively", () => {
-    expect(suggestPrice({ noiva: 20000, convidada: 5000 }, "Noiva")).toBe(20000);
-    expect(suggestPrice({ noiva: 20000 }, "Concerto")).toBeNull();
   });
 });
