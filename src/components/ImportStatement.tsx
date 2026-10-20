@@ -10,6 +10,7 @@ import {
 import { importTransactions, type ImportOutcome } from "@/data/transactions";
 import { runCategorize } from "@/data/rules";
 import { formatSigned, formatDate } from "@/lib/format";
+import { errorMessage } from "@/lib/errors";
 
 type Stage = "pick" | "map" | "done";
 
@@ -75,7 +76,7 @@ export function ImportStatement({
       }
       setStage("map");
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     }
   }
 
@@ -100,7 +101,7 @@ export function ImportStatement({
       }
       onDone();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(errorMessage(e));
     } finally {
       setBusy(false);
     }

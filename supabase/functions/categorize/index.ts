@@ -11,7 +11,8 @@ import {
   redactForAI,
   AI_CONFIDENCE_THRESHOLD,
   type Rule,
-  type MesadaRule,
+  mesadaRules,
+  type CategoryRow,
 } from "../_shared/categorize.ts";
 import { categorizeWithAI, type AICatItem } from "../_shared/ai.ts";
 import { LLMError } from "../_shared/llm.ts";
@@ -52,7 +53,7 @@ Deno.serve(async (req) => {
         .order("booking_date", { ascending: false })
         .limit(400),
       svc.from("rules").select("field, match_type, pattern, category_id, priority").eq("household_id", householdId),
-      svc.from("categories").select("id, name, grp").eq("household_id", householdId).eq("archived", false),
+      svc.from("categories").select("id, name, grp, sort, system_role").eq("household_id", householdId).eq("archived", false),
       svc.from("members").select("display_name, mesada_cents, mesada_day").eq("household_id", householdId),
       svc
         .from("transactions")
@@ -68,17 +69,10 @@ Deno.serve(async (req) => {
 
     const uncategorized = (uncatRes.data ?? []) as Tx[];
     const rules = (rulesRes.data ?? []) as Rule[];
-    const categories = (catsRes.data ?? []) as { id: string; name: string; grp: string }[];
+    const categories = (catsRes.data ?? []) as CategoryRow[];
 
     // Mesadas: map each member to the mesada category whose name mentions them.
-    const mesadas: MesadaRule[] = [];
-    for (const m of membersRes.data ?? []) {
-      if (!m.mesada_cents || m.mesada_cents <= 0) continue;
-      const cat = categories.find(
-        (c) => c.grp === "mesada" && c.name.toLowerCase().includes(String(m.display_name).toLowerCase()),
-      );
-      if (cat) mesadas.push({ category_id: cat.id, mesada_cents: m.mesada_cents, mesada_day: m.mesada_day });
-    }
+    const mesadas = mesadaRules(categories, membersRes.data ?? []);
 
     // History: most recent confirmed category per normalized merchant.
     const history = new Map<string, string>();

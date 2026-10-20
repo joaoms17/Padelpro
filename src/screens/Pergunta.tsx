@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { PageHeader } from "@/components/ui";
 import { askApp } from "@/data/ask";
+import { errorMessage } from "@/lib/errors";
 
 interface Msg {
   role: "user" | "app";
@@ -30,7 +31,7 @@ export function Pergunta() {
       const answer = await askApp(question);
       setMessages((m) => [...m, { role: "app", text: answer }]);
     } catch (e) {
-      setMessages((m) => [...m, { role: "app", text: `⚠️ ${e instanceof Error ? e.message : String(e)}` }]);
+      setMessages((m) => [...m, { role: "app", text: `⚠️ ${errorMessage(e)}` }]);
     } finally {
       setBusy(false);
       setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 50);

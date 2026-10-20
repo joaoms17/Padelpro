@@ -27,6 +27,40 @@ export interface MesadaRule {
   mesada_day: number | null;
 }
 
+export interface CategoryRow {
+  id: string;
+  name: string;
+  grp: string;
+  sort?: number | null;
+  system_role?: string | null;
+}
+
+/**
+ * Each member with a mesada → their mesada category: the one in the mesada
+ * group whose name mentions them, preferring the app's own (system_role)
+ * over any the household added later, then the first in order.
+ */
+export function mesadaRules(
+  categories: CategoryRow[],
+  members: { display_name: string | null; mesada_cents: number | null; mesada_day: number | null }[],
+): MesadaRule[] {
+  const candidates = categories
+    .filter((c) => c.grp === "mesada")
+    .sort(
+      (a, b) =>
+        Number(b.system_role === "mesada") - Number(a.system_role === "mesada") ||
+        (a.sort ?? 0) - (b.sort ?? 0),
+    );
+  const out: MesadaRule[] = [];
+  for (const m of members) {
+    const name = String(m.display_name ?? "").trim().toLowerCase();
+    if (!m.mesada_cents || m.mesada_cents <= 0 || !name) continue;
+    const cat = candidates.find((c) => c.name.toLowerCase().includes(name));
+    if (cat) out.push({ category_id: cat.id, mesada_cents: m.mesada_cents, mesada_day: m.mesada_day });
+  }
+  return out;
+}
+
 export interface Assignment {
   category_id: string;
   source: CategorySource;

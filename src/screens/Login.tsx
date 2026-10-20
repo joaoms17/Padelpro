@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/auth/AuthProvider";
+import { errorMessage } from "@/lib/errors";
 
 export function Login() {
   const { signIn, signUp, configured } = useAuth();
@@ -106,7 +107,7 @@ export function Login() {
 }
 
 function messageFor(err: unknown): string {
-  const m = err instanceof Error ? err.message : String(err);
+  const m = errorMessage(err);
   if (/Invalid login credentials/i.test(m)) return "Email ou password errados.";
   if (/already registered|already exists/i.test(m)) return "Este email já tem conta — entra em vez de criar.";
   if (/rate/i.test(m)) return "Demasiadas tentativas. Tenta daqui a pouco.";

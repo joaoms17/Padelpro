@@ -16,6 +16,7 @@ import {
 } from "@/data/review";
 import { formatSigned, formatDate, formatPct, formatCents } from "@/lib/format";
 import type { Transaction } from "@/lib/types";
+import { errorMessage } from "@/lib/errors";
 
 export function PorRever() {
   const { householdId } = useHousehold();
@@ -85,7 +86,7 @@ export function PorRever() {
       );
       await load();
     } catch (e) {
-      setMsg(e instanceof Error ? e.message : String(e));
+      setMsg(errorMessage(e));
     } finally {
       setRunning(false);
     }

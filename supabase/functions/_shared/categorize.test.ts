@@ -10,6 +10,7 @@ import {
   type Rule,
   type TxLite,
   type MesadaRule,
+  mesadaRules,
   suggestRuleKeyword,
   matchesKeyword,
   isUsableKeyword,
@@ -189,5 +190,32 @@ describe("matchesKeyword", () => {
   });
   it("never matches an empty keyword", () => {
     expect(matchesKeyword("anything", "  ")).toBe(false);
+  });
+});
+
+describe("mesadaRules", () => {
+  const members = [
+    { display_name: "João", mesada_cents: 30000, mesada_day: 5 },
+    { display_name: "Joana", mesada_cents: 30000, mesada_day: null },
+    { display_name: "Sem mesada", mesada_cents: 0, mesada_day: null },
+  ];
+  it("maps each member to the app's own mesada category, first in order", () => {
+    const cats = [
+      { id: "extra", name: "Mesada João extra", grp: "mesada", sort: 5, system_role: null },
+      { id: "joao", name: "Mesada João", grp: "mesada", sort: 510, system_role: "mesada" },
+      { id: "joana", name: "Mesada Joana", grp: "mesada", sort: 520, system_role: "mesada" },
+      { id: "fake", name: "Mesada Joana", grp: "variavel", sort: 1, system_role: null },
+    ];
+    expect(mesadaRules(cats, members)).toEqual([
+      { category_id: "joao", mesada_cents: 30000, mesada_day: 5 },
+      { category_id: "joana", mesada_cents: 30000, mesada_day: null },
+    ]);
+  });
+  it("works without roles (by group and name)", () => {
+    const cats = [
+      { id: "joana", name: "Mesada Joana", grp: "mesada", sort: 520 },
+      { id: "joao", name: "Mesada João", grp: "mesada", sort: 510 },
+    ];
+    expect(mesadaRules(cats, members).map((m) => m.category_id)).toEqual(["joao", "joana"]);
   });
 });

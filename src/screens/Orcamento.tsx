@@ -23,7 +23,7 @@ function todayISO(): string {
 const LEVEL_COLOR = { ok: "#2E6B66", warn: "#A64B25", over: "#A64B25" };
 
 export function Orcamento() {
-  const { householdId, categories } = useHousehold();
+  const { householdId, categories, groupLabels } = useHousehold();
   const [monthTx, setMonthTx] = useState<MonthTx[]>([]);
   const [recentTx, setRecentTx] = useState<MonthTx[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,7 +121,7 @@ export function Orcamento() {
       )}
 
       <section>
-        <SectionTitle>Variáveis do casal</SectionTitle>
+        <SectionTitle>{groupLabels.variavel}</SectionTitle>
         <div className="space-y-3">
           {budgetCats
             .filter((c) => c.grp === "variavel")
