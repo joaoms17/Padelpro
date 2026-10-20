@@ -18,6 +18,7 @@ on:
     branches: [main]
     paths:
       - "supabase/functions/**"
+      - "supabase/migrations/**"
       - "supabase/cron/**"
       - "supabase/config.toml"
       - ".github/workflows/supabase-deploy.yml"
@@ -75,6 +76,20 @@ jobs:
             echo "::error::A base de dados não tem o schema da app — corre supabase/setup.sql no SQL Editor primeiro."
             exit 1
           fi
+
+      - name: Apply migrations (0007+)
+        run: |
+          set -euo pipefail
+          source .github/scripts/supabase-api.sh
+          # 0001–0006 come from supabase/setup.sql (run once by hand). From
+          # 0007 on every migration is idempotent and applied on each run.
+          for f in $(ls supabase/migrations/*.sql | sort); do
+            n=$(basename "$f" | cut -c1-4)
+            if [ "$((10#$n))" -ge 7 ]; then
+              echo "→ $f"
+              sql "$(cat "$f")" > /dev/null
+            fi
+          done
 
       - name: Sync function secrets
         env:
@@ -173,7 +188,12 @@ jobs:
           if [ "$HAS_EB" = "true" ]; then
             code=$(curl -sS -o /tmp/out -w '%{http_code}' -X POST "$base/eb-sync" \
               -H 'Content-Type: application/json' -H "x-cron-secret: $CRON_SECRET" -d '{"check":true}')
-            if [ "$code" = "200" ]; then summary "- ✅ Enable Banking: $(jq -r '.aspsp' /tmp/out) encontrado"
+            if [ "$code" = "200" ]; then
+              summary "- ✅ Enable Banking: $(jq -r '.aspsp' /tmp/out) encontrado ($(jq -r '.environment // "?"' /tmp/out))"
+              summary "  - redirect URLs registados: $(jq -r '.redirect_urls | join(", ") | if . == "" then "nenhum" else . end' /tmp/out)"
+              if [ "$(jq -r '.active' /tmp/out)" = "false" ]; then
+                summary "- ⚠️ A app Enable Banking ainda não está ativa — Control Panel → Activate by linking accounts"
+              fi
             else summary "- ❌ Enable Banking: HTTP $code $(jq -r '.error // .' /tmp/out | head -c 300)"; fail=1; fi
           else summary "- ⏭️ Fase C: EB_APP_ID / EB_PRIVATE_KEY em falta"; fi
 
