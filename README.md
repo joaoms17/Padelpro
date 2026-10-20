@@ -42,9 +42,11 @@ No primeiro login, a app chama `ensure_membership()`: o primeiro utilizador
 cria o agregado "Casa" (com categorias, definições e a Conta Casa) e o segundo
 junta-se automaticamente. O agregado está limitado a 2 membros.
 
-**Auth**: usar **OTP de 6 dígitos por email** (não magic link — no iPhone o link
-abre no Safari e não na PWA). No Supabase: Authentication → Email → ativar OTP e
-pôr `{{ .Token }}` no template. Restringir os signups aos dois emails.
+**Auth**: **email + password** (Supabase `signInWithPassword`/`signUp`). No
+Supabase: Authentication → Email ativado e **"Confirm email" desligado** (não
+precisa de SMTP nem templates). A sessão é persistente (não há login repetido);
+o PIN local é o bloqueio rápido ao reabrir. Depois de os dois registarem, podes
+desligar novos signups.
 
 ## Ligação ao banco (M3 — Enable Banking)
 

@@ -15,10 +15,10 @@ interface AuthState {
   session: Session | null;
   member: Member | null;
   configured: boolean;
-  /** Send a 6-digit OTP code to the email. */
-  sendCode: (email: string) => Promise<void>;
-  /** Verify the 6-digit code and open a session. */
-  verifyCode: (email: string, token: string) => Promise<void>;
+  /** Sign in with email + password (session persists — no repeated logins). */
+  signIn: (email: string, password: string) => Promise<void>;
+  /** Create the account with email + password. */
+  signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -94,20 +94,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       member,
       configured: isSupabaseConfigured,
-      async sendCode(email) {
-        const { error } = await supabase.auth.signInWithOtp({
+      async signIn(email, password) {
+        const { error } = await supabase.auth.signInWithPassword({
           email: email.trim(),
-          options: { shouldCreateUser: true },
+          password,
         });
         if (error) throw error;
       },
-      async verifyCode(email, token) {
-        const { error } = await supabase.auth.verifyOtp({
+      async signUp(email, password) {
+        const { data, error } = await supabase.auth.signUp({
           email: email.trim(),
-          token: token.trim(),
-          type: "email",
+          password,
         });
         if (error) throw error;
+        // When email confirmation is disabled, signUp returns a session and the
+        // user is logged in immediately. Otherwise fall back to a sign-in.
+        if (!data.session) {
+          const { error: e2 } = await supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password,
+          });
+          if (e2) throw e2;
+        }
       },
       async signOut() {
         await supabase.auth.signOut();
