@@ -98,6 +98,51 @@ describe("planPending", () => {
   });
 });
 
+describe("planPending — evidence that it is the same movement", () => {
+  it("never folds a released fuel hold into an unrelated withdrawal of the same amount", () => {
+    const stale = [p("galp", -5000, "2026-10-10", { description_raw: "COMPRA GALP LISBOA", created_at: "2026-10-10T18:00:00Z" })];
+    const returned = [r("ref:ATM1", -5000, "2026-10-11", "confirmado", "LEVANTAMENTO MULTIBANCO")];
+    const stored = [{ id: "atm", external_id: "ref:ATM1", created_at: "2026-10-11T18:00:00Z" }];
+    expect(planPending(stale, returned, stored, "2026-10-12")).toEqual({ relink: [], merge: [], remove: [] });
+    // ...and it simply expires after the grace period.
+    expect(planPending(stale, returned, stored, "2026-10-21").remove).toEqual(["galp"]);
+  });
+
+  it("prefers the stored booked version over an unrelated fresh movement", () => {
+    const stale = [p("rest", -2000, "2026-10-10", { description_raw: "RESTAURANTE O PATEO", created_at: "2026-10-10T18:00:00Z" })];
+    const returned = [
+      r("ref:R1", -2000, "2026-10-11", "confirmado", "RESTAURANTE O PATEO"),
+      r("ref:M1", -2000, "2026-10-11", "confirmado", "MBWAY JOAO"),
+    ];
+    const stored = [{ id: "r1", external_id: "ref:R1", created_at: "2026-10-11T06:00:00Z" }];
+    expect(planPending(stale, returned, stored, "2026-10-11")).toEqual({
+      relink: [],
+      merge: [{ id: "rest", into_id: "r1" }],
+      remove: [],
+    });
+  });
+
+  it("merges a pending twin into its booked version with the same hashed base", () => {
+    // Bank listed booked + pending together (base, base#1); then the pending went.
+    const stale = [p("twin", -120, "2026-10-10", {
+      external_id: "h:2026-10-10:-120:abc#1",
+      description_raw: "CAFE A",
+      created_at: "2026-10-11T06:00:00Z",
+    })];
+    const returned = [r("h:2026-10-10:-120:abc", -120, "2026-10-10", "confirmado", "CAFE A")];
+    const stored = [{ id: "base", external_id: "h:2026-10-10:-120:abc", created_at: "2026-10-10T18:00:00Z" }];
+    expect(planPending(stale, returned, stored, "2026-10-11").merge).toEqual([{ id: "twin", into_id: "base" }]);
+  });
+
+  it("a cancelled stored pending row is relinked if its booking is there, else removed at once", () => {
+    const stale = [p("c", -120, "2026-10-10", { external_id: "h:x", description_raw: "CAFE A" })];
+    const withBooking = [r("ref:A1", -120, "2026-10-10", "confirmado", "CAFE A")];
+    expect(planPending(stale, withBooking, [], "2026-10-11", 10, new Set(["h:x"])).relink)
+      .toEqual([{ id: "c", external_id: "ref:A1" }]);
+    expect(planPending(stale, [], [], "2026-10-11", 10, new Set(["h:x"])).remove).toEqual(["c"]);
+  });
+});
+
 describe("fetchStart", () => {
   it("pulls the window back to cover open pending rows, capped at 30 days", () => {
     expect(fetchStart("2026-03-25", [p("a", -1, "2026-03-20")], "2026-03-31")).toBe("2026-03-17");

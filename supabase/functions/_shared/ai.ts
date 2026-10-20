@@ -106,7 +106,8 @@ ${items
     },
   };
 
-  const text = await generateText({ tier: "fast", prompt, maxTokens: 8192, jsonSchema });
+  // A truncated answer still has complete objects: extractJson keeps them.
+  const text = await generateText({ tier: "fast", prompt, maxTokens: 8192, jsonSchema, allowPartial: true });
   const parsed = extractJson(text || "[]");
   const valid = new Set(categories.map((c) => c.id));
   return parsed.map((r) => ({

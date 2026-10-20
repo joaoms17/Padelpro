@@ -131,20 +131,9 @@ async function syncAccount(
 
   const { rows, cancelledIds } = prepareBatch(txs, todayISO);
 
-  // Cancelled/rejected: drop the provisional row if we had stored it.
-  const cancelled = new Set(cancelledIds);
-  const gone = pending.filter((p) => cancelled.has(p.external_id));
-  await removeRows(svc, householdId, gone.map((p) => p.id));
-
-  await reconcilePending(
-    svc,
-    householdId,
-    acc,
-    pending.filter((p) => !cancelled.has(p.external_id)),
-    rows,
-    fromISO,
-    todayISO,
-  );
+  // Cancelled/rejected stored pending rows go through reconciliation too: a
+  // voided twin of a booked movement is relinked/merged, otherwise removed.
+  await reconcilePending(svc, householdId, acc, pending, rows, new Set(cancelledIds), fromISO, todayISO);
 
   // Merge on conflict — provided columns update (pending → booked),
   // category_id and note are not provided so they are preserved.
@@ -179,6 +168,7 @@ async function reconcilePending(
   acc: Account,
   pending: StoredPending[],
   rows: { external_id: string; amount_cents: number; booking_date: string; status: "confirmado" | "provisorio"; description_raw: string }[],
+  cancelledIds: Set<string>,
   fromISO: string,
   todayISO: string,
 ): Promise<void> {
@@ -198,7 +188,7 @@ async function reconcilePending(
     stored = (data ?? []) as typeof stored;
   }
 
-  const plan = planPending(stale, rows, stored, todayISO);
+  const plan = planPending(stale, rows, stored, todayISO, 10, cancelledIds);
   for (const r of plan.relink) {
     const { error } = await svc.from("transactions").update({ external_id: r.external_id }).eq("id", r.id);
     if (error) throw error;
@@ -243,16 +233,31 @@ async function mergeInto(svc: SupabaseClient, householdId: string, fromId: strin
   await svc.from("event_payments").update({ transaction_id: intoId }).eq("transaction_id", fromId);
   await svc.from("transactions").update({ matched_transaction_id: intoId }).eq("matched_transaction_id", fromId);
 
+  // Open review items move over — unless the booked row already has the same
+  // proposal (same type and event / payments), which would double-record it.
   const { data: items } = await svc
     .from("review_items")
-    .select("id, ref")
+    .select("id, type, ref")
     .eq("household_id", householdId)
     .eq("status", "aberto")
-    .eq("ref->>transaction_id", fromId);
-  for (const it of items ?? []) {
-    await svc.from("review_items")
-      .update({ ref: { ...(it.ref as Record<string, unknown>), transaction_id: intoId } })
-      .eq("id", it.id);
+    .in("ref->>transaction_id", [fromId, intoId]);
+  const key = (it: { type: string; ref: unknown }) => {
+    const r = it.ref as { event_id?: string; payment_ids?: string[] };
+    return `${it.type}:${r.event_id ?? ""}:${(r.payment_ids ?? []).join(",")}`;
+  };
+  const onInto = new Set(
+    (items ?? []).filter((it) => (it.ref as { transaction_id?: string }).transaction_id === intoId).map(key),
+  );
+  for (const it of (items ?? []).filter((x) => (x.ref as { transaction_id?: string }).transaction_id === fromId)) {
+    if (onInto.has(key(it))) {
+      await svc.from("review_items")
+        .update({ status: "resolvido", resolved_at: new Date().toISOString() })
+        .eq("id", it.id);
+    } else {
+      await svc.from("review_items")
+        .update({ ref: { ...(it.ref as Record<string, unknown>), transaction_id: intoId } })
+        .eq("id", it.id);
+    }
   }
 
   const { error } = await svc.from("transactions").delete().eq("id", fromId);
@@ -260,7 +265,7 @@ async function mergeInto(svc: SupabaseClient, householdId: string, fromId: strin
 }
 
 /** Deletes bank rows and closes any open review item that points at them. */
-async function removeRows(svc: SupabaseClient, householdId: string, ids: string[]): Promise<void> {
+export async function removeRows(svc: SupabaseClient, householdId: string, ids: string[]): Promise<void> {
   if (ids.length === 0) return;
   await svc
     .from("review_items")

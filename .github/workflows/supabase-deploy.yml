@@ -123,6 +123,19 @@ jobs:
             | map(select(.value != ""))')
           api POST "/secrets" "$payload" > /dev/null
           echo "Secrets definidos: $(jq -r 'map(.name) | join(", ")' <<<"$payload")"
+
+          # AI provider/model choice follows the repo: a name removed there is
+          # removed here too (otherwise the old key/model would stay active).
+          existing=$(api GET "/secrets" | jq -r '.[].name')
+          stale=()
+          for n in GEMINI_API_KEY GEMINI_MODEL_FAST GEMINI_MODEL_SMART ANTHROPIC_API_KEY; do
+            if [ -z "${!n:-}" ] && grep -qx "$n" <<<"$existing"; then stale+=("$n"); fi
+          done
+          if [ ${#stale[@]} -gt 0 ]; then
+            api DELETE "/secrets" "$(printf '%s\n' "${stale[@]}" | jq -R . | jq -s .)" > /dev/null \
+              && echo "Secrets removidos: ${stale[*]}" \
+              || echo "::warning::Não consegui remover ${stale[*]} do Supabase — remove-os em Edge Functions → Secrets."
+          fi
           [ -n "${GEMINI_API_KEY:-}${ANTHROPIC_API_KEY:-}" ] ||
             echo "::warning::GEMINI_API_KEY não está nos secrets do repo (a IA da app fica desligada)."
           for s in EB_APP_ID EB_PRIVATE_KEY; do
@@ -202,12 +215,15 @@ jobs:
               if has "$smart"; then summary "- ✅ Gemini: $smart disponível (Pergunta à app)"
               else summary "- ⚠️ Gemini: $smart não existe — a Pergunta à app usa $fast"; fi
               # One tiny real call proves the key can generate (uses 1 request of the daily quota).
+              # Generous ceiling: thinking tokens count against maxOutputTokens.
               out=$(curl -sS "https://generativelanguage.googleapis.com/v1beta/models/$fast:generateContent" \
                 -H "x-goog-api-key: $GEMINI_API_KEY" -H 'Content-Type: application/json' \
-                -d '{"contents":[{"role":"user","parts":[{"text":"Responde apenas: OK"}]}],"generationConfig":{"maxOutputTokens":256}}')
-              if jq -e '.candidates[0].content.parts | map(select(.thought != true) | .text // "") | join("") | length > 0' <<<"$out" > /dev/null; then
+                -d '{"contents":[{"role":"user","parts":[{"text":"Responde apenas: OK"}]}],"generationConfig":{"maxOutputTokens":2048}}')
+              if jq -e '(.candidates[0].content.parts // []) | map(select(.thought != true) | .text // "") | join("") | length > 0' <<<"$out" > /dev/null 2>&1; then
                 summary "- ✅ Gemini responde ($fast)"
-              else summary "- ❌ Gemini não respondeu: $(jq -r '.error.message // .' <<<"$out" | head -c 300)"; fail=1; fi
+              elif jq -e '.error.code == 429' <<<"$out" > /dev/null 2>&1; then
+                summary "- ⚠️ Gemini: quota esgotada neste momento (429) — a chave é válida"
+              else summary "- ❌ Gemini não respondeu: $(jq -r '.error.message // (.candidates[0].finishReason // .)' <<<"$out" | head -c 300)"; fail=1; fi
             else summary "- ❌ Gemini: chave recusada — $(jq -r '.error.message // .' <<<"$models" | head -c 200)"; fail=1; fi
           elif [ -n "$ANTHROPIC_API_KEY" ]; then
             models=$(curl -sS 'https://api.anthropic.com/v1/models?limit=100' \

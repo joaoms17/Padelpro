@@ -7,7 +7,7 @@
 // event payment and review links — the row is either re-pointed to the booked
 // movement's external_id before the upsert (which then updates it in place),
 // or, when the booked version is already stored, merged into it.
-import { merchantSimilarity } from "./match.ts";
+import { merchantSimilarity, SIMILARITY_THRESHOLD } from "./match.ts";
 
 export interface StoredPending {
   id: string;
@@ -78,10 +78,21 @@ export function candidateIds(stale: StoredPending[], returned: ReturnedRow[]): s
     .map((r) => r.external_id);
 }
 
+/** Hashed ids of identical movements share a base: "h:…" and "h:…#1". */
+const baseOf = (id: string) => (id.startsWith("h:") ? id.split("#")[0] : id);
+
 /**
  * @param stored candidates (from candidateIds) that are already stored for
  *   this account. A NEW movement absorbs a stale row by relink; a stored,
  *   booked one (inserted while the bank still listed the pending too) by merge.
+ * @param cancelledIds ids the bank reported as cancelled this time: such a
+ *   row is still matched first (a voided twin of a booked movement), else it
+ *   is removed at once instead of waiting for the grace period.
+ *
+ * A candidate needs evidence that it is the same movement — same amount and
+ * date window, plus a similar description when both have one (or the same
+ * hashed base) — never the amount alone, or a released fuel hold would end up
+ * on an unrelated withdrawal of the same value.
  */
 export function planPending(
   stale: StoredPending[],
@@ -89,50 +100,50 @@ export function planPending(
   stored: StoredBooked[],
   todayISO: string,
   graceDays = 10,
+  cancelledIds: Set<string> = new Set(),
 ): PendingPlan {
   const plan: PendingPlan = { relink: [], merge: [], remove: [] };
   const storedById = new Map(stored.map((s) => [s.external_id, s]));
   const claimed = new Set<string>();
 
-  const rank = (s: StoredPending) => (a: ReturnedRow, b: ReturnedRow) => {
-    // Booked first, then the most similar text, then the closest date.
-    if (a.status !== b.status) return a.status === "confirmado" ? -1 : 1;
-    const sim = (r: ReturnedRow) => merchantSimilarity(s.description_raw ?? "", r.description_raw ?? "");
-    const ds = sim(b) - sim(a);
-    if (ds !== 0) return ds;
-    return Math.abs(toMs(a.booking_date) - toMs(s.booking_date)) -
-      Math.abs(toMs(b.booking_date) - toMs(s.booking_date));
-  };
-
   for (const s of [...stale].sort((a, b) => a.booking_date.localeCompare(b.booking_date))) {
-    const same = returned.filter((r) =>
-      !claimed.has(r.external_id) && r.amount_cents === s.amount_cents && inWindow(s, r)
-    );
+    const sim = (r: ReturnedRow) => merchantSimilarity(s.description_raw ?? "", r.description_raw ?? "");
+    const sameBase = (r: ReturnedRow) => s.external_id.startsWith("h:") && baseOf(r.external_id) === baseOf(s.external_id);
+    const similar = (r: ReturnedRow) =>
+      sameBase(r) || !s.description_raw || !r.description_raw || sim(r) >= SIMILARITY_THRESHOLD;
 
-    const fresh = same.filter((r) => !storedById.has(r.external_id)).sort(rank(s))[0];
-    if (fresh) {
-      claimed.add(fresh.external_id);
-      plan.relink.push({ id: s.id, external_id: fresh.external_id });
-      continue;
+    const candidates = returned.filter((r) => {
+      if (claimed.has(r.external_id) || r.amount_cents !== s.amount_cents || !inWindow(s, r)) return false;
+      if (!similar(r)) return false;
+      const row = storedById.get(r.external_id);
+      if (!row) return true; // fresh: relink
+      // Stored: only a booked row, and only one stored after the pending one
+      // (or the same hashed movement), never an older unrelated movement.
+      return r.status === "confirmado" &&
+        (sameBase(r) || !s.created_at || !row.created_at || row.created_at >= s.created_at);
+    });
+
+    const best = candidates.sort((a, b) => {
+      // Booked first, then the most similar text, then fresh over stored,
+      // then the closest date.
+      if (a.status !== b.status) return a.status === "confirmado" ? -1 : 1;
+      const ds = sim(b) - sim(a);
+      if (ds !== 0) return ds;
+      const fa = storedById.has(a.external_id) ? 1 : 0;
+      const fb = storedById.has(b.external_id) ? 1 : 0;
+      if (fa !== fb) return fa - fb;
+      return Math.abs(toMs(a.booking_date) - toMs(s.booking_date)) -
+        Math.abs(toMs(b.booking_date) - toMs(s.booking_date));
+    })[0];
+
+    if (best) {
+      claimed.add(best.external_id);
+      const row = storedById.get(best.external_id);
+      if (row) plan.merge.push({ id: s.id, into_id: row.id });
+      else plan.relink.push({ id: s.id, external_id: best.external_id });
+    } else if (cancelledIds.has(s.external_id) || (toMs(todayISO) - toMs(s.booking_date)) / DAY > graceDays) {
+      plan.remove.push(s.id);
     }
-
-    // Booked version already stored (it was inserted while the bank still
-    // listed the pending one): merge — but only into a row stored after the
-    // pending one, never into an older, unrelated movement.
-    const booked = same
-      .filter((r) => r.status === "confirmado" && storedById.has(r.external_id))
-      .filter((r) => {
-        const row = storedById.get(r.external_id)!;
-        return !s.created_at || !row.created_at || row.created_at >= s.created_at;
-      })
-      .sort(rank(s))[0];
-    if (booked) {
-      claimed.add(booked.external_id);
-      plan.merge.push({ id: s.id, into_id: storedById.get(booked.external_id)!.id });
-      continue;
-    }
-
-    if ((toMs(todayISO) - toMs(s.booking_date)) / DAY > graceDays) plan.remove.push(s.id);
   }
   return plan;
 }

@@ -34,6 +34,8 @@ export class LLMError extends Error {
     message: string,
     /** Daily quota gone, model missing or overloaded: worth trying a lighter model. */
     readonly fallback = false,
+    /** Configuration problem (key): no further call can succeed. */
+    readonly fatal = false,
   ) {
     super(message);
     this.name = "LLMError";
@@ -89,7 +91,9 @@ async function timedFetch(url: string, init: RequestInit, who: string): Promise<
 async function geminiCall(model: string, body: Record<string, unknown>): Promise<GeminiResponse> {
   const key = Deno.env.get("GEMINI_API_KEY")!;
   let req = body;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  let retries = 0; // transport retries (429 / 5xx), at most 2
+  const dropped = { thinking: false, schema: false }; // each adjustment at most once
+  for (;;) {
     const res = await timedFetch(`${GEMINI_API}/${model}:generateContent`, {
       method: "POST",
       headers: { "x-goog-api-key": key, "Content-Type": "application/json" },
@@ -106,26 +110,26 @@ async function geminiCall(model: string, body: Record<string, unknown>): Promise
     }
     const msg = err.message ?? text.slice(0, 200);
     const details = err.details ?? [];
+    const gen = req.generationConfig as Record<string, unknown> | undefined;
 
     // Some models reject a thinking level they don't support: drop it once.
-    const gen = req.generationConfig as Record<string, unknown> | undefined;
-    if (res.status === 400 && gen?.thinkingConfig && /thinking/i.test(msg)) {
+    if (res.status === 400 && gen?.thinkingConfig && !dropped.thinking && /thinking/i.test(msg)) {
+      dropped.thinking = true;
       const { thinkingConfig: _t, ...rest } = gen;
       req = { ...req, generationConfig: rest };
       continue;
     }
     // Structured output schema not accepted by this model: the prompt also
     // asks for the format, so retry once without the schema.
-    if (res.status === 400 && gen?.responseJsonSchema && /schema/i.test(msg)) {
+    if (res.status === 400 && gen?.responseJsonSchema && !dropped.schema && /schema/i.test(msg)) {
+      dropped.schema = true;
       const { responseJsonSchema: _s, ...rest } = gen;
       req = { ...req, generationConfig: rest };
       continue;
     }
     if (res.status === 429) {
-      const perDay = details.some((d) =>
-        JSON.stringify(d.violations ?? "").includes("PerDay")
-      );
-      if (perDay || attempt === 2) {
+      const perDay = details.some((d) => JSON.stringify(d.violations ?? "").includes("PerDay"));
+      if (perDay || retries >= 2) {
         throw new LLMError(
           perDay
             ? `A quota grátis diária do Gemini (${model}) esgotou — volta por volta das 8h.`
@@ -134,27 +138,30 @@ async function geminiCall(model: string, body: Record<string, unknown>): Promise
         );
       }
       const retry = details.find((d) => typeof d.retryDelay === "string")?.retryDelay as string | undefined;
-      const secs = retry ? Number.parseFloat(retry) : 2 ** (attempt + 1);
+      const secs = retry ? Number.parseFloat(retry) : 2 ** (retries + 1);
+      retries++;
       await sleep(Math.min(10, Number.isFinite(secs) ? secs : 4) * 1000);
       continue;
     }
-    if ([500, 502, 503, 504].includes(res.status) && attempt < 2) {
-      await sleep(2 ** (attempt + 1) * 1000);
+    if ([500, 502, 503, 504].includes(res.status)) {
+      if (retries >= 2) throw new LLMError(`O Gemini está sobrecarregado (${res.status}) — tenta mais tarde.`, true);
+      retries++;
+      await sleep(2 ** retries * 1000);
       continue;
     }
     if (res.status === 404) throw new LLMError(`O modelo ${model} não está disponível para esta chave.`, true);
-    if ([500, 502, 503, 504].includes(res.status)) {
-      throw new LLMError(`O Gemini está sobrecarregado (${res.status}) — tenta mais tarde.`, true);
-    }
-    if (res.status === 400 && /API_KEY_INVALID|API key/i.test(text)) {
-      throw new LLMError("A chave GEMINI_API_KEY é inválida.");
+    if (res.status === 401 || res.status === 403 || /API_KEY_INVALID|API key not valid/i.test(text)) {
+      throw new LLMError("A chave GEMINI_API_KEY é inválida ou não tem acesso à API do Gemini.", false, true);
     }
     throw new LLMError(`Gemini ${res.status}: ${msg}`);
   }
-  throw new LLMError("O Gemini não respondeu.", true);
 }
 
-function geminiText(data: GeminiResponse): string {
+/**
+ * @param allowPartial return what was generated on MAX_TOKENS (a JSON array
+ *   cut short still has complete objects worth keeping) instead of failing.
+ */
+function geminiText(data: GeminiResponse, allowPartial = false): string {
   const c = data.candidates?.[0];
   if (!c) throw new LLMError(`O Gemini recusou o pedido (${data.promptFeedback?.blockReason ?? "sem resposta"}).`);
   const text = (c.content?.parts ?? [])
@@ -162,7 +169,7 @@ function geminiText(data: GeminiResponse): string {
     .map((p) => p.text)
     .join("")
     .trim();
-  if (c.finishReason && c.finishReason !== "STOP") {
+  if (c.finishReason && c.finishReason !== "STOP" && !(allowPartial && c.finishReason === "MAX_TOKENS")) {
     throw new LLMError(`Resposta do Gemini incompleta (${c.finishReason}).`);
   }
   return text;
@@ -172,7 +179,7 @@ async function geminiGenerate(
   tier: Tier,
   system: string | undefined,
   prompt: string,
-  opts: { maxTokens: number; jsonSchema?: Record<string, unknown> },
+  opts: { maxTokens: number; jsonSchema?: Record<string, unknown>; allowPartial?: boolean },
 ): Promise<string> {
   const generationConfig: Record<string, unknown> = {
     maxOutputTokens: opts.maxTokens,
@@ -188,7 +195,7 @@ async function geminiGenerate(
     generationConfig,
   };
   if (system) body.systemInstruction = { parts: [{ text: system }] };
-  return geminiText(await geminiCall(modelFor("gemini", tier), body));
+  return geminiText(await geminiCall(modelFor("gemini", tier), body), opts.allowPartial);
 }
 
 function geminiTools(tools: ToolDef[]) {
@@ -216,6 +223,7 @@ async function geminiChat(
   deadline: number,
 ): Promise<string> {
   const contents: GeminiContent[] = [{ role: "user", parts: [{ text: question }] }];
+  let malformedRetried = false;
   for (let step = 0; step < maxSteps; step++) {
     // Not enough time left for another model call (+ tools) in this request.
     if (Date.now() > deadline - CALL_TIMEOUT_MS) {
@@ -233,6 +241,16 @@ async function geminiChat(
       generationConfig: { maxOutputTokens: 8192, thinkingConfig: { thinkingLevel: "MEDIUM" } },
     });
     const cand = data.candidates?.[0];
+    if (cand?.finishReason === "MALFORMED_FUNCTION_CALL") {
+      // Flash models occasionally emit a broken call: retry this step once,
+      // then let the caller fall back to the other model.
+      if (!malformedRetried) {
+        malformedRetried = true;
+        step--;
+        continue;
+      }
+      throw new LLMError("Não consegui interpretar a pergunta — tenta reformular.", true);
+    }
     const calls = (cand?.content?.parts ?? []).filter((p) => p.functionCall);
     if (!cand?.content || calls.length === 0) return geminiText(data);
 
@@ -276,7 +294,11 @@ async function anthropicCall(body: Record<string, unknown>): Promise<{
     body: JSON.stringify(body),
   }, "A Anthropic");
   if (!res.ok) {
-    throw new LLMError(`Anthropic ${res.status}: ${(await res.text()).slice(0, 200)}`, res.status === 429 || res.status >= 500);
+    throw new LLMError(
+      `Anthropic ${res.status}: ${(await res.text()).slice(0, 200)}`,
+      res.status === 429 || res.status >= 500,
+      res.status === 401 || res.status === 403,
+    );
   }
   return await res.json();
 }
@@ -330,9 +352,11 @@ export async function generateText(opts: {
   maxTokens: number;
   /** JSON Schema of the expected answer (Gemini enforces it; Claude follows the prompt). */
   jsonSchema?: Record<string, unknown>;
+  /** Return a truncated answer instead of failing (the caller can salvage it). */
+  allowPartial?: boolean;
 }): Promise<string> {
   const provider = llmProvider();
-  if (!provider) throw new LLMError("Nenhuma chave de IA configurada (GEMINI_API_KEY ou ANTHROPIC_API_KEY).");
+  if (!provider) throw new LLMError("Nenhuma chave de IA configurada (GEMINI_API_KEY ou ANTHROPIC_API_KEY).", false, true);
   if (provider === "gemini") {
     return await geminiGenerate(opts.tier, opts.system, opts.prompt, opts);
   }

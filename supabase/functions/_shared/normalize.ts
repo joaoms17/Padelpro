@@ -120,51 +120,53 @@ export interface PreparedBatch {
 
 /**
  * Normalises one fetch of an account's movements into upsert-safe rows.
- * - Cancelled/rejected movements are dropped (their ids reported apart).
  * - Identical hashed movements (two equal coffees the same day) get distinct
- *   ids via an occurrence counter that is independent of the bank's order and
- *   of cancelled entries: booked ones take #0..#n first, then provisional
- *   ones only beyond that — so a pending twin of a booked movement collapses
- *   into it instead of becoming a second row.
+ *   ids via an occurrence counter independent of the bank's order: booked
+ *   ones take #0..#n first, then provisional ones. A pending twin that the
+ *   bank still lists next to its booked version therefore gets its own id for
+ *   a while and is merged into the booked row once it disappears (pending.ts).
+ * - Cancelled/rejected movements are dropped; their ids are numbered after
+ *   the live ones of the same base, so a voided twin points at the stored
+ *   row it voids, never at a live one.
  * - One row per external_id (booked wins), as an upsert batch must never
  *   touch the same row twice.
  */
 export function prepareBatch(txs: EBTransaction[], todayISO: string): PreparedBatch {
-  const live: { n: NormalizedTx; base: string }[] = [];
-  const cancelled: string[] = [];
+  const live: NormalizedTx[] = [];
+  const cancelled: NormalizedTx[] = [];
   for (const tx of txs) {
     const n = normalizeTransaction(tx, todayISO);
-    if (isCancelled(tx)) cancelled.push(n.external_id);
-    else live.push({ n, base: n.external_id });
+    (isCancelled(tx) ? cancelled : live).push(n);
   }
 
-  // Hashed ids: index per base key, booked before provisional.
-  const groups = new Map<string, NormalizedTx[]>();
-  for (const { n, base } of live) {
-    if (!base.startsWith("h:")) continue;
-    groups.set(base, [...(groups.get(base) ?? []), n]);
-  }
-  const keep = new Set<NormalizedTx>(live.filter((x) => !x.base.startsWith("h:")).map((x) => x.n));
-  for (const [base, list] of groups) {
-    const booked = list.filter((n) => n.status === "confirmado");
-    const prov = list.filter((n) => n.status === "provisorio");
-    // Provisional twins of booked movements are the same movements.
-    const ordered = [...booked, ...prov.slice(booked.length)];
+  // Hashed ids: index per base key — booked, then provisional, then cancelled.
+  const groups = new Map<string, { live: NormalizedTx[]; cancelled: NormalizedTx[] }>();
+  const group = (base: string) => {
+    let g = groups.get(base);
+    if (!g) groups.set(base, g = { live: [], cancelled: [] });
+    return g;
+  };
+  for (const n of live) if (n.external_id.startsWith("h:")) group(n.external_id).live.push(n);
+  for (const n of cancelled) if (n.external_id.startsWith("h:")) group(n.external_id).cancelled.push(n);
+  for (const [base, g] of groups) {
+    const ordered = [
+      ...g.live.filter((n) => n.status === "confirmado"),
+      ...g.live.filter((n) => n.status === "provisorio"),
+      ...g.cancelled,
+    ];
     ordered.forEach((n, k) => {
       n.external_id = k === 0 ? base : `${base}#${k}`;
-      keep.add(n);
     });
   }
 
   const byId = new Map<string, NormalizedTx>();
-  for (const { n } of live) {
-    if (!keep.has(n)) continue;
+  for (const n of live) {
     const prev = byId.get(n.external_id);
     if (prev && prev.status === "confirmado" && n.status === "provisorio") continue;
     byId.set(n.external_id, n);
   }
-  // A cancelled entry only removes a stored row that is not also live now.
-  const cancelledIds = [...new Set(cancelled)].filter((id) => !byId.has(id));
+  // A cancelled entry only points at a stored row that is not also live now.
+  const cancelledIds = [...new Set(cancelled.map((n) => n.external_id))].filter((id) => !byId.has(id));
   return { rows: [...byId.values()], cancelledIds };
 }
 

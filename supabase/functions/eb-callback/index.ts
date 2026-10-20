@@ -3,7 +3,7 @@
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { householdFromRequest, serviceClient } from "../_shared/db.ts";
 import { ebFetch } from "../_shared/eb.ts";
-import { syncHousehold } from "../_shared/sync.ts";
+import { removeRows, syncHousehold } from "../_shared/sync.ts";
 import { planAccountLinks, type SessionAccount, type StoredAccount } from "../_shared/accounts.ts";
 
 // POST /sessions returns account OBJECTS (GET /sessions/{id} returns uid strings).
@@ -87,6 +87,15 @@ Deno.serve(async (req) => {
     if (plan.unlink.length) {
       const { error } = await svc.from("accounts").update({ eb_account_uid: null }).in("id", plan.unlink);
       if (error) throw error;
+      // Their pending rows can no longer resolve (no more syncs): drop them so
+      // they don't count forever.
+      const { data: stuck } = await svc
+        .from("transactions")
+        .select("id")
+        .in("account_id", plan.unlink)
+        .eq("source", "banco")
+        .eq("status", "provisorio");
+      await removeRows(svc, householdId, (stuck ?? []).map((t) => t.id as string));
     }
     const linked = plan.update.length + plan.insert.length;
 

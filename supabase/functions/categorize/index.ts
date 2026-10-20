@@ -131,7 +131,9 @@ Deno.serve(async (req) => {
         try {
           results = await categorizeWithAI(chunk, categories);
         } catch (e) {
-          if (e instanceof LLMError) aiError = e.message;
+          // Quota / overload / missing model / timeout / bad key: stop for
+          // this run. A problem with this batch only (blocked, malformed): skip it.
+          if (e instanceof LLMError && (e.fallback || e.fatal)) aiError = e.message;
           results = [];
         }
       }

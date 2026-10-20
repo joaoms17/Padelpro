@@ -23,7 +23,7 @@ export interface BankTx {
 
 const DATE_MIN = -1; // bank can post 1 day before (rare) …
 const DATE_MAX = 3; // … up to 3 days after the purchase
-const SIMILARITY_THRESHOLD = 0.4;
+export const SIMILARITY_THRESHOLD = 0.4;
 
 function stripAccents(s: string): string {
   return s.normalize("NFD").replace(/[̀-ͯ]/g, "");
