@@ -42,4 +42,11 @@ describe("incomeMonths", () => {
     const r = incomeMonths([sal], c, ["2026-08"], "2026-10-20").get("s")!;
     expect(r[0]).toMatchObject({ receivedCents: 210000, missingCents: 0 });
   });
+  it("a month whose usual day is before the bank history is 'no data', not missing", () => {
+    const renda: ExpectedIncome = { ...sal, id: "r", amount_cents: 120000, day: 8, match_text: "renda" };
+    const c = [{ id: "1", booking_date: "2026-08-08", amount_cents: 120000, description_raw: "TRF RENDA" }];
+    const r = incomeMonths([renda], c, ["2026-07", "2026-08"], "2026-10-20", "2026-07-20").get("r")!;
+    expect(r.map((m) => [m.noData, m.missingCents])).toEqual([[true, 0], [false, 0]]);
+    expect(r[1].credits).toEqual([{ date: "2026-08-08", amount_cents: 120000 }]);
+  });
 });

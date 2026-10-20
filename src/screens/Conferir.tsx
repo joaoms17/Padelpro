@@ -5,7 +5,7 @@ import { useHousehold } from "@/data/household";
 import { listIncomes, loadCredits } from "@/data/incomes";
 import { loadDuetReceipts, type DuetReceiptsResult } from "@/data/duet";
 import { categoriesWithRole } from "@/lib/categories";
-import { incomeMonths, joanaMonths } from "@/lib/conferir";
+import { incomeMonths, joanaMonths, type IncomeMonth } from "@/lib/conferir";
 import { addMonth, type Credit, type ExpectedIncome } from "@/lib/forecast";
 import { formatCents, formatMonth } from "@/lib/format";
 import { errorMessage } from "@/lib/errors";
@@ -83,7 +83,7 @@ export function Conferir() {
     [shown.join(), duet, credits, eventosIds],
   );
   const perIncome = useMemo(
-    () => incomeMonths(incomes.filter((i) => i.active), credits, shown, todayISO()),
+    () => incomeMonths(incomes.filter((i) => i.active), credits, shown, todayISO(), credits[0]?.booking_date),
     [incomes, credits, shown.join()],
   );
 
@@ -171,24 +171,7 @@ export function Conferir() {
                     <table className="w-full text-sm tnum">
                       <tbody>
                         {(perIncome.get(inc.id) ?? []).map((m) => (
-                          <tr key={m.month} className="border-t first:border-t-0 border-areia/50 dark:border-white/5">
-                            <td className="py-1.5 capitalize">{shortMonth(m.month)}</td>
-                            <td className="text-right">
-                              {!m.due ? (
-                                <span className="text-tinta/40 dark:text-creme/40">não é mês</span>
-                              ) : m.missingCents === 0 ? (
-                                <span className="text-petroleo">✓ {formatCents(m.receivedCents)}</span>
-                              ) : m.month === thisMonth() ? (
-                                <span className="text-tinta/60 dark:text-creme/60">
-                                  {m.receivedCents > 0 ? `${formatCents(m.receivedCents)} · ` : ""}por receber {formatCents(m.missingCents)}
-                                </span>
-                              ) : (
-                                <span className="text-terracota">
-                                  {m.receivedCents > 0 ? `${formatCents(m.receivedCents)} · ` : ""}falta {formatCents(m.missingCents)}
-                                </span>
-                              )}
-                            </td>
-                          </tr>
+                          <IncomeRow key={m.month} m={m} />
                         ))}
                       </tbody>
                     </table>
@@ -215,5 +198,46 @@ function IncomeTotal({ rows }: { rows: { month: string; due: boolean; expectedCe
       Recebido {formatCents(received)}
       {missing > 0 ? ` · falta ${formatCents(missing)} dos meses passados` : " · meses passados em dia"}
     </p>
+  );
+}
+
+/** One month of an expected income; tap to see the transfers counted for it. */
+function IncomeRow({ m }: { m: IncomeMonth }) {
+  const [open, setOpen] = useState(false);
+  const status = !m.due ? (
+    <span className="text-tinta/40 dark:text-creme/40">não é mês</span>
+  ) : m.noData ? (
+    <span className="text-tinta/40 dark:text-creme/40">sem dados do banco</span>
+  ) : m.missingCents === 0 ? (
+    <span className="text-petroleo">✓ {formatCents(m.receivedCents)}</span>
+  ) : m.month === thisMonth() ? (
+    <span className="text-tinta/60 dark:text-creme/60">
+      {m.receivedCents > 0 ? `${formatCents(m.receivedCents)} · ` : ""}por receber {formatCents(m.missingCents)}
+    </span>
+  ) : (
+    <span className="text-terracota">
+      {m.receivedCents > 0 ? `${formatCents(m.receivedCents)} · ` : ""}falta {formatCents(m.missingCents)}
+    </span>
+  );
+  const canOpen = m.due && !m.noData;
+  return (
+    <>
+      <tr
+        className={`border-t first:border-t-0 border-areia/50 dark:border-white/5 ${canOpen ? "cursor-pointer" : ""}`}
+        onClick={() => canOpen && setOpen((o) => !o)}
+      >
+        <td className="py-1.5 capitalize">{shortMonth(m.month)}</td>
+        <td className="text-right">{status}</td>
+      </tr>
+      {open && (
+        <tr>
+          <td colSpan={2} className="pb-2 text-xs text-tinta/50 dark:text-creme/50">
+            {m.credits.length === 0
+              ? "Nenhum movimento contado — confirma a palavra-chave em Entradas previstas."
+              : m.credits.map((c) => `${c.date.slice(8, 10)}/${c.date.slice(5, 7)} · ${formatCents(c.amount_cents)}`).join("  ·  ")}
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
