@@ -54,6 +54,9 @@ export class EBError extends Error {
 }
 
 function friendlyMessage(status: number, code: string | null): string | null {
+  if (code === "APPLICATION_NOT_ACTIVE") {
+    return "A app Enable Banking ainda não está ativa — no Control Panel faz \"Activate by linking accounts\" com o Santander.";
+  }
   if (code === "ASPSP_RATE_LIMIT_EXCEEDED" || status === 429) {
     return "O banco limita as sincronizações por dia (cerca de 4) — tenta daqui a umas horas.";
   }
@@ -86,8 +89,10 @@ export async function ebFetch<T = unknown>(
   if (!res.ok) {
     let code: string | null = null;
     try {
-      const err = JSON.parse(text) as { error?: unknown };
+      const err = JSON.parse(text) as { error?: unknown; message?: unknown };
       if (typeof err.error === "string") code = err.error;
+      // A production app not yet activated answers 403 "Application is not active".
+      else if (typeof err.message === "string" && /not active/i.test(err.message)) code = "APPLICATION_NOT_ACTIVE";
     } catch (_e) {
       /* non-JSON error body */
     }
