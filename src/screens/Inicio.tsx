@@ -6,11 +6,10 @@ import { assembleMetrics, type MetricsBundle } from "@/data/metrics";
 import { loadMembers } from "@/data/settings";
 import { Card, SectionTitle } from "@/components/ui";
 import { ForecastCard } from "@/components/ForecastCard";
-import { formatCents, formatPct } from "@/lib/format";
+import { formatCents } from "@/lib/format";
 
 const QUICK_LINKS = [
   { to: "/por-rever", label: "Por rever", hint: "Correções e correspondências" },
-  { to: "/conferir", label: "Conferir entradas", hint: "App1 e ordenado vs Santander" },
   { to: "/orcamento", label: "Orçamento", hint: "Limites por categoria" },
   { to: "/objetivos", label: "Objetivos", hint: "Reservas da almofada" },
   { to: "/pergunta", label: "Pergunta à app", hint: "Chat sobre as contas" },
@@ -36,6 +35,7 @@ export function Inicio() {
       members,
       contaCasa?.balance_cents ?? 0,
       new Date().toISOString().slice(0, 10),
+      contaCasa?.id ?? null,
     );
     setM(bundle);
   }, [householdId, categories, contaCasa]);
@@ -67,34 +67,11 @@ export function Inicio() {
       )}
 
       {m && (
-        <Link to="/metricas" className="block">
-          <Card>
-            <div className="flex items-baseline justify-between gap-3">
-              <div className="text-sm text-tinta/60 dark:text-creme/60">Sobra deste mês até agora</div>
-              <div className={`text-2xl font-display tnum ${m.totals.sobraCents < 0 ? "text-terracota" : ""}`}>
-                {formatCents(m.totals.sobraCents)}
-              </div>
-            </div>
-            <p className="text-xs text-tinta/50 dark:text-creme/50">
-              Entradas − despesas do mês · poupança {formatPct(m.totals.taxaPoupanca)}
-            </p>
-            <SobraComTudo m={m} />
-          </Card>
-        </Link>
-      )}
-
-      {m && (
-        <div className="grid grid-cols-2 gap-3">
-          <Card>
-            <div className="text-sm text-tinta/60 dark:text-creme/60">Almofada</div>
-            <div className="text-2xl font-display tnum">{m.almofadaMeses.toFixed(1)} meses</div>
-            <div className="text-xs text-tinta/50 dark:text-creme/50">{formatCents(m.almofadaDisponivelCents)}</div>
-          </Card>
-          <Card>
-            <div className="text-sm text-tinta/60 dark:text-creme/60">A receber (eventos)</div>
-            <div className="text-2xl font-display tnum">{formatCents(m.eventosAReceberCents)}</div>
-          </Card>
-        </div>
+        <Card>
+          <div className="text-sm text-tinta/60 dark:text-creme/60">Almofada</div>
+          <div className="text-2xl font-display tnum">{m.almofadaMeses.toFixed(1)} meses</div>
+          <div className="text-xs text-tinta/50 dark:text-creme/50">{formatCents(m.almofadaDisponivelCents)}</div>
+        </Card>
       )}
 
       <div>
@@ -108,25 +85,6 @@ export function Inicio() {
           ))}
         </div>
       </div>
-    </div>
-  );
-}
-
-/** The month's sobra if every expected income still to come arrives. */
-function SobraComTudo({ m }: { m: MetricsBundle }) {
-  const pending = m.forecast.incoming.reduce((a, l) => a + l.cents, 0);
-  if (pending <= 0) return null;
-  const entradas = m.totals.entradasCents + pending;
-  const sobra = m.totals.sobraCents + pending;
-  return (
-    <div className="mt-2 pt-2 border-t border-areia/50 dark:border-white/5 flex items-baseline justify-between gap-3">
-      <div className="text-sm text-tinta/60 dark:text-creme/60">
-        Se entrar tudo o previsto
-        <span className="block text-xs text-tinta/50 dark:text-creme/50">
-          +{formatCents(pending)} por entrar · poupança {formatPct(entradas > 0 ? sobra / entradas : 0)}
-        </span>
-      </div>
-      <div className={`text-xl font-display tnum ${sobra < 0 ? "text-terracota" : "text-petroleo"}`}>{formatCents(sobra)}</div>
     </div>
   );
 }

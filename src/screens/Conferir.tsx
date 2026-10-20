@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { PageHeader, SectionTitle, EmptyState } from "@/components/ui";
 import { useHousehold } from "@/data/household";
 import { listIncomes, loadCredits } from "@/data/incomes";
@@ -29,7 +29,6 @@ type Credits = (Credit & { category_id: string | null })[];
  * expected income (salary…) against what arrived.
  */
 export function Conferir() {
-  const navigate = useNavigate();
   const { householdId, categories } = useHousehold();
   const [credits, setCredits] = useState<Credits>([]);
   const [incomes, setIncomes] = useState<ExpectedIncome[]>([]);
@@ -108,12 +107,9 @@ export function Conferir() {
 
   return (
     <div className="space-y-6">
-      <button className="text-sm text-tinta/50 dark:text-creme/50" onClick={() => navigate(-1)}>
-        ‹ Voltar
-      </button>
       <PageHeader
-        title="Conferir entradas"
-        subtitle="O que devia ter entrado no Santander e o que entrou, mês a mês."
+        title="Entradas"
+        subtitle="Já entrou tudo? O que devia ter chegado ao Santander e o que chegou, mês a mês. Os eventos geres na App1."
       />
 
       {error && <p className="text-sm text-terracota">{error}</p>}
