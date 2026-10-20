@@ -145,10 +145,10 @@ export function Conferir() {
                       ? `Entraram mais ${formatCents(-totalGap)} no Santander do que o marcado como pago na App1 — falta marcar algum pagamento?`
                       : "Bate certo: o pago na App1 entrou todo no Santander."}
                 </div>
-                <table className="w-full text-sm tnum">
+                <table className="w-full table-fixed text-sm tnum">
                   <thead className="text-xs text-tinta/50 dark:text-creme/50">
                     <tr>
-                      <th className="text-left font-normal">Mês</th>
+                      <th className="text-left font-normal w-[26%]">Mês</th>
                       <th className="text-right font-normal">Pago (App1)</th>
                       <th className="text-right font-normal">No Santander</th>
                       <th className="text-right font-normal">Diferença</th>
@@ -195,7 +195,7 @@ export function Conferir() {
                 {incomes.filter((i) => i.active).map((inc) => (
                   <div key={inc.id} className="card p-4">
                     <div className="font-medium text-sm mb-2">{inc.label}</div>
-                    <table className="w-full text-sm tnum">
+                    <table className="w-full table-fixed text-sm tnum">
                       <tbody>
                         {(perIncome.get(inc.id) ?? []).map((m) => (
                           <IncomeRow key={m.month} m={m} />
@@ -306,7 +306,7 @@ function JoanaRow({
             ) : (
               bank.map((c) => (
                 <div key={c.id} className="flex justify-between gap-3">
-                  <span className="truncate">{day(c.booking_date)} · {c.description_raw ?? "—"}</span>
+                  <span className="truncate min-w-0">{day(c.booking_date)} · {c.description_raw ?? "—"}</span>
                   <span className="shrink-0">{formatCents(c.amount_cents)}</span>
                 </div>
               ))
@@ -317,7 +317,7 @@ function JoanaRow({
             ) : (
               duet.map((r, i) => (
                 <div key={i} className="flex justify-between gap-3">
-                  <span className="truncate">{day(r.date)} · {r.title}</span>
+                  <span className="truncate min-w-0">{day(r.date)} · {r.title}</span>
                   <span className="shrink-0">{formatCents(r.amount_cents)}</span>
                 </div>
               ))
