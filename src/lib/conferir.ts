@@ -43,6 +43,10 @@ export interface IncomeMonth {
   /** Covered for this month, from everything received (oldest months first). */
   receivedCents: number;
   missingCents: number;
+  /** Its usual day is before the bank history starts: nothing to check. */
+  noData: boolean;
+  /** The transfers counted for this month. */
+  credits: { date: string; amount_cents: number }[];
 }
 
 /**
@@ -55,6 +59,8 @@ export function incomeMonths(
   credits: Credit[],
   months: string[],
   today: string,
+  /** First day with bank movements (history before it is unknown). */
+  dataFrom?: string,
 ): Map<string, IncomeMonth[]> {
   // Every transfer counted for each income, oldest first.
   const got = new Map<string, Credit[]>(incomes.map((i) => [i.id, []]));
@@ -87,14 +93,21 @@ export function incomeMonths(
       inc.id,
       months.map((month) => {
         const due = isDueInMonth(inc, month);
-        if (!due) return { month, due, expectedCents: 0, receivedCents: 0, missingCents: 0 };
+        if (!due) return { month, due, expectedCents: 0, receivedCents: 0, missingCents: 0, noData: false, credits: [] };
+        // Paid before the bank history starts (allowing for it coming a few days late).
+        const usual = `${month}-${String(Math.min(inc.day + 7, 28)).padStart(2, "0")}`;
+        if (dataFrom && usual < dataFrom) {
+          return { month, due, expectedCents: inc.amount_cents, receivedCents: 0, missingCents: 0, noData: true, credits: [] };
+        }
         // Each due month takes its parts from the oldest transfers left; the
         // amounts may vary (salary), a part counts once it looks like one.
         let received = 0;
         let whole = 0;
+        const counted: { date: string; amount_cents: number }[] = [];
         while (next < queue.length && whole < parts && received < inc.amount_cents * 0.95) {
           const c = queue[next++];
           received += c.amount_cents;
+          counted.push({ date: c.booking_date, amount_cents: c.amount_cents });
           if (c.amount_cents >= part * 0.7) whole++;
         }
         const done = whole >= parts || received >= inc.amount_cents * 0.95;
@@ -104,6 +117,8 @@ export function incomeMonths(
           expectedCents: inc.amount_cents,
           receivedCents: received,
           missingCents: done ? 0 : Math.max(0, inc.amount_cents - received),
+          noData: false,
+          credits: counted,
         };
       }),
     );
