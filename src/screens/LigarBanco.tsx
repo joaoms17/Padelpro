@@ -24,6 +24,14 @@ function fmtDateTime(iso: string | null): string {
   }).format(new Date(iso));
 }
 
+/** Running as the installed home-screen app (iOS standalone / display-mode). */
+function isInstalledApp(): boolean {
+  const nav = navigator as Navigator & { standalone?: boolean };
+  return nav.standalone === true || window.matchMedia?.("(display-mode: standalone)").matches === true;
+}
+
+const isMobile = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
 export function LigarBanco() {
   const { householdId, contaCasa, reload } = useHousehold();
   const [conn, setConn] = useState<BankConnection | null>(null);
@@ -46,7 +54,24 @@ export function LigarBanco() {
     void refresh();
   }, [refresh]);
 
+  // The bank authorization hops to the Santander app and comes back in the
+  // default browser; from the installed app that is a different browser
+  // session, so Enable Banking reports "Authentication session has expired".
+  const installed = isInstalledApp();
+  const [copied, setCopied] = useState(false);
+  const pageUrl = `${window.location.origin}/ligar-banco`;
+
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(pageUrl);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+
   async function connect() {
+    if (installed) return;
     setBusy("auth");
     setError(null);
     try {
@@ -155,6 +180,31 @@ export function LigarBanco() {
             </Card>
           )}
 
+          {installed ? (
+            <Card className="border-terracota/30 bg-terracota/5 space-y-2">
+              <p className="text-sm text-terracota font-medium">
+                Liga o banco no Safari ou no computador
+              </p>
+              <p className="text-sm text-tinta/70 dark:text-creme/70">
+                Na app instalada, o banco volta para o Safari, que não tem a sessão
+                da autorização, e ela expira. Abre este endereço no computador
+                (recomendado) ou no Safari e entra com a tua conta:
+              </p>
+              <p className="text-xs break-all font-mono">{pageUrl}</p>
+              <button className="btn-ghost w-full" onClick={copyLink}>
+                {copied ? "Copiado ✓" : "Copiar endereço"}
+              </button>
+            </Card>
+          ) : (
+            isMobile() && !active && (
+              <p className="text-xs text-tinta/60 dark:text-creme/60 leading-relaxed">
+                Dica: no telemóvel faz isto no <b>browser predefinido</b> (normalmente
+                o Safari) — depois de confirmares na app do Santander, o banco volta
+                sempre para esse browser. No computador é mais simples.
+              </p>
+            )
+          )}
+
           {msg && <p className="text-sm text-petroleo">{msg}</p>}
           {error && <p className="text-sm text-terracota">{error}</p>}
 
@@ -170,7 +220,7 @@ export function LigarBanco() {
             )}
             <button
               className={active ? "btn-ghost w-full" : "btn-primary w-full"}
-              disabled={busy !== null}
+              disabled={busy !== null || installed}
               onClick={connect}
             >
               {busy === "auth"
