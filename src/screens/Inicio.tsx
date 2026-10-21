@@ -226,12 +226,13 @@ function Preparar({
             </p>
           )}
           {duet?.configured && (
-            <p className="text-sm">
+            <Link to="/meses/joana" className="block text-sm active:opacity-60">
               Joana: <Eur cents={duet.cents} className="font-medium" /> recebidos na Duet
               <span className={faint}> ({duet.count} {duet.count === 1 ? "pagamento" : "pagamentos"})</span> ·{" "}
               <Eur cents={real.entradas.find((l) => l.key === "joana")?.cents ?? 0} className="font-medium" /> já na conta
+              <span className={POS}> →</span>
               {month < JOANA_FROM && <span className={`block text-xs ${faint}`}>A partir de novembro tudo o que recebe na Duet passa para a conta.</span>}
-            </p>
+            </Link>
           )}
           {top.length > 0 && (
             <div>
@@ -502,7 +503,7 @@ function Controlar({
           )}
           {month >= JOANA_FROM &&
             (joanaDuet != null && joana ? (
-              <p>
+              <Link to="/meses/joana" className="block active:opacity-60">
                 Joana: <Eur cents={joanaDuet} /> na Duet este mês · chegou <Eur cents={joanaArrived} />
                 {joana.missing > 0 ? (
                   <span className={NEG}>
@@ -514,12 +515,14 @@ function Controlar({
                 ) : (
                   joanaDuet > 0 && <span className={POS}> ✓</span>
                 )}
-              </p>
+                <span className={POS}> →</span>
+              </Link>
             ) : (
-              <p>
+              <Link to="/meses/joana" className="block active:opacity-60">
                 Joana: <Eur cents={joanaArrived} /> na conta este mês
                 <span className={faint}>{duet === null ? " · a ver a Duet…" : " · sem dados da Duet"}</span>
-              </p>
+                <span className={POS}> →</span>
+              </Link>
             ))}
           {real.entrou !== expectedIn && (
             <p className={`text-xs ${faint}`}>

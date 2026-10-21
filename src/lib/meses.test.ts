@@ -254,6 +254,16 @@ describe("compare table", () => {
     ]);
   });
 
+  it("with Duet: Joana na Duet right after Joana, with the plan's average", () => {
+    const withDuet = compareRows([augS, sepS], [aug, sep], averages, members, { byMonth: { "2026-08": 172500, "2026-10": 90000 }, average: 150000 });
+    const keys = withDuet.map((r) => r.key);
+    expect(keys.slice(4, 6)).toEqual(["joana", "joana-duet"]);
+    expect(withDuet.find((r) => r.key === "joana-duet")).toMatchObject({ label: "Joana na Duet", values: [172500, 0], avg: 150000, kind: "sub" });
+    // Not part of "Entrou".
+    expect(withDuet[0]).toEqual(row("entrou"));
+    expect(compareRows([augS, sepS], [aug, sep], averages, members, null).some((r) => r.key === "joana-duet")).toBe(false);
+  });
+
   it("compact amounts", () => {
     expect(compactEuros(123456)).toMatch(/^1\s?235$/);
     expect(compactEuros(-8500)).toBe("−85");

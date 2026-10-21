@@ -1,8 +1,12 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { eligible } from "@/lib/month";
 import { compactEuros, compareRows, type CompareRow } from "@/lib/meses";
+import { addMonth } from "@/lib/forecast";
 import { monthName, monthShort } from "@/lib/format";
+import { joanaStats } from "@/lib/joanaView";
+import { duetByMonth } from "@/lib/planView";
+import { lastDayOf, loadDuetReceipts, type DuetReceiptsResult } from "@/data/duet";
 import type { MonthsView } from "@/lib/view";
 
 /** At most this many months side by side (the table must fit a phone). */
@@ -13,12 +17,28 @@ const join = (xs: string[]) => (xs.length <= 1 ? (xs[0] ?? "") : `${xs.slice(0, 
 /** The closed months side by side (sem pontuais) with the averages the plan uses. */
 export function MonthCompare({ view, members }: { view: MonthsView; members: { id: string; display_name: string }[] }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  // What Joana received on Duet: the last 12 complete months (the compared
+  // ones are among them), averaged as the plan does.
+  const current = view.current;
+  const [receipts, setReceipts] = useState<DuetReceiptsResult | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void loadDuetReceipts(`${addMonth(current, -12)}-01`, lastDayOf(addMonth(current, -1))).then((r) => alive && setReceipts(r));
+    return () => {
+      alive = false;
+    };
+  }, [current]);
+  const duet = useMemo(() => {
+    if (!receipts?.configured || receipts.error) return null;
+    const s = joanaStats(receipts.receipts, current);
+    return { byMonth: duetByMonth(receipts.receipts), average: s.average, count: s.months.length };
+  }, [receipts, current]);
   const { months, sem, rows } = useMemo(() => {
     const months = view.closed.slice(-MAX_MONTHS);
     const sem = months.map((m) => view.semPontuais.get(m)!);
     const real = months.map((m) => view.real.get(m)!);
-    return { months, sem, rows: compareRows(sem, real, view.averages, members) };
-  }, [view, members]);
+    return { months, sem, rows: compareRows(sem, real, view.averages, members, duet) };
+  }, [view, members, duet]);
   const hidden = view.closed.length - months.length;
   const notEligible = new Set(sem.filter((b) => !eligible(b)).map((b) => b.month));
   const avgMonths = view.averages.months;
@@ -119,6 +139,16 @@ export function MonthCompare({ view, members }: { view: MonthsView; members: { i
             </Link>
           </p>
         )}
+        {duet && (
+          <p className="mt-1 text-[11px] text-tinta/50 dark:text-creme/50">
+            Joana na Duet: o que recebeu lá (não soma no Entrou); a média é a do Plano
+            {duet.count > 0 && `, de ${duet.count} ${duet.count === 1 ? "mês" : "meses"}`}.{" "}
+            <Link to="/meses/joana" className="underline">
+              Histórico
+            </Link>
+          </p>
+        )}
+        {receipts?.error && <p className="mt-1 text-[11px] text-terracota dark:text-orange-300">Não consegui ver a Duet: {receipts.error}</p>}
         {hidden > 0 && <p className="mt-1 text-[11px] text-tinta/50 dark:text-creme/50">Mostro os últimos {MAX_MONTHS} meses fechados.</p>}
       </div>
 
