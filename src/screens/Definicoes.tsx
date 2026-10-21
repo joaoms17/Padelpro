@@ -1,20 +1,21 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/auth/AuthProvider";
+import { useHousehold } from "@/data/household";
 import { PageHeader, SectionTitle } from "@/components/ui";
+import { ImportStatement } from "@/components/ImportStatement";
+import { supabase } from "@/lib/supabase";
 import { isPinSet, setPin, clearPin } from "@/auth/PinLock";
 import { getStoredTheme, applyTheme, type Theme } from "@/lib/theme";
 
 function Row({
   title,
   hint,
-  milestone,
   right,
   to,
 }: {
   title: string;
   hint?: string;
-  milestone?: string;
   right?: React.ReactNode;
   to?: string;
 }) {
@@ -27,11 +28,6 @@ function Row({
         )}
       </div>
       <div className="shrink-0 flex items-center gap-2">
-        {milestone && (
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-petroleo bg-petroleo/10 rounded-full px-2 py-0.5">
-            {milestone}
-          </span>
-        )}
         {right}
         {to && <span className="text-tinta/30 dark:text-creme/30">›</span>}
       </div>
@@ -49,11 +45,35 @@ function Row({
   );
 }
 
+/** "há 3 h" / "há 2 dias". */
+function ago(iso: string | null): string {
+  if (!iso) return "nunca";
+  const h = Math.round((Date.now() - Date.parse(iso)) / 3600000);
+  if (h < 1) return "há pouco";
+  if (h < 36) return `há ${h} h`;
+  return `há ${Math.round(h / 24)} dias`;
+}
+
 export function Definicoes() {
   const { member, signOut } = useAuth();
+  const { householdId } = useHousehold();
   const [theme, setTheme] = useState<Theme>(getStoredTheme());
   const [pinOn, setPinOn] = useState(isPinSet());
   const [pinEntry, setPinEntry] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [bank, setBank] = useState<{ last_sync_at: string | null; valid_until: string | null } | null>(null);
+
+  useEffect(() => {
+    if (!householdId) return;
+    supabase
+      .from("bank_connections")
+      .select("last_sync_at, valid_until, status")
+      .eq("household_id", householdId)
+      .then(({ data }) => {
+        const rows = (data ?? []) as { last_sync_at: string | null; valid_until: string | null; status: string }[];
+        setBank(rows.find((r) => r.status === "active") ?? rows[0] ?? null);
+      });
+  }, [householdId]);
 
   function chooseTheme(t: Theme) {
     setTheme(t);
@@ -68,48 +88,34 @@ export function Definicoes() {
     }
   }
 
+  const until = bank?.valid_until ? new Date(bank.valid_until).toLocaleDateString("pt-PT", { day: "numeric", month: "short" }) : null;
+
   return (
     <div className="space-y-6">
-      <PageHeader title="Definições" subtitle="Configura a app do vosso jeito." />
+      <PageHeader title="Definições" subtitle={member ? `Sessão de ${member.display_name}` : undefined} />
 
-      {/* Agregado */}
       <section className="card p-5">
-        <SectionTitle>Agregado</SectionTitle>
+        <SectionTitle>Banco</SectionTitle>
         <Row
-          title={member?.display_name ?? "Membro"}
-          hint={member ? "Sessão iniciada" : "A carregar…"}
+          title="Santander"
+          hint={bank ? `Atualizado ${ago(bank.last_sync_at)}${until ? ` · ligação válida até ${until}` : ""}` : "Por ligar"}
+          to="/ligar-banco"
         />
-        <Row title="Membros" hint="João e Joana" milestone="M1" />
-        <Row title="Conta Casa (Santander)" hint="Cotitulares · todo o dinheiro entra aqui" milestone="M3" />
       </section>
 
-      {/* Dinheiro */}
       <section className="card p-5">
-        <SectionTitle>Dinheiro</SectionTitle>
-        <Row title="Entradas previstas" hint="Ordenado, despesas de representação… para a previsão" to="/entradas-previstas" />
-        <Row title="Mesadas" hint="Valor e dia por pessoa" to="/dinheiro" />
-        <Row title="Categorias" hint="Separadores e opções: criar, renomear, ordenar" to="/categorias" />
-        <Row title="Regras" hint="O que cada regra categoriza — mudar ou apagar" to="/regras" />
+        <SectionTitle>Categorias</SectionTitle>
+        <Row title="Categorias" hint="Criar, renomear, ordenar, juntar" to="/categorias" />
+        <Row title="Regras" hint="O que cada regra categoriza sozinha" to="/regras" />
       </section>
 
-      {/* Ligações */}
       <section className="card p-5">
-        <SectionTitle>Ligações</SectionTitle>
-        <Row title="Ligação ao banco" hint="Enable Banking · Santander" to="/ligar-banco" />
-        <Row title="Atalho Apple Pay" hint="Token e URL por iPhone" to="/apple-pay" />
-        <Row title="Notificações" hint="Web Push por membro" to="/notificacoes" />
+        <SectionTitle>Avisos</SectionTitle>
+        <Row title="Notificações" hint="O que cada um recebe no telemóvel" to="/notificacoes" />
       </section>
 
-      {/* Dados */}
       <section className="card p-5">
-        <SectionTitle>Dados</SectionTitle>
-        <Row title="Importar extrato" hint="CSV/XLSX do Santander" milestone="M2" />
-        <Row title="Exportar dados" hint="CSV" milestone="M2" />
-      </section>
-
-      {/* App — functional in M1 */}
-      <section className="card p-5">
-        <SectionTitle>App</SectionTitle>
+        <SectionTitle>Aparência e PIN</SectionTitle>
 
         <Row
           title="Tema"
@@ -170,12 +176,22 @@ export function Definicoes() {
         />
       </section>
 
+      <section className="card p-5">
+        <SectionTitle>Avançado</SectionTitle>
+        <button className="w-full text-left" onClick={() => setImporting(true)}>
+          <Row title="Importar extratos antigos" hint="CSV/XLSX do Santander, para meses antes da ligação" />
+        </button>
+        <Row title="Atalho Apple Pay" hint="Registar compras no momento (iPhone)" to="/apple-pay" />
+      </section>
+
+      <ImportStatement open={importing} onClose={() => setImporting(false)} onDone={() => setImporting(false)} />
+
       <button className="btn-ghost w-full" onClick={() => signOut()}>
         Terminar sessão
       </button>
 
       <p className="text-center text-xs text-tinta/40 dark:text-creme/40">
-        Contas a Dois · v0.1.0
+        Contas a Dois · v0.2.0
       </p>
     </div>
   );

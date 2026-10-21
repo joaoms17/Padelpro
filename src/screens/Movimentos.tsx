@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PageHeader, EmptyState } from "@/components/ui";
 import { useHousehold } from "@/data/household";
 import { listTransactions, type TxFilters } from "@/data/transactions";
-import { AddTransaction } from "@/components/AddTransaction";
 import { TransactionSheet } from "@/components/TransactionSheet";
 import { ImportStatement } from "@/components/ImportStatement";
 import { formatSigned, formatCents } from "@/lib/format";
@@ -51,7 +50,6 @@ export function Movimentos() {
   const [txs, setTxs] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
   const [editing, setEditing] = useState<Transaction | null>(null);
 
@@ -212,17 +210,7 @@ export function Movimentos() {
         </div>
       )}
 
-      {/* Floating add button */}
-      <button
-        className="fixed right-5 bottom-24 z-30 w-14 h-14 rounded-full bg-terracota text-creme text-3xl shadow-card flex items-center justify-center active:scale-95 transition-transform"
-        style={{ marginBottom: "env(safe-area-inset-bottom)" }}
-        onClick={() => setAdding(true)}
-        aria-label="Novo movimento"
-      >
-        +
-      </button>
 
-      <AddTransaction open={adding} onClose={() => setAdding(false)} onSaved={load} />
       <ImportStatement
         open={importing}
         onClose={() => setImporting(false)}

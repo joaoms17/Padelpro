@@ -1,4 +1,3 @@
-import { lazy, Suspense } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/auth/AuthProvider";
 import { HouseholdProvider } from "@/data/household";
@@ -7,25 +6,14 @@ import { AppShell } from "@/components/AppShell";
 import { Login } from "@/screens/Login";
 import { Inicio } from "@/screens/Inicio";
 import { Movimentos } from "@/screens/Movimentos";
-import { PorRever } from "@/screens/PorRever";
+import { Meses } from "@/screens/Meses";
+import { Plano } from "@/screens/Plano";
 import { Regras } from "@/screens/Regras";
 import { Categorias } from "@/screens/Categorias";
-import { EntradasPrevistas } from "@/screens/EntradasPrevistas";
-import { Conferir } from "@/screens/Conferir";
-import { MesadasModulo } from "@/screens/MesadasModulo";
-import { Orcamento } from "@/screens/Orcamento";
-import { Dinheiro } from "@/screens/Dinheiro";
-import { Objetivos } from "@/screens/Objetivos";
 import { LigarBanco, LigarBancoCallback } from "@/screens/LigarBanco";
 import { ApplePay } from "@/screens/ApplePay";
 import { Notificacoes } from "@/screens/Notificacoes";
-import { Pergunta } from "@/screens/Pergunta";
 import { Definicoes } from "@/screens/Definicoes";
-
-// Lazy — keeps Recharts out of the initial bundle.
-const Metricas = lazy(() =>
-  import("@/screens/Metricas").then((m) => ({ default: m.Metricas })),
-);
 
 function Gate() {
   const { loading, session, member, memberError, signOut } = useAuth();
@@ -71,28 +59,25 @@ function Gate() {
         <Routes>
         <Route element={<AppShell />}>
           <Route path="/" element={<Inicio />} />
+          <Route path="/meses" element={<Meses />} />
+          <Route path="/meses/:mes" element={<Meses />} />
+          <Route path="/plano" element={<Plano />} />
           <Route path="/movimentos" element={<Movimentos />} />
-          <Route path="/por-rever" element={<PorRever />} />
-          <Route path="/orcamento" element={<Orcamento />} />
-          <Route path="/eventos" element={<Navigate to="/conferir" replace />} />
-          <Route
-            path="/metricas"
-            element={
-              <Suspense fallback={<div className="py-10 text-center text-tinta/50 dark:text-creme/50">A carregar…</div>}>
-                <Metricas />
-              </Suspense>
-            }
-          />
-          <Route path="/objetivos" element={<Objetivos />} />
-          <Route path="/pergunta" element={<Pergunta />} />
           <Route path="/definicoes" element={<Definicoes />} />
           <Route path="/regras" element={<Regras />} />
           <Route path="/categorias" element={<Categorias />} />
-          <Route path="/entradas-previstas" element={<EntradasPrevistas />} />
-          <Route path="/conferir" element={<Conferir />} />
-          <Route path="/mesadas" element={<MesadasModulo />} />
-          <Route path="/ensaio" element={<Navigate to="/mesadas" replace />} />
-          <Route path="/dinheiro" element={<Dinheiro />} />
+          {/* Old screens, folded into the four above */}
+          <Route path="/metricas" element={<Navigate to="/meses" replace />} />
+          <Route path="/conferir" element={<Navigate to="/meses" replace />} />
+          <Route path="/eventos" element={<Navigate to="/meses" replace />} />
+          <Route path="/mesadas" element={<Navigate to="/plano" replace />} />
+          <Route path="/ensaio" element={<Navigate to="/plano" replace />} />
+          <Route path="/dinheiro" element={<Navigate to="/plano" replace />} />
+          <Route path="/orcamento" element={<Navigate to="/plano" replace />} />
+          <Route path="/entradas-previstas" element={<Navigate to="/plano#entradas" replace />} />
+          <Route path="/objetivos" element={<Navigate to="/plano" replace />} />
+          <Route path="/por-rever" element={<Navigate to="/movimentos?vista=categorizar" replace />} />
+          <Route path="/pergunta" element={<Navigate to="/" replace />} />
           <Route path="/apple-pay" element={<ApplePay />} />
           <Route path="/notificacoes" element={<Notificacoes />} />
           <Route path="/ligar-banco" element={<LigarBanco />} />
