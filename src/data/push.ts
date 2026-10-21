@@ -5,14 +5,18 @@ export const VAPID_PUBLIC_KEY = (import.meta.env.VITE_VAPID_PUBLIC_KEY ?? "").tr
 
 export type NotifyPrefs = Record<string, boolean>;
 
-// Only notifications the server actually sends (alerts, notify and
-// monthly-close functions). Salary/rent arrivals, event-payment matches,
-// budget 80/100% and fixed-expense changes are not sent yet, so they are
-// not offered as toggles.
+// The notifications the server sends (alerts, notify and monthly-close
+// functions), one toggle per members.notify_prefs key (on unless false).
+// The plan's alerts (limites … joana) only start once the plan is in force.
 export const NOTIFY_OPTIONS: { key: string; label: string }[] = [
   { key: "ligacao_banco", label: "Ligação ao banco a expirar" },
-  { key: "resumo_semana", label: "Resumo semanal (domingo)" },
+  { key: "resumo_semana", label: "Resumo da semana (domingo)" },
   { key: "fecho_mes", label: "Fecho do mês (dia 1)" },
+  { key: "limites", label: "Limites e ritmo do dia a dia" },
+  { key: "contas_fixas", label: "Contas fixas que ainda não saíram" },
+  { key: "entradas", label: "Entradas que ainda não chegaram" },
+  { key: "mesadas", label: "Mesadas acima do combinado" },
+  { key: "joana", label: "Dinheiro da Duet por chegar à conta" },
 ];
 
 export function pushSupported(): boolean {

@@ -6,7 +6,7 @@ name: Supabase deploy
 #
 # Repo secrets (Settings → Secrets and variables → Actions):
 #   SUPABASE_ACCESS_TOKEN  required — supabase.com/dashboard/account/tokens
-#   GEMINI_API_KEY         Fase B (categorização IA, Pergunta à app, resumos) —
+#   GEMINI_API_KEY         Fase B (categorização IA) —
 #                          aistudio.google.com → Get API key (grátis); em
 #                          alternativa ANTHROPIC_API_KEY (Claude)
 #   EB_APP_ID              Fase C (Enable Banking application ID)
@@ -35,7 +35,9 @@ permissions:
 
 env:
   PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF || 'rhwmykdmlggcsvfbeomz' }}
-  FUNCTIONS: ai-ask alerts categorize duet-events eb-auth-start eb-callback eb-sync ingest-applepay monthly-close notify
+  FUNCTIONS: alerts categorize duet-events eb-auth-start eb-callback eb-sync ingest-applepay monthly-close notify
+  # Functions that no longer exist in the repo: removed from the project on deploy.
+  RETIRED_FUNCTIONS: ai-ask
 
 jobs:
   gate:
@@ -152,6 +154,14 @@ jobs:
           # verify_jwt per function comes from supabase/config.toml.
           supabase functions deploy $FUNCTIONS --project-ref "$PROJECT_REF" --use-api
 
+      - name: Remove retired Edge Functions
+        run: |
+          set -uo pipefail
+          for fn in $RETIRED_FUNCTIONS; do
+            supabase functions delete "$fn" --project-ref "$PROJECT_REF" > /dev/null 2>&1 \
+              && echo "Função removida: $fn" || echo "$fn já não existe no projeto"
+          done
+
       - name: Schedule crons
         run: |
           set -euo pipefail
@@ -174,7 +184,6 @@ jobs:
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL_FAST: ${{ vars.GEMINI_MODEL_FAST }}
-          GEMINI_MODEL_SMART: ${{ vars.GEMINI_MODEL_SMART }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           HAS_EB: ${{ secrets.EB_APP_ID != '' && secrets.EB_PRIVATE_KEY != '' }}
         run: |
@@ -185,7 +194,7 @@ jobs:
           summary "### Supabase deploy — $PROJECT_REF"
 
           # 1. Functions are up and reject anonymous calls (in code, not the gateway).
-          for fn in categorize ai-ask eb-auth-start duet-events; do
+          for fn in categorize eb-auth-start duet-events; do
             code=$(curl -sS -o /tmp/out -w '%{http_code}' -X POST "$base/$fn" -H 'Content-Type: application/json' -d '{}')
             if [ "$code" = "401" ] && grep -q 'autenticado' /tmp/out; then summary "- ✅ $fn ativo (pede login)"
             else summary "- ❌ $fn: HTTP $code $(head -c 200 /tmp/out)"; fail=1; fi
@@ -205,19 +214,16 @@ jobs:
           #    as in supabase/functions/_shared/llm.ts).
           if [ -n "$GEMINI_API_KEY" ]; then
             fast="${GEMINI_MODEL_FAST:-gemini-3.5-flash-lite}"
-            smart="${GEMINI_MODEL_SMART:-gemini-3.8-flash}"
             models=$(curl -sS 'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000' \
               -H "x-goog-api-key: $GEMINI_API_KEY")
             if jq -e '.models' <<<"$models" > /dev/null; then
               has() { jq -e --arg m "models/$1" '.models | map(.name) | index($m)' <<<"$models" > /dev/null; }
-              if has "$fast"; then summary "- ✅ Gemini: $fast disponível (categorização, resumos)"
+              if has "$fast"; then summary "- ✅ Gemini: $fast disponível (categorização)"
               else
                 summary "- ❌ Gemini: $fast não existe para esta chave — define a variável GEMINI_MODEL_FAST"
                 summary "  - modelos flash: $(jq -r '[.models[].name | select(test("flash")) | sub("models/";"")] | join(", ")' <<<"$models")"
                 fail=1
               fi
-              if has "$smart"; then summary "- ✅ Gemini: $smart disponível (Pergunta à app)"
-              else summary "- ⚠️ Gemini: $smart não existe — a Pergunta à app usa $fast"; fi
               # One tiny real call proves the key can generate (uses 1 request of the daily quota).
               # Generous ceiling: thinking tokens count against maxOutputTokens.
               out=$(curl -sS "https://generativelanguage.googleapis.com/v1beta/models/$fast:generateContent" \

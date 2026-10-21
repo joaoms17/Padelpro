@@ -125,7 +125,11 @@ export function Notificacoes() {
       </Card>
 
       <Card>
-        <div className="font-medium mb-2">O que quero receber</div>
+        <div className="font-medium">O que quero receber</div>
+        <p className="text-sm text-tinta/50 dark:text-creme/50 mb-2">
+          Os avisos do plano (limites, contas fixas, entradas, mesadas e Duet) começam quando o plano
+          entra em vigor e não se repetem no mesmo mês.
+        </p>
         <div className="divide-y divide-areia/50 dark:divide-white/5">
           {NOTIFY_OPTIONS.map((o) => (
             <label key={o.key} className="flex items-center justify-between gap-3 py-2.5 text-sm">

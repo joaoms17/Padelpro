@@ -5,7 +5,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
 import { EBError, ebFetch } from "./eb.ts";
 import { pickBalance, prepareBatch, toCents, type EBBalance, type EBTransaction } from "./normalize.ts";
 import { candidateIds, fetchStart, findStale, planPending, type StoredPending } from "./pending.ts";
-import { reconcileHousehold, proposeEventMatches } from "./reconcile.ts";
+import { reconcileHousehold } from "./reconcile.ts";
 
 interface Account {
   id: string;
@@ -64,10 +64,9 @@ export async function syncHousehold(
     }
   }
 
-  // Reconcile Apple Pay provisionals + propose event payment matches.
+  // Reconcile Apple Pay provisionals.
   try {
     await reconcileHousehold(svc, householdId);
-    await proposeEventMatches(svc, householdId);
   } catch {
     /* reconciliation is best-effort; bank data already synced */
   }

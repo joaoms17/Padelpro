@@ -1,17 +1,9 @@
 // Mesadas month by month: the agreed value per person and what each one
 // actually took from the house account. Pure and testable.
 import type { Category, CategoryGroup, Member } from "./types";
-import type { MesadaMonth } from "@/data/mesadas";
 
-/** A person's mesada in a month: the value set for that month, else the base. */
-export function mesadaFor(member: Pick<Member, "id" | "mesada_cents">, month: string, overrides: MesadaMonth[]): number {
-  const o = overrides.find((x) => x.member_id === member.id && x.month.slice(0, 7) === month);
-  return o ? o.amount_cents : member.mesada_cents || 0;
-}
-
-export function isOverride(memberId: string, month: string, overrides: MesadaMonth[]): boolean {
-  return overrides.some((x) => x.member_id === memberId && x.month.slice(0, 7) === month);
-}
+// The agreed mesada per month: shared with the Edge Functions.
+export { isOverride, mesadaFor } from "@shared/engine/mesadas.ts";
 
 /** Lowercase, no accents, letters and digits only: "TRF P/ JOÃO" ~ "trf p joao". */
 export const plain = (s: string | null | undefined) =>
