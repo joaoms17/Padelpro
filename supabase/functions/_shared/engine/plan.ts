@@ -2,11 +2,11 @@
 // to save, and so how much each mesada can be. Also "Com o modelo" (a month
 // redone as if the plan were already in place) and the current month's
 // control. Pure and testable.
-import { addMonth, isDueInMonth } from "./forecast";
-import { budgetLevel, daysInMonth, paceProjection, type BudgetLevel } from "./budget";
-import { incomeKind, JOANA_FROM, type EngineIncome, type MonthBreakdown } from "./month";
-import { plain } from "@shared/suggest";
-import type { Category, Member } from "./types";
+import { addMonth, isDueInMonth } from "./forecast.ts";
+import { budgetLevel, daysInMonth, paceProjection, type BudgetLevel } from "./budget.ts";
+import { incomeKind, JOANA_FROM, type EngineIncome, type MonthBreakdown } from "./month.ts";
+import { plain } from "../suggest.ts";
+import type { Category, Member } from "./types.ts";
 
 export type ExtrasRule = "poupanca" | "metade" | "decidir";
 

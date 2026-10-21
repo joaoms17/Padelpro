@@ -1,10 +1,10 @@
 // The month, as one set of accounts: what came in (and how), where it went
 // (the house, each of you, savings) and what was left. Every screen reads
 // its numbers from here, so they always agree. Pure and testable.
-import { hasIncomeKeyword, incomeFor, isTransfer, kindOf, makeNameFinder, plain } from "@shared/suggest";
-import { displayMerchant, normalizeMerchant } from "@shared/categorize";
-import { isDueInMonth, type ExpectedIncome } from "./forecast";
-import type { Category, Member, TransactionSource } from "./types";
+import { hasIncomeKeyword, incomeFor, isTransfer, kindOf, makeNameFinder, plain } from "../suggest.ts";
+import { displayMerchant, normalizeMerchant } from "../categorize.ts";
+import { isDueInMonth, type ExpectedIncome } from "./forecast.ts";
+import type { Category, Member, TransactionSource } from "./types.ts";
 
 /** First month Joana's events money goes to the house account. */
 export const JOANA_FROM = "2026-11";
