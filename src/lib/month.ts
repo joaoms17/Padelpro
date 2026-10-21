@@ -148,7 +148,7 @@ export const METHOD_LABELS: Record<Method, string> = {
 /** How money left, from the bank description. */
 export function paymentMethod(desc: string | null | undefined): Method {
   const p = ` ${plain(desc)} `;
-  if (/ (deb dir|debito direto|debito directo|dd|cobranca|sdd) /.test(p)) return "debito_direto";
+  if (/ (deb dir|debito direto|debito directo|dd|cobranca|sdd|prestacao|emprestimo) /.test(p)) return "debito_direto";
   if (/ (mb way|mbway) /.test(p)) return "mbway";
   if (/ (levantamento|lev|atm) /.test(p)) return "levantamento";
   if (/^ (trf|transf|transferencia|trf imed)\b/.test(p) || / (trf|transferencia|sepa) /.test(p)) return "transferencia";
@@ -427,11 +427,29 @@ export function monthBreakdown(
   };
 }
 
-/** Months worth comparing: ended, complete enough (≤ 2 % and ≤ 10 movements without category). */
+/**
+ * Months worth comparing: ended and complete enough — at most 10 movements
+ * without category and at most 5 % of the house costs (a big transfer to one
+ * of you must not make a month look complete).
+ */
 export function eligible(b: MonthBreakdown): boolean {
   if (b.status === "parcial" || b.status === "a_decorrer") return false;
-  const out = b.casa + b.voces + b.semSaiu;
-  return b.semCount <= 10 && b.semSaiu <= Math.max(0, out) * 0.02;
+  return b.semCount <= 10 && b.semSaiu <= Math.max(0, b.casa + b.semSaiu) * 0.05;
+}
+
+/**
+ * Transfers to one of you that look like the month's extra (prémio,
+ * subsídio) passed on: at least half of it, not marked pontual yet. Marked
+ * pontual, they stay out of the averages like the extra itself.
+ */
+export function pontualCandidates(txs: EngineTx[], ctx: EngineCtx, b: MonthBreakdown): TxRef[] {
+  const extra = b.entradas.find((l) => l.key === "extra")?.cents ?? 0;
+  if (extra <= 0) return [];
+  const classify = makeClassifier(ctx);
+  return txs
+    .filter((t) => inScope(t, b.month, ctx.today) && t.amount_cents < 0 && !t.pontual && -t.amount_cents >= extra * 0.5)
+    .filter((t) => classify(t).area === "voces")
+    .map((t) => ({ id: t.id, date: t.booking_date, desc: displayMerchant(t.description_raw) || (t.description_raw ?? ""), cents: -t.amount_cents, categoryId: t.category_id, pontual: false }));
 }
 
 /**

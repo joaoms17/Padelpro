@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { displayMerchant } from "@shared/categorize";
 import { setPontual } from "@/data/transactions";
+import { rowTitle } from "@/lib/triage";
 import type { EngineData } from "@/data/engine";
 import { errorMessage } from "@/lib/errors";
 import { formatEuros, monthName, monthTitle } from "@/lib/format";
@@ -21,6 +22,7 @@ import {
   lineLabel,
   makeResolver,
   METHOD_LABELS,
+  pontualCandidates,
   topMerchants,
   type CategoryLine,
   type EngineTx,
@@ -157,6 +159,7 @@ export function MonthReport({
             {real.porValidar} {real.porValidar === 1 ? "categoria sugerida" : "categorias sugeridas"} pela app por confirmar.
           </Banner>
         )}
+        <PontualSuggestions data={data} real={real} reload={reload} />
       </div>
 
       {mode === "real" ? (
@@ -650,5 +653,53 @@ function Maiores({ b, categoryName, reload }: { b: MonthBreakdown; categoryName:
       {err && <p className="mt-2 text-sm text-terracota">Não consegui guardar: {err}</p>}
       <p className={`mt-1 text-xs ${muted}`}>Pontual: um gasto que não se repete (fica fora das médias e do plano).</p>
     </Section>
+  );
+}
+
+// ── The extra passed on to one of you ───────────────────────────────────────
+
+/**
+ * A big transfer to one of you right after a prémio is usually the prémio
+ * itself: marked pontual it stays out of the averages, like the extra.
+ */
+function PontualSuggestions({ data, real, reload }: { data: EngineData; real: MonthBreakdown; reload: () => Promise<void> }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const candidates = useMemo(() => pontualCandidates(data.txs, data.ctx, real), [data, real]);
+  const extra = real.entradas.find((l) => l.key === "extra")?.cents ?? 0;
+  if (candidates.length === 0) return null;
+  async function mark(id: string) {
+    setBusy(id);
+    setError(null);
+    try {
+      await setPontual(id, true);
+      await reload();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+  return (
+    <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 space-y-2 text-sm">
+      <p>
+        Este mês veio um extra de <strong>{formatEuros(extra)}</strong> com o ordenado. Estas transferências parecem ser esse extra a
+        passar para um de vocês — marcadas como pontuais, ficam fora das médias:
+      </p>
+      {candidates.map((c) => (
+        <div key={c.id} className="flex items-center justify-between gap-3">
+          <span className="min-w-0">
+            <strong className="tnum">{formatEuros(c.cents)}</strong>
+            <span className="block truncate text-xs text-tinta/60 dark:text-creme/60">
+              {Number(c.date.slice(8, 10))}/{Number(c.date.slice(5, 7))} · {rowTitle(data.txs.find((t) => t.id === c.id)?.description_raw ?? c.desc)}
+            </span>
+          </span>
+          <button className="btn-ghost shrink-0 text-xs px-3 py-1.5" disabled={busy === c.id} onClick={() => mark(c.id)}>
+            {busy === c.id ? "A marcar…" : "Marcar como pontual"}
+          </button>
+        </div>
+      ))}
+      {error && <p className="text-terracota">{error}</p>}
+    </div>
   );
 }

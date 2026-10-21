@@ -7,6 +7,7 @@ import {
   monthEndBalances,
   monthsBetween,
   paymentMethod,
+  pontualCandidates,
   referenceAverages,
   todayLisbon,
   topMerchants,
@@ -143,7 +144,7 @@ describe("monthBreakdown — August", () => {
   it("biggest day-to-day spends and how money left", () => {
     expect(b.maiores[0]).toMatchObject({ cents: 12000 });
     expect(b.maiores.every((m) => m.cents > 0)).toBe(true);
-    expect(b.metodo.debito_direto).toBe(6000);
+    expect(b.metodo.debito_direto).toBe(6000 + 85000); // the EDP debit and the mortgage
     expect(b.metodo.transferencia).toBeGreaterThanOrEqual(619000);
   });
 });
@@ -164,16 +165,30 @@ describe("status, scope and averages", () => {
     expect(b).toMatchObject({ pendentes: 1, dia: 1500 });
   });
   it("eligible months feed the averages; otherwise provisório ones", () => {
-    const a = monthBreakdown(aug, ctx, "2026-08", { semPontuais: true });
+    // August with 200 € more without category: above 5 % of its house costs.
+    const a = monthBreakdown([...aug, t("2026-08-30", -20000, "XYZ")], ctx, "2026-08", { semPontuais: true });
     const s = monthBreakdown([t("2026-09-09", -20000, "CONTINENTE", "sup")], ctx, "2026-09", { semPontuais: true });
     expect(eligible(s)).toBe(true);
-    expect(eligible(a)).toBe(false); // 4 500 € without category > 2 %
+    expect(eligible(a)).toBe(false);
+    // The 5 690 € transfer to João does not make August look complete.
+    expect(eligible(monthBreakdown(aug, ctx, "2026-08", { semPontuais: true }))).toBe(true);
     const avg = referenceAverages([a, s]);
     expect(avg).toMatchObject({ months: ["2026-09"], provisorio: false });
     expect(avg.categorias.get("sup")!.mean).toBe(20000);
     const prov = referenceAverages([a]);
     expect(prov.provisorio).toBe(true);
     expect(prov.categorias.get("sup")!.mean).toBe(11450);
+  });
+});
+
+describe("pontualCandidates", () => {
+  it("the transfer that passed the prémio on", () => {
+    const b = monthBreakdown(aug, ctx, "2026-08");
+    const unmarked = aug.map((x) => (x.amount_cents === -569000 ? { ...x, pontual: false } : x));
+    const b2 = monthBreakdown(unmarked, ctx, "2026-08");
+    expect(pontualCandidates(unmarked, ctx, b2).map((c) => c.cents)).toEqual([569000]);
+    expect(pontualCandidates(aug, ctx, b)).toEqual([]); // already marked
+    expect(pontualCandidates(aug, ctx, monthBreakdown([], ctx, "2026-09"))).toEqual([]);
   });
 });
 
