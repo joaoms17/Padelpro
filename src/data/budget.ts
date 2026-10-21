@@ -26,7 +26,7 @@ export async function loadRecentTx(householdId: string, days = 190): Promise<Mon
   const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
   const { data } = await supabase
     .from("transactions")
-    .select("category_id, amount_cents, booking_date, counterparty, merchant_clean, account_id")
+    .select("id, category_id, amount_cents, booking_date, counterparty, merchant_clean, account_id, description_raw")
     .eq("household_id", householdId)
     .is("matched_transaction_id", null)
     .gte("booking_date", from)

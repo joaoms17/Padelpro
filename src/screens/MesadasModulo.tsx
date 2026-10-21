@@ -9,11 +9,13 @@ import { loadMembers } from "@/data/settings";
 import { loadMesadaMonths, setMesadaMonth, type MesadaMonth } from "@/data/mesadas";
 import { incomeMonths, type IncomeMonth } from "@/lib/conferir";
 import { ensaio, fullMonths, sustainableMesada, withMesada, type EnsaioMonth } from "@/lib/ensaio";
-import { isOverride, mesadaFor, takenByMember } from "@/lib/mesadas";
+import { isOverride, makePaidOut, mesadaFor, takenByMember, type PaidTx } from "@/lib/mesadas";
 import { addMonth } from "@/lib/forecast";
 import { formatCents, formatMonth, parseCents } from "@/lib/format";
 import { errorMessage } from "@/lib/errors";
 import type { Member } from "@/lib/types";
+
+type Taken = { cents: number; items: PaidTx[] };
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const shortMonth = (m: string) => formatMonth(m).split(" ")[0];
@@ -89,6 +91,7 @@ export function MesadasModulo() {
   }, [load]);
 
   const group = useMemo(() => new Map(categories.map((c) => [c.id, c.grp])), [categories]);
+  const paidOut = useMemo(() => makePaidOut(categories, members), [categories, members]);
   const rows = useMemo(
     () =>
       base &&
@@ -97,12 +100,13 @@ export function MesadasModulo() {
         today: todayISO(),
         group,
         mesadasFor: (month) => members.reduce((a, m) => a + mesadaFor(m, month, overrides), 0),
+        isPaidOut: (t) => paidOut(t).paid,
       }),
-    [base, group, members, overrides],
+    [base, group, members, overrides, paidOut],
   );
   const taken = useMemo(
-    () => (base ? takenByMember(base.tx, categories, members) : new Map<string, Map<string, number>>()),
-    [base, categories, members],
+    () => (base ? takenByMember(base.tx, paidOut, members) : new Map<string, Map<string, Taken>>()),
+    [base, paidOut, members],
   );
 
   const people = Math.max(1, members.length);
@@ -241,7 +245,7 @@ export function MesadasModulo() {
                 </tbody>
               </table>
               <p className="mt-3 text-xs text-tinta/50 dark:text-creme/50 leading-relaxed">
-                Entra = as tuas entradas previstas no valor normal (ordenado, despesas, renda — sem prémios nem subsídios) +
+                Entra = as tuas entradas previstas pelo que entrou de facto (ordenado com prémios, despesas, renda) +
                 o que a Joana marcou como recebido na App1. Despesas = tudo o que saiu para a casa (prestações, fixas,
                 variáveis, atividade). Pago a vocês = mesadas e retiradas/transferências reais. Podia mais = o que ainda
                 sobrava. Toca num mês para ver as contas e mudar a mesada desse mês.
@@ -264,7 +268,7 @@ function MonthRow({
   r: EnsaioMonth;
   members: Member[];
   overrides: MesadaMonth[];
-  taken: Map<string, Map<string, number>>;
+  taken: Map<string, Map<string, Taken>>;
   onSave: (memberId: string, month: string, cents: number | null) => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
@@ -292,11 +296,10 @@ function MonthRow({
         <tr>
           <td colSpan={5} className="pb-3 text-xs text-tinta/60 dark:text-creme/60 space-y-0.5">
             {r.partial && <div className="text-tinta/40 dark:text-creme/40">* mês com dados parciais</div>}
-            {line("+ Entradas do João (valor normal)", r.joaoCents)}
+            {line("+ Entradas do João", r.joaoCents)}
             {line("+ Recebido pela Joana (App1)", r.joanaCents)}
             {line("− Despesas da casa (prestações, fixas, variáveis, atividade)", r.despesasCents)}
-            {line("− Pago em mesadas", r.mesadasPagasCents)}
-            {line("− Outras retiradas e transferências entre contas", r.retiradasCents - r.mesadasPagasCents)}
+            {line("− Pago a vocês (transferências e mesadas)", r.retiradasCents)}
             <div className={`flex justify-between gap-3 font-medium ${r.podiaMaisCents < 0 ? "text-terracota" : "text-petroleo"}`}>
               <span>= Podia ter pago mais</span>
               <span>{formatCents(r.podiaMaisCents)}</span>
@@ -319,7 +322,7 @@ function MonthRow({
                   month={r.month}
                   value={mesadaFor(m, r.month, overrides)}
                   custom={isOverride(m.id, r.month, overrides)}
-                  taken={taken.get(m.id)?.get(r.month) ?? 0}
+                  taken={taken.get(m.id)?.get(r.month) ?? { cents: 0, items: [] }}
                   onSave={onSave}
                 />
               ))}
@@ -343,12 +346,12 @@ function MemberMonth({
   month: string;
   value: number;
   custom: boolean;
-  taken: number;
+  taken: Taken;
   onSave: (memberId: string, month: string, cents: number | null) => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
   const [amount, setAmount] = useState("");
-  const over = taken - value;
+  const over = taken.cents - value;
   return (
     <div className="rounded-lg bg-areia/30 dark:bg-white/5 px-3 py-2">
       <div className="flex justify-between gap-3 text-sm text-tinta dark:text-creme">
@@ -358,14 +361,24 @@ function MemberMonth({
         </span>
         <span className="tnum">{formatCents(value)}</span>
       </div>
-      {taken > 0 && (
-        <div className={`flex justify-between gap-3 ${over > 100 ? "text-terracota" : ""}`}>
-          <span>Tirou de facto</span>
-          <span className="tnum">
-            {formatCents(taken)}
-            {over > 100 ? ` (+${formatCents(over)})` : ""}
-          </span>
-        </div>
+      {taken.cents > 0 && (
+        <>
+          <div className={`flex justify-between gap-3 ${over > 100 ? "text-terracota" : ""}`}>
+            <span>Recebeu de facto</span>
+            <span className="tnum">
+              {formatCents(taken.cents)}
+              {over > 100 ? ` (+${formatCents(over)})` : ""}
+            </span>
+          </div>
+          {taken.items.map((t, i) => (
+            <div key={i} className="flex justify-between gap-3 pl-2 text-tinta/40 dark:text-creme/40">
+              <span className="truncate min-w-0">
+                {t.booking_date.slice(8, 10)}/{t.booking_date.slice(5, 7)} · {t.description_raw ?? "—"}
+              </span>
+              <span className="shrink-0 tnum">{formatCents(-t.amount_cents)}</span>
+            </div>
+          ))}
+        </>
       )}
       {!editing ? (
         <div className="flex gap-3 mt-1">
