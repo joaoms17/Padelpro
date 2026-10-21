@@ -18,6 +18,8 @@ export interface EngineTx {
   description_raw: string | null;
   source: TransactionSource;
   pontual?: boolean | null;
+  note?: string | null;
+  merchant_clean?: string | null;
 }
 
 export type IncomeKind = "salario" | "representacao" | "renda" | "outra";

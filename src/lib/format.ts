@@ -1,25 +1,24 @@
 // Formatting helpers — PT-PT, euros as "1 234,56 €", dates dd/mm/aaaa.
 // Monetary values are stored as cents (bigint); positive = entrada, negative = saída.
 
-const eur = new Intl.NumberFormat("pt-PT", {
-  style: "currency",
-  currency: "EUR",
-});
+/** "1234567" → "1 234 567" (pt-PT leaves 4-digit numbers ungrouped; here they always are). */
+const group = (digits: string) => digits.replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0");
 
-const eurNoSign = new Intl.NumberFormat("pt-PT", {
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
+/** "1 234,56" for |cents|. */
+function euroDigits(cents: number): string {
+  const abs = Math.round(Math.abs(cents));
+  return `${group(String(Math.floor(abs / 100)))},${String(abs % 100).padStart(2, "0")}`;
+}
 
 /** Format cents as "1 234,56 €". Keeps the sign. */
 export function formatCents(cents: number): string {
-  return eur.format(cents / 100);
+  return `${cents < 0 ? "-" : ""}${euroDigits(cents)}\u00a0€`;
 }
 
 /** Format cents as a plain "1 234,56 €" with explicit +/- prefix. */
 export function formatSigned(cents: number): string {
   const sign = cents > 0 ? "+" : cents < 0 ? "−" : "";
-  return `${sign}${eurNoSign.format(Math.abs(cents) / 100)} €`;
+  return `${sign}${euroDigits(cents)}\u00a0€`;
 }
 
 /** Parse user text like "12,34 €" or "12.34" or "1 234,56" into cents. */
@@ -65,11 +64,10 @@ export function formatPct(ratio: number): string {
   }).format(ratio * 100)}%`;
 }
 
-const eurRound = new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR", maximumFractionDigits: 0, minimumFractionDigits: 0 });
-
-/** Summary amounts, to the euro: "1 234 €" (negative keeps its sign). */
+/** Summary amounts, to the euro: "1 234 €" — thousands always grouped (pt-PT leaves 4 digits alone). */
 export function formatEuros(cents: number): string {
-  return eurRound.format(Math.round(cents / 100));
+  const n = Math.sign(cents) * Math.round(Math.abs(cents) / 100);
+  return `${n < 0 ? "-" : ""}${group(String(Math.abs(n)))}\u00a0€`;
 }
 
 const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
