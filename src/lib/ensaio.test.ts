@@ -29,6 +29,13 @@ describe("ensaio", () => {
       sobraCents: 240000 + 80000 - 41000 - 60000,
     });
   });
+  it("João counts at the normal salary, ignoring a prémio paid with it", () => {
+    const [m] = ensaio({
+      months: ["2026-08"], dataFrom: "2026-07-20", today: "2026-10-21", tx: [], group, joanaReceipts: [], mesadasCents: 0,
+      incomeRows: [[{ month: "2026-08", due: true, expectedCents: 195157, receivedCents: 764388, missingCents: 0, noData: false, credits: [] }]],
+    });
+    expect(m.joaoCents).toBe(195157);
+  });
   it("the first month (history from the 20th) and the current one are partial", () => {
     const r = ensaio({ months: ["2026-07", "2026-08", "2026-10"], dataFrom: "2026-07-20", today: "2026-10-21", tx: [], group, incomeRows: [], joanaReceipts: [], mesadasCents: 0 });
     expect(r.map((m) => m.partial)).toEqual([true, false, true]);

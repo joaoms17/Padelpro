@@ -138,7 +138,7 @@ export function Ensaio() {
               </tbody>
             </table>
             <p className="mt-3 text-xs text-tinta/50 dark:text-creme/50 leading-relaxed">
-              Entra = as tuas entradas previstas (o que entrou, ou o previsto se não entrou) + o que a Joana marcou como
+              Entra = as tuas entradas previstas no valor normal (sem prémios nem subsídios) + o que a Joana marcou como
               recebido na App1. Sai = despesas da casa (fixas, variáveis, atividade) + as mesadas definidas. As retiradas
               e transferências reais ficam de fora — no ensaio são substituídas pela mesada. Toca num mês para ver as contas.
             </p>

@@ -7,7 +7,7 @@ export interface EnsaioMonth {
   month: string;
   /** Bank data only covers part of it (history starts, or the month is not over). */
   partial: boolean;
-  /** João's expected incomes: what arrived, or the expected value if it didn't. */
+  /** João's expected incomes at their normal value (no prémios or subsídios). */
   joaoCents: number;
   /** Joana: what she marked as received in the App1. */
   joanaCents: number;
@@ -59,7 +59,9 @@ export function ensaio(input: {
     for (const rows of input.incomeRows) {
       const r = rows.find((x) => x.month === month);
       if (!r || r.noData) continue;
-      joao += r.due ? Math.max(r.receivedCents, r.expectedCents) : r.receivedCents;
+      // The normal amount only: a prémio or subsídio paid with the salary
+      // would make the mesadas look more affordable than they are.
+      if (r.due) joao += r.expectedCents;
     }
     const joana = input.joanaReceipts
       .filter((r) => r.date.slice(0, 7) === month)
