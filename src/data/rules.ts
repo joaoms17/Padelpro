@@ -81,9 +81,10 @@ interface PastTx {
   category_source: string | null;
 }
 
-// A new "Aplicar sempre" may replace what was categorized automatically or by
-// an older rule — never a category set by hand, a mesada or an Apple Pay match.
-const REPLACEABLE_SOURCES = ["ai", "history", "rule"];
+// A new "Aplicar sempre" may replace what was categorized automatically, by
+// a suggestion or by an older rule — never a category set by hand, a mesada
+// or an Apple Pay match.
+const REPLACEABLE_SOURCES = ["ai", "history", "rule", "sugestao"];
 const replaceable = (t: PastTx) => !t.category_id || REPLACEABLE_SOURCES.includes(t.category_source ?? "");
 
 /** Every movement of the household matching the keyword (paged: no row cap). */

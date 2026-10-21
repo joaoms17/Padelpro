@@ -9,10 +9,9 @@ import {
   createCategory,
   moveCategoryInGroup,
   removeCategory,
-  saveGroupLabels,
   updateCategory,
 } from "@/data/categories";
-import { canRenameCategory, GROUP_LABELS, GROUP_ORDER, isProtectedCategory } from "@/lib/categories";
+import { canRenameCategory, GROUP_ORDER, isProtectedCategory } from "@/lib/categories";
 import { formatCents } from "@/lib/format";
 import type { Category, CategoryGroup } from "@/lib/types";
 import { errorMessage } from "@/lib/errors";
@@ -55,7 +54,7 @@ export function Categorias() {
       </button>
       <PageHeader
         title="Categorias"
-        subtitle="Os separadores e as opções que aparecem ao categorizar um movimento."
+        subtitle="Poucas categorias, para se ver bem onde vai o dinheiro."
       />
 
       {error && !editing && <p className="text-sm text-terracota">{error}</p>}
@@ -63,13 +62,9 @@ export function Categorias() {
       {GROUP_ORDER.map((grp) => (
         <GroupSection
           key={grp}
-          grp={grp}
           label={groupLabels[grp]}
           items={categories.filter((c) => c.grp === grp)}
           busy={busy}
-          onRenameGroup={(name) =>
-            run(() => saveGroupLabels(householdId!, { ...groupLabels, [grp]: name }))
-          }
           onAdd={(name) => run(() => createCategory(householdId!, categories, grp, name))}
           onMove={(c, delta) => run(() => moveCategoryInGroup(categories, c, delta))}
           onEdit={edit}
@@ -77,9 +72,9 @@ export function Categorias() {
       ))}
 
       <p className="text-xs text-tinta/40 dark:text-creme/40 leading-relaxed">
-        🔒 Categorias que a app usa nos cálculos (salário e renda para a base fixa,
-        eventos, mesadas): podes mudar a ordem e o nome (menos o das mesadas), mas
-        não o separador nem removê-las.
+        🔒 Categorias que a app usa nas contas (ordenado, representação, renda,
+        Joana, para cada um de vocês): podes mudar a ordem e o nome (menos os de
+        "Para vocês"), mas não o grupo nem removê-las.
       </p>
 
       <EditCategory
@@ -95,66 +90,29 @@ export function Categorias() {
 }
 
 function GroupSection({
-  grp,
   label,
   items,
   busy,
-  onRenameGroup,
   onAdd,
   onMove,
   onEdit,
 }: {
-  grp: CategoryGroup;
   label: string;
   items: Category[];
   busy: boolean;
-  onRenameGroup: (name: string) => Promise<boolean>;
   onAdd: (name: string) => Promise<boolean>;
   onMove: (c: Category, delta: -1 | 1) => Promise<boolean>;
   onEdit: (c: Category) => void;
 }) {
-  const [renaming, setRenaming] = useState(false);
-  const [groupName, setGroupName] = useState(label);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
-
-  useEffect(() => setGroupName(label), [label]);
 
   return (
     <section>
       <div className="flex items-center justify-between gap-2 mb-3">
-        {renaming ? (
-          <div className="flex-1 flex gap-2">
-            <input
-              className="input py-1.5"
-              value={groupName}
-              placeholder={GROUP_LABELS[grp]}
-              onChange={(e) => setGroupName(e.target.value)}
-              aria-label="Nome do separador"
-            />
-            <button
-              className="text-sm text-petroleo font-medium shrink-0"
-              disabled={busy}
-              onClick={async () => {
-                if (await onRenameGroup(groupName)) setRenaming(false);
-              }}
-            >
-              Guardar
-            </button>
-          </div>
-        ) : (
-          <>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-tinta/50 dark:text-creme/50">
-              {label}
-            </h2>
-            <button
-              className="text-xs text-tinta/50 dark:text-creme/50"
-              onClick={() => setRenaming(true)}
-            >
-              Renomear
-            </button>
-          </>
-        )}
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-tinta/50 dark:text-creme/50">
+          {label}
+        </h2>
       </div>
 
       <div className="card divide-y divide-areia/50 dark:divide-white/5">

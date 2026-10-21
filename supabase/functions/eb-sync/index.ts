@@ -1,4 +1,5 @@
-// eb-sync — pulls transactions + balances.
+// eb-sync — pulls transactions + balances, then files the new movements
+// (rules, history, known shops, incomes; no AI here — see categorize).
 // Two ways in:
 //   • cron (pg_cron/pg_net, x-cron-secret) → syncs every household
 //     ({ check: true } instead only verifies the Enable Banking credentials)
@@ -7,6 +8,7 @@ import { corsHeaders, json } from "../_shared/cors.ts";
 import { householdFromRequest, serviceClient } from "../_shared/db.ts";
 import { isCronRequest } from "../_shared/auth.ts";
 import { syncHousehold } from "../_shared/sync.ts";
+import { categorizeHousehold } from "../_shared/categorizeRun.ts";
 import { EBError, findSantanderPT, getApplication, type EBApplication } from "../_shared/eb.ts";
 
 Deno.serve(async (req) => {
@@ -48,10 +50,9 @@ Deno.serve(async (req) => {
         .eq("status", "active");
       const results = [];
       for (const c of conns ?? []) {
-        results.push({
-          household_id: c.household_id,
-          ...(await syncHousehold(svc, c.household_id as string)),
-        });
+        const householdId = c.household_id as string;
+        const synced = await syncHousehold(svc, householdId);
+        results.push({ household_id: householdId, ...synced, categorized: await categorizeQuietly(svc, householdId) });
       }
       return json({ mode: "all", results });
     }
@@ -59,8 +60,18 @@ Deno.serve(async (req) => {
     const ctx = await householdFromRequest(req);
     if (!ctx) return json({ error: "não autenticado" }, 401);
     const result = await syncHousehold(svc, ctx.householdId);
-    return json({ mode: "one", ...result });
+    return json({ mode: "one", ...result, categorized: await categorizeQuietly(svc, ctx.householdId) });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }
 });
+
+/** File what came in; a failure here never fails the sync itself. */
+async function categorizeQuietly(svc: ReturnType<typeof serviceClient>, householdId: string): Promise<number | null> {
+  try {
+    const r = await categorizeHousehold(svc, householdId, { ai: false, aiDeadline: 0 });
+    return r.assigned;
+  } catch (_e) {
+    return null;
+  }
+}

@@ -54,16 +54,14 @@ describe("isProtectedCategory", () => {
     const editable = SEED_CATEGORIES.filter((c) => !isProtectedCategory(c)).map((c) => c.name);
     expect(editable).toContain("Supermercado");
     expect(editable).toContain("Outras entradas");
-    expect(editable).toContain("Reembolsos");
-    expect(editable.length).toBe(SEED_CATEGORIES.length - 5);
+    expect(editable).toContain("Compras online");
+    expect(editable.length).toBe(SEED_CATEGORIES.length - 6);
   });
 });
 
 describe("mergeGroupLabels", () => {
-  it("applies the household's names over the defaults, ignoring blanks", () => {
-    const l = mergeGroupLabels({ variavel: "Dia a dia", fixa: "  " });
-    expect(l.variavel).toBe("Dia a dia");
-    expect(l.fixa).toBe(GROUP_LABELS.fixa);
-    expect(mergeGroupLabels(null)).toEqual(GROUP_LABELS);
+  it("the same group names everywhere (old renames are ignored)", () => {
+    expect(mergeGroupLabels({ variavel: "Variáveis" })).toEqual(GROUP_LABELS);
+    expect(GROUP_LABELS.variavel).toBe("Dia a dia");
   });
 });

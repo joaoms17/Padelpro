@@ -1,5 +1,5 @@
 import { supabase } from "@/lib/supabase";
-import { GROUP_LABELS, GROUP_ORDER } from "@/lib/categories";
+import { GROUP_ORDER } from "@/lib/categories";
 import type { Category, CategoryGroup } from "@/lib/types";
 
 /** Sort values of a group: 10, 20, 30… after the group's base (entrada 0, fixa 1000…). */
@@ -100,21 +100,5 @@ export async function categoryUsage(
 export async function removeCategory(id: string, targetId: string): Promise<void> {
   if (id === targetId) throw new Error("Escolhe outra categoria para os movimentos.");
   const { error } = await supabase.rpc("merge_category", { p_from: id, p_to: targetId });
-  if (error) throw error;
-}
-
-/** Save the household's group names (blank or default = the app's name). */
-export async function saveGroupLabels(
-  householdId: string,
-  labels: Partial<Record<CategoryGroup, string>>,
-): Promise<void> {
-  const clean = Object.fromEntries(
-    Object.entries(labels)
-      .map(([k, v]) => [k, (v ?? "").trim()] as const)
-      .filter(([k, v]) => v && v !== GROUP_LABELS[k as CategoryGroup]),
-  );
-  const { error } = await supabase
-    .from("settings")
-    .upsert({ household_id: householdId, group_labels: clean }, { onConflict: "household_id" });
   if (error) throw error;
 }

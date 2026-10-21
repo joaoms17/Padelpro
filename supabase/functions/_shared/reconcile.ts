@@ -17,7 +17,7 @@ export async function reconcileHousehold(
   // Unmatched Apple Pay provisionals.
   const { data: provData } = await svc
     .from("transactions")
-    .select("id, amount_cents, description_raw, merchant_clean, booking_date, category_id, note")
+    .select("id, amount_cents, description_raw, merchant_clean, booking_date, category_id, category_source, note")
     .eq("household_id", householdId)
     .eq("source", "applepay")
     .eq("status", "provisorio")
@@ -30,6 +30,7 @@ export async function reconcileHousehold(
     merchant_clean: string | null;
     booking_date: string;
     category_id: string | null;
+    category_source: string | null;
     note: string | null;
   }>;
   if (provisionals.length === 0) return { matched: 0, provisionals: 0 };
@@ -87,7 +88,9 @@ export async function reconcileHousehold(
     const patch: Record<string, unknown> = {};
     if (prov.category_id && !bk.category_id) {
       patch.category_id = prov.category_id;
-      patch.category_source = "applepay";
+      // A guess (suggestion/AI) stays a guess to confirm; a choice is kept as Apple Pay's.
+      const guessed = prov.category_source === "sugestao" || prov.category_source === "ai";
+      patch.category_source = guessed ? prov.category_source : "applepay";
     }
     if (prov.note && !bk.note) patch.note = prov.note;
     if (Object.keys(patch).length) {

@@ -11,78 +11,65 @@ export interface SeedCategory {
 /** Order of the groups ("separadores") everywhere in the app. */
 export const GROUP_ORDER: CategoryGroup[] = ["entrada", "fixa", "variavel", "atividade", "mesada", "interna"];
 
-/** Default group names; each household can rename them (settings.group_labels). */
+/** Group names, the same everywhere in the app. */
 export const GROUP_LABELS: Record<CategoryGroup, string> = {
   entrada: "Entradas",
-  fixa: "Fixas",
-  variavel: "Variáveis do casal",
-  atividade: "Atividade Joana",
-  mesada: "Mesadas",
-  interna: "Transferências internas",
+  fixa: "Contas fixas",
+  variavel: "Dia a dia",
+  atividade: "Trabalho da Joana",
+  mesada: "Para vocês",
+  interna: "Poupança",
 };
 
+// The short list (migration 0015): few categories, so it is easy to see
+// where the money goes.
 export const SEED_CATEGORIES: SeedCategory[] = [
   // Entradas
-  { grp: "entrada", name: "Salário e extras João", system_role: "salario" },
+  { grp: "entrada", name: "Ordenado João", system_role: "salario" },
+  { grp: "entrada", name: "Despesas de representação", system_role: "representacao" },
   { grp: "entrada", name: "Renda casa arrendada", system_role: "renda" },
   { grp: "entrada", name: "Eventos Joana", system_role: "eventos" },
-  { grp: "entrada", name: "Reembolsos" },
   { grp: "entrada", name: "Outras entradas" },
-  // Fixas
-  { grp: "fixa", name: "Crédito habitação e prestações" },
-  { grp: "fixa", name: "Condomínio" },
-  { grp: "fixa", name: "Luz" },
-  { grp: "fixa", name: "Água" },
-  { grp: "fixa", name: "Gás" },
-  { grp: "fixa", name: "Internet e telemóvel" },
+  // Contas fixas
+  { grp: "fixa", name: "Prestação casa" },
+  { grp: "fixa", name: "Prestação casa arrendada" },
+  { grp: "fixa", name: "Luz, água, gás e internet" },
   { grp: "fixa", name: "Seguros" },
   { grp: "fixa", name: "Subscrições" },
-  { grp: "fixa", name: "Impostos da casa (IMI, IUC)" },
-  { grp: "fixa", name: "Outras fixas" },
-  // Variáveis do casal
+  { grp: "fixa", name: "Condomínio, IMI e outras" },
+  // Dia a dia
   { grp: "variavel", name: "Supermercado" },
-  { grp: "variavel", name: "Restaurantes e saídas" },
+  { grp: "variavel", name: "Restaurantes e cafés" },
   { grp: "variavel", name: "Uber Eats e entregas" },
-  { grp: "variavel", name: "Combustível e carregamentos" },
-  { grp: "variavel", name: "Transportes e portagens" },
-  { grp: "variavel", name: "Casa e manutenção" },
+  { grp: "variavel", name: "Compras online" },
+  { grp: "variavel", name: "Nutrição e suplementos" },
+  { grp: "variavel", name: "Carro e transportes" },
   { grp: "variavel", name: "Saúde e farmácia" },
   { grp: "variavel", name: "Maggie" },
-  { grp: "variavel", name: "Roupa e cuidado pessoal" },
-  { grp: "variavel", name: "Lazer e concertos" },
-  { grp: "variavel", name: "Viagens" },
-  { grp: "variavel", name: "Prendas" },
-  { grp: "variavel", name: "Compras online" },
-  { grp: "variavel", name: "Outras variáveis" },
-  // Atividade Joana
-  { grp: "atividade", name: "Material" },
-  { grp: "atividade", name: "Deslocações" },
-  { grp: "atividade", name: "Alojamento em trabalho" },
-  { grp: "atividade", name: "Outras despesas da atividade" },
-  // Mesadas
-  { grp: "mesada", name: "Mesada João", system_role: "mesada" },
-  { grp: "mesada", name: "Mesada Joana", system_role: "mesada" },
-  // Transferências internas
-  { grp: "interna", name: "Entre contas" },
+  { grp: "variavel", name: "Viagens e lazer" },
+  { grp: "variavel", name: "Casa e outras compras" },
+  // Trabalho da Joana
+  { grp: "atividade", name: "Trabalho da Joana" },
+  // Para vocês
+  { grp: "mesada", name: "Para o João", system_role: "mesada" },
+  { grp: "mesada", name: "Para a Joana", system_role: "mesada" },
+  // Poupança
+  { grp: "interna", name: "Poupança" },
 ];
 
-/** Default group names overridden by the household's own (blank = default). */
+/** Group names (renaming groups was removed: the same words everywhere). */
 export function mergeGroupLabels(
-  custom: Partial<Record<string, string>> | null | undefined,
+  _custom?: Partial<Record<string, string>> | null,
 ): Record<CategoryGroup, string> {
-  const out = { ...GROUP_LABELS };
-  for (const g of GROUP_ORDER) {
-    const v = custom?.[g]?.trim();
-    if (v) out[g] = v;
-  }
-  return out;
+  return { ...GROUP_LABELS };
 }
 
 type RoleLike = { grp: CategoryGroup; name: string; system_role?: SystemRole | null };
 
 // How each role was recognised before migration 0010 gave categories a role.
 const LEGACY_ROLE: [SystemRole, (c: RoleLike) => boolean][] = [
-  ["salario", (c) => c.grp === "entrada" && /sal[áa]rio/i.test(c.name)],
+  ["salario", (c) => c.grp === "entrada" && /sal[áa]rio|ordenado/i.test(c.name)],
+  ["representacao", (c) => c.grp === "entrada" && /represent/i.test(c.name)],
   ["renda", (c) => c.grp === "entrada" && /renda casa/i.test(c.name)],
   ["eventos", (c) => c.grp === "entrada" && /eventos/i.test(c.name)],
   ["mesada", (c) => c.grp === "mesada"],

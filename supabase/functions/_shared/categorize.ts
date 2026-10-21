@@ -1,6 +1,7 @@
 // Categorization engine — pure, deterministic, testable (no Deno/Supabase).
 // Order (spec 6.2): user rules → mesadas → history → (AI, done in the Edge
 // Function). Confidence < 0.7 means "Por rever".
+import { plain } from "./suggest.ts";
 
 export type RuleField = "merchant" | "description" | "counterparty" | "iban";
 export type MatchType = "equals" | "contains" | "regex";
@@ -53,9 +54,9 @@ export function mesadaRules(
     );
   const out: MesadaRule[] = [];
   for (const m of members) {
-    const name = String(m.display_name ?? "").trim().toLowerCase();
+    const name = plain(m.display_name);
     if (!m.mesada_cents || m.mesada_cents <= 0 || !name) continue;
-    const cat = candidates.find((c) => c.name.toLowerCase().includes(name));
+    const cat = candidates.find((c) => plain(c.name).split(" ").includes(name));
     if (cat) out.push({ category_id: cat.id, mesada_cents: m.mesada_cents, mesada_day: m.mesada_day });
   }
   return out;
