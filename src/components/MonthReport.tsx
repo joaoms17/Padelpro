@@ -347,9 +347,11 @@ function Entradas({ b, data, month, duet }: { b: MonthBreakdown; data: EngineDat
   const expected = expectedByLine(data.incomes, month, firstSeen);
   const lines = b.entradas.filter((l) => l.cents !== 0);
   const joanaLine = lines.find((l) => l.key === "joana");
-  // From November everything she received on Duet is to reach the account.
-  const duetCard =
-    month >= JOANA_FROM ? <JoanaDuetCard month={month} bankCents={joanaLine?.cents ?? 0} duet={duet} householdId={data.householdId} /> : null;
+  // What she received on Duet against what reached the account; from
+  // November all of it is to reach the account.
+  const duetCard = (
+    <JoanaDuetCard month={month} bankCents={joanaLine?.cents ?? 0} duet={duet} householdId={data.householdId} owed={month >= JOANA_FROM} />
+  );
   const missing = b.status === "parcial" ? [] : missingIncomes(b.entradas, data.incomes, month, firstSeen);
   const running = b.status === "a_decorrer";
 
@@ -377,14 +379,14 @@ function Entradas({ b, data, month, duet }: { b: MonthBreakdown; data: EngineDat
               }
               right={<Eur cents={l.cents} />}
             >
-              {l.key === "joana" && month < JOANA_FROM && (
+              {l.key === "joana" && month < JOANA_FROM && duet && !duet.configured && (
                 <p className={`text-xs ${muted} pb-2 -mt-1`}>Antes de novembro a Joana ainda não passava tudo para a conta — não é dívida.</p>
               )}
-              {l.key === "joana" && duetCard && <div className="pb-2">{duetCard}</div>}
+              {l.key === "joana" && <div className="pb-2">{duetCard}</div>}
             </Line>
           );
         })}
-        {!joanaLine && duetCard && <div className="py-2">{duetCard}</div>}
+        {!joanaLine && <div className="py-2">{duetCard}</div>}
       </div>
       {missing.length > 0 && (
         <div className="mt-2 text-xs text-amber-700 dark:text-amber-300 space-y-0.5 px-1">

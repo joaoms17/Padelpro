@@ -8,22 +8,26 @@ import { Eur } from "./kit";
 const faint = "text-tinta/50 dark:text-creme/50";
 
 /**
- * Joana's month, from November: what she marked as received on Duet against
- * what reached the house account. She puts in everything she receives, so
+ * Joana's month: what she marked as received on Duet against what reached
+ * the house account. From November she puts in everything she receives, so
  * the difference is still to arrive — unless it is marked as not owed
- * ("Não é dívida", kept per month). Hidden while Duet is not set up.
+ * ("Não é dívida", kept per month). Before November it is only shown.
+ * Hidden while Duet is not set up.
  */
 export function JoanaDuetCard({
   month,
   bankCents,
   duet,
   householdId,
+  owed = true,
 }: {
   month: string;
   bankCents: number;
   /** The month on Duet (null while loading). */
   duet: DuetMonth | null;
   householdId: string;
+  /** From November the difference is still to arrive; before, it is not a debt. */
+  owed?: boolean;
 }) {
   const { waivers, reload } = useJoanaWaivers(householdId);
   const [busy, setBusy] = useState(false);
@@ -56,6 +60,10 @@ export function JoanaDuetCard({
       </p>
       {duet.count === 0 ? (
         <p className={`text-xs ${faint}`}>Nada marcado como recebido na Duet este mês.</p>
+      ) : !owed ? (
+        <p className={`text-xs ${faint}`}>
+          {duet.count} {duet.count === 1 ? "pagamento" : "pagamentos"} na Duet. Antes de novembro a Joana ainda não passava tudo para a conta — não é dívida.
+        </p>
       ) : !waivers ? null : gap.missing > 0 ? (
         <div className="flex items-center justify-between gap-3">
           <p className="min-w-0 font-medium text-terracota dark:text-orange-300">
@@ -72,7 +80,7 @@ export function JoanaDuetCard({
       ) : gap.waived === 0 ? (
         <p className="font-medium text-petroleo dark:text-teal-300">✓ Chegou tudo</p>
       ) : null}
-      {waivers && gap.waived > 0 && (
+      {owed && waivers && gap.waived > 0 && (
         <div className={`flex items-center justify-between gap-3 text-xs ${faint}`}>
           <span className="min-w-0">
             Diferença de <Eur cents={gap.waived} /> marcada como não sendo dívida

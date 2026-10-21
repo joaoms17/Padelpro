@@ -225,6 +225,14 @@ function Preparar({
               E mais <Eur cents={real.semSaiu} /> que ainda não têm categoria.
             </p>
           )}
+          {duet?.configured && (
+            <p className="text-sm">
+              Joana: <Eur cents={duet.cents} className="font-medium" /> recebidos na Duet
+              <span className={faint}> ({duet.count} {duet.count === 1 ? "pagamento" : "pagamentos"})</span> ·{" "}
+              <Eur cents={real.entradas.find((l) => l.key === "joana")?.cents ?? 0} className="font-medium" /> já na conta
+              {month < JOANA_FROM && <span className={`block text-xs ${faint}`}>A partir de novembro tudo o que recebe na Duet passa para a conta.</span>}
+            </p>
+          )}
           {top.length > 0 && (
             <div>
               <p className={`text-xs mb-1 ${faint}`}>
