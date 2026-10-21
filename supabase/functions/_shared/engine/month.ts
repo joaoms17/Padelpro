@@ -3,7 +3,7 @@
 // its numbers from here, so they always agree. Pure and testable.
 import { hasIncomeKeyword, incomeFor, isTransfer, kindOf, makeNameFinder, plain } from "../suggest.ts";
 import { displayMerchant, normalizeMerchant } from "../categorize.ts";
-import { isDueInMonth, type ExpectedIncome } from "./forecast.ts";
+import { addMonth, isDueInMonth, type ExpectedIncome } from "./forecast.ts";
 import type { Category, Member, TransactionSource } from "./types.ts";
 
 /** First month Joana's events money goes to the house account. */
@@ -20,6 +20,8 @@ export interface EngineTx {
   pontual?: boolean | null;
   note?: string | null;
   merchant_clean?: string | null;
+  /** "provisorio": a bank movement still pending (not in the booked balance yet). */
+  status?: "confirmado" | "provisorio" | null;
 }
 
 export type IncomeKind = "salario" | "representacao" | "renda" | "outra";
@@ -439,17 +441,42 @@ export function eligible(b: MonthBreakdown): boolean {
 
 /**
  * Transfers to one of you that look like the month's extra (prémio,
- * subsídio) passed on: at least half of it, not marked pontual yet. Marked
- * pontual, they stay out of the averages like the extra itself.
+ * subsídio) passed on: made on or after the salary that brought it, each
+ * between half and 110 % of it, together not more than it (oldest first,
+ * until they add up to it), not marked pontual yet, and not the same amount
+ * that person got the month before (a regular transfer, like the mesada).
+ * Marked pontual, they stay out of the averages like the extra itself.
  */
 export function pontualCandidates(txs: EngineTx[], ctx: EngineCtx, b: MonthBreakdown): TxRef[] {
-  const extra = b.entradas.find((l) => l.key === "extra")?.cents ?? 0;
-  if (extra <= 0) return [];
+  const line = b.entradas.find((l) => l.key === "extra");
+  const extra = line?.cents ?? 0;
+  if (!line || extra <= 0) return [];
+  const salaryIds = new Set(line.txIds);
+  const from = txs.filter((t) => salaryIds.has(t.id)).map((t) => t.booking_date.slice(0, 10)).sort()[0] ?? `${b.month}-01`;
   const classify = makeClassifier(ctx);
-  return txs
-    .filter((t) => inScope(t, b.month, ctx.today) && t.amount_cents < 0 && !t.pontual && -t.amount_cents >= extra * 0.5)
-    .filter((t) => classify(t).area === "voces")
-    .map((t) => ({ id: t.id, date: t.booking_date, desc: displayMerchant(t.description_raw) || (t.description_raw ?? ""), cents: -t.amount_cents, categoryId: t.category_id, pontual: false }));
+  const prev = addMonth(b.month, -1);
+  const regular = new Set(
+    txs
+      .filter((t) => t.booking_date.slice(0, 7) === prev && t.amount_cents < 0 && !t.pontual)
+      .map((t) => ({ t, k: classify(t) }))
+      .filter(({ k }) => k.area === "voces")
+      .map(({ t, k }) => `${k.memberId ?? "?"}:${t.amount_cents}`),
+  );
+  const fits = txs
+    .filter((t) => inScope(t, b.month, ctx.today) && t.amount_cents < 0 && !t.pontual && t.booking_date.slice(0, 10) >= from)
+    .filter((t) => -t.amount_cents >= extra * 0.5 && -t.amount_cents <= extra * 1.1)
+    .map((t) => ({ t, k: classify(t) }))
+    .filter(({ t, k }) => k.area === "voces" && !regular.has(`${k.memberId ?? "?"}:${t.amount_cents}`))
+    .sort((x, y) => x.t.booking_date.localeCompare(y.t.booking_date) || x.t.id.localeCompare(y.t.id));
+  const out: TxRef[] = [];
+  let total = 0;
+  for (const { t } of fits) {
+    if (total >= extra * 0.95) break;
+    if (total - t.amount_cents > extra * 1.1) continue;
+    total -= t.amount_cents;
+    out.push({ id: t.id, date: t.booking_date, desc: displayMerchant(t.description_raw) || (t.description_raw ?? ""), cents: -t.amount_cents, categoryId: t.category_id, pontual: false });
+  }
+  return out;
 }
 
 /**

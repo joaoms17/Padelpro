@@ -2,6 +2,8 @@
 // confirming what the app filed by itself ("Por validar"). Pure and testable.
 import { isTransfer, memberCategory, plain, slotCategory, type SuggestCategoryRow, type SuggestMember } from "@shared/suggest";
 import { isUsableKeyword, normalizeMerchant, suggestRuleKeyword } from "@shared/categorize";
+import { formatCents } from "./format";
+import type { Classified, IncomeKey, MonthBreakdown } from "./month";
 
 export interface TriageTx {
   id: string;
@@ -225,4 +227,51 @@ export function transferTargets(
   else for (const c of categories.filter((c) => !c.archived && c.grp === "mesada" && c.system_role === "mesada")) add(c);
   add(slotCategory("poupanca", categories));
   return out;
+}
+
+/**
+ * How far a group's "Aplicar também aos próximos" word reaches, counted on the
+ * movements there are today (the rule itself only files the ones still to
+ * come): many more than the group's own means the word is too broad.
+ */
+export function ruleReach(matches: number, groupSize: number): string {
+  const total = Math.max(matches, groupSize);
+  const head = `Apanha ${total} ${total === 1 ? "movimento" : "movimentos"} até hoje`;
+  if (total === groupSize) return `${head}: só ${groupSize === 1 ? "este" : "estes"}.`;
+  const others = total - groupSize;
+  return `${head}: ${groupSize === 1 ? "este" : `estes ${groupSize}`} e mais ${others}, que ${others === 1 ? "fica como está" : "ficam como estão"}.`;
+}
+
+/**
+ * Is a movement in one of Meses' income lines (the `linha` filter)? The extra
+ * (prémio, subsídio) came inside the salary movement, so for "extra" these are
+ * the salary movements — but only in a month that had an extra.
+ */
+export function inIncomeLine(
+  k: Pick<Classified, "area" | "key">,
+  linha: IncomeKey,
+  month: string,
+  extraMonths: ReadonlySet<string>,
+): boolean {
+  if (k.area !== "entrada") return false;
+  if (linha !== "extra") return k.key === linha;
+  return k.key === "ordenado" && extraMonths.has(month);
+}
+
+/** The salary as Meses splits it: its normal part and the extra that came with it. */
+export function salarySplit(b: Pick<MonthBreakdown, "entradas">): { normal: number; extra: number } {
+  const of = (key: IncomeKey) => b.entradas.find((l) => l.key === key)?.cents ?? 0;
+  return { normal: of("ordenado"), extra: Math.max(0, of("extra")) };
+}
+
+/**
+ * Under a month's salary movements (linha ordenado or extra): why their total
+ * is not the Meses line it came from — the movement holds both parts.
+ * Null when there was no extra (the total is then the line itself).
+ */
+export function salaryNote(linha: "ordenado" | "extra", split: { normal: number; extra: number }, count: number): string | null {
+  if (split.extra <= 0) return null;
+  const parts = `${formatCents(split.normal)} de ordenado + ${formatCents(split.extra)} de extra`;
+  if (linha === "ordenado") return `Este total inclui o extra (prémio, subsídio): ${parts}.`;
+  return `O extra veio junto com o ordenado, ${count === 1 ? "neste movimento" : "nestes movimentos"}: ${parts}.`;
 }

@@ -6,8 +6,10 @@ import {
   compareRows,
   dayShort,
   duetShare,
+  existedIn,
   expectedByLine,
   howItCame,
+  incomeFirstSeen,
   incomeTag,
   mesadaStatus,
   missingIncomes,
@@ -124,6 +126,34 @@ describe("expected incomes", () => {
     // "Outras" incomes are named one by one.
     const other = missingIncomes(sep.entradas, [inc("o1", "Explicações", 20000, "explic", "outra", 15)], "2026-09");
     expect(other).toEqual([{ key: "outras", label: "Explicações", cents: 20000, day: 15 }]);
+  });
+
+  it("an income set up now did not 'faltar' in the months before it existed", () => {
+    const today = "2026-10-21T10:00:00Z";
+    const setUpNow = [...incomes, inc("o1", "Explicações", 20000, "explic", "outra", 15)].map((i) => ({ ...i, created_at: today }));
+    const seen = incomeFirstSeen(setUpNow, txs, ctx);
+    // The salary, the representação and the rent came in August; the new one never did.
+    expect(Object.fromEntries(seen)).toEqual({ i1: "2026-08", i2: "2026-08", i3: "2026-08" });
+    expect(missingIncomes(sep.entradas, setUpNow, "2026-09", seen).map((m) => m.label)).toEqual(["Despesas de representação", "Renda da casa arrendada"]);
+    expect(expectedByLine(setUpNow, "2026-09", seen).has("outras")).toBe(false);
+    // From the month it was set up, it is expected.
+    const oct = monthBreakdown(txs, ctx, "2026-10");
+    expect(missingIncomes(oct.entradas, setUpNow, "2026-10", seen).map((m) => m.label)).toContain("Explicações");
+    // Once it has come in, it existed from then on.
+    const withIt = [...txs, t("2026-09-15", 20000, "TRF EXPLICACOES MARIA")];
+    const seen2 = incomeFirstSeen(setUpNow, withIt, ctx);
+    expect(seen2.get("o1")).toBe("2026-09");
+    expect(existedIn(setUpNow[3], "2026-08", seen2)).toBe(false);
+    expect(existedIn(setUpNow[3], "2026-09", seen2)).toBe(true);
+    // Without a creation date (older rows), as before.
+    expect(existedIn({ id: "x", created_at: null }, "2026-08", new Map())).toBe(true);
+  });
+
+  it("without a keyword, a categorized credit on its line shows it already existed", () => {
+    const renda = { ...inc("r", "Renda Casa", 120000, "", "renda", 8), match_text: null, created_at: "2026-10-21T10:00:00Z" };
+    expect(incomeFirstSeen([renda], txs, ctx).get("r")).toBe("2026-08");
+    const outra = { ...inc("o", "Explicações", 20000, "", "outra", 15), match_text: null, created_at: "2026-10-21T10:00:00Z" };
+    expect(incomeFirstSeen([outra], txs, ctx).has("o")).toBe(false);
   });
 });
 

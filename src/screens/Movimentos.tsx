@@ -27,12 +27,16 @@ import {
   groupByCategory,
   groupByDay,
   groupUncategorized,
+  inIncomeLine,
   matchesSearch,
   parseVista,
   rowTitle,
+  salaryNote,
+  salarySplit,
   transferTargets,
   type Vista,
 } from "@/lib/triage";
+import { isSemCategoria } from "@/lib/semCategoria";
 import { makeSuggester } from "@shared/suggest";
 
 const SUGGESTED = new Set(["sugestao", "ai"]);
@@ -125,7 +129,8 @@ export function Movimentos() {
     const resolve = makeResolver(data.ctx.categories);
     const suggester = makeSuggester({ categories: data.allCategories, members: data.members, incomes: data.incomes });
     const counted = (t: EngineTx) => inScope(t, monthOf(t), data.ctx.today);
-    const uncategorized = (t: EngineTx) => !t.category_id && t.source !== "applepay";
+    // The same rule as Meses' and Este mês' "sem categoria".
+    const uncategorized = isSemCategoria;
     const suggested = (t: EngineTx) => !!t.category_id && SUGGESTED.has(t.category_source ?? "");
     const everyMonth = data.txs.filter(counted);
     return {
@@ -155,6 +160,14 @@ export function Movimentos() {
       strayApplePay,
     };
   }, [data, engine, allMonths, mes, today]);
+
+  // The months whose salary came with an extra (prémio, subsídio), for linha=extra.
+  const extraMonths = useMemo(() => {
+    if (!data || !view || linhaParam !== "extra") return new Set<string>();
+    if (view.breakdown) return new Set(salarySplit(view.breakdown).extra > 0 ? [mes] : []);
+    const months = [...new Set(data.txs.map(monthOf))];
+    return new Set(months.filter((m) => salarySplit(monthBreakdown(data.txs, data.ctx, m)).extra > 0));
+  }, [data, view, linhaParam, mes]);
 
   const nCat = view?.toCategorize.length ?? 0;
   const nVal = view?.toValidate.length ?? 0;
@@ -187,14 +200,11 @@ export function Movimentos() {
       if (vista === "pontuais" && !t.pontual) return false;
       if (area && engine.classify(t).area !== area) return false;
       if (catParam && engine.resolve(t.category_id)?.id !== catParam) return false;
-      if (linhaParam) {
-        const k = engine.classify(t);
-        // The extra (prémio) came with the salary: show the salary movements.
-        if (k.area !== "entrada" || k.key !== (linhaParam === "extra" ? "ordenado" : linhaParam)) return false;
-      }
+      // The extra (prémio) came with the salary: the salary movements of a month with one.
+      if (linhaParam && !inIncomeLine(engine.classify(t), linhaParam, monthOf(t), extraMonths)) return false;
       return !q || matchesSearch(t.description_raw, q);
     });
-  }, [view, engine, vista, catParam, linhaParam, q]);
+  }, [view, engine, vista, catParam, linhaParam, q, extraMonths]);
 
   if (!data || !engine || !view || !householdId) {
     return (
@@ -236,6 +246,17 @@ export function Movimentos() {
       </button>
     );
   const scopeWord = allMonths ? "" : " neste mês";
+  // Only the income line is filtered (no search, category or other area on top).
+  const lineOnly = !q && !catParam && (vista === "todos" || vista === "entradas");
+  // The salary list's total is the whole movement: say how Meses split it.
+  const salaryLine =
+    (linhaParam === "ordenado" || linhaParam === "extra") && lineOnly
+      ? b
+        ? salaryNote(linhaParam, salarySplit(b), list.length)
+        : linhaParam === "extra"
+          ? "O extra veio junto com o ordenado: estes são os movimentos do ordenado dos meses com extra."
+          : null
+      : null;
 
   return (
     <div className="space-y-4 pb-4">
@@ -396,17 +417,24 @@ export function Movimentos() {
             value={q}
             onChange={(e) => update({ q: e.target.value }, true)}
           />
-          {linhaParam === "extra" && (
-            <p className="text-xs text-tinta/50 dark:text-creme/50">O extra veio junto com o ordenado: estes são os movimentos do ordenado.</p>
-          )}
           {list.length === 0 ? (
-            <EmptyState title="Sem movimentos" hint={q || hasFilter ? "Nada com estes filtros." : `Nada${scopeWord}.`} />
+            linhaParam === "extra" && lineOnly ? (
+              <EmptyState
+                title={`Sem extra${scopeWord}`}
+                hint={`Nenhum prémio ou subsídio veio com o ordenado${allMonths ? "" : ` em ${monthName(mes)}`}.`}
+              />
+            ) : (
+              <EmptyState title="Sem movimentos" hint={q || hasFilter ? "Nada com estes filtros." : `Nada${scopeWord}.`} />
+            )
           ) : (
             <>
-              <p className="text-xs text-tinta/50 dark:text-creme/50">
-                {plural(list.length, "movimento", "movimentos")} · total{" "}
-                <span className="tnum">{formatSigned(list.reduce((a, t) => a + t.amount_cents, 0))}</span>
-              </p>
+              <div className="space-y-1 text-xs text-tinta/50 dark:text-creme/50">
+                <p>
+                  {plural(list.length, "movimento", "movimentos")} · total{" "}
+                  <span className="tnum">{formatSigned(list.reduce((a, t) => a + t.amount_cents, 0))}</span>
+                </p>
+                {salaryLine && <p>{salaryLine}</p>}
+              </div>
               {groupByDay(list.slice().reverse()).map(([day, rows]) => (
                 <div key={day}>
                   <div className="text-xs font-semibold uppercase tracking-wide text-tinta/50 dark:text-creme/50 mb-2">

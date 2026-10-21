@@ -6,7 +6,9 @@ import {
   centsInput,
   commonMesada,
   coveredMean,
+  currentMonthRest,
   duetByMonth,
+  duetFrom,
   euroNum,
   freqText,
   incomeCredits,
@@ -26,6 +28,7 @@ import {
   suggestionCredits,
   theName,
   withDefaults,
+  withDuetRange,
 } from "./planView";
 import { monthBreakdown, referenceAverages, type EngineCtx, type EngineTx } from "./month";
 import { normalizePlan } from "./plan";
@@ -231,5 +234,74 @@ describe("Joana and the bank", () => {
     expect(suggestionCredits(credits, incomes).map((c) => c.id)).toEqual(["x"]);
     expect(suggestionCredits(credits, [incomes[0]]).map((c) => c.key)).toEqual(["renda", "renda", "sem"]);
     expect(suggestionCredits(credits, [])).toHaveLength(5);
+  });
+  it("Duet is asked from the first closed month, at most a year back", () => {
+    expect(duetFrom(["2026-08", "2026-09"], "2026-10")).toBe("2026-08");
+    expect(duetFrom(["2026-08", "2026-09", "2026-12"], "2027-01")).toBe("2026-08");
+    expect(duetFrom(["2024-01", "2024-02"], "2026-10")).toBe("2025-10");
+    expect(duetFrom([], "2026-10")).toBe("2026-10");
+  });
+  it("months before what was asked of Duet show as unknown, not 0", () => {
+    const h = { months: [{ month: "2026-08", bank: 100, duet: 0 }, { month: "2026-09", bank: 100, duet: 150 }], suggestion: 0, share: null };
+    expect(withDuetRange(h, "2026-09").months.map((m) => m.duet)).toEqual([null, 150]);
+    // Without Duet nothing changes.
+    const none = { ...h, months: h.months.map((m) => ({ ...m, duet: null })) };
+    expect(withDuetRange(none, "2026-09").months.map((m) => m.duet)).toEqual([null, null]);
+  });
+});
+
+describe("the projection's first month: the rest of this one", () => {
+  const people = [
+    { id: "mj", display_name: "João", mesada_cents: 50000 },
+    { id: "ma", display_name: "Joana", mesada_cents: 0 },
+  ];
+  const oct = [
+    ...txs,
+    t("2026-10-06", -7000, "DD EDP", "luz"),
+    t("2026-10-08", 120000, "TRF CRED SEPA+ DE INQUILINO RENDA", "ren"),
+    t("2026-10-15", -20000, "TRF P/ JOAO MANUEL SILVA", "pj"),
+    t("2026-10-19", -1500, "APPLE PAY CONTINENTE", null, { source: "applepay" }),
+  ];
+  const real = monthBreakdown(oct, ctx, "2026-10");
+  const sem = monthBreakdown(oct, ctx, "2026-10", { semPontuais: true });
+  const rest = (over: Partial<Parameters<typeof currentMonthRest>[0]> = {}) =>
+    currentMonthRest({
+      balance: 400000,
+      real,
+      sem,
+      categories,
+      plan: normalizePlan({}),
+      incomes,
+      members: people,
+      mesadaMonths: [],
+      txs: oct,
+      today: "2026-10-21",
+      casa: 85000,
+      ...over,
+    });
+
+  it("what is still to come in and to go out, as Este mês forecasts it", () => {
+    const r = rest();
+    // The salary (not in yet); the rent already came.
+    expect(r.toCome).toEqual([{ label: "Ordenado (dia 8)", cents: 195157 }]);
+    // The loan not paid yet, what is left of João's 500 €, the Apple Pay note.
+    expect(r.toGo).toEqual([
+      { label: "Contas fixas por pagar", cents: 85000 },
+      { label: "Mesadas por sair", cents: 30000 },
+      { label: "Apple Pay ainda por descontar", cents: 1500 },
+    ]);
+    expect(r.month).toBe("2026-10");
+    expect(r.entra).toBe(195157);
+    expect(r.sai).toBe(116500);
+    expect(r.sobra).toBe(195157 - 116500);
+    expect(r.saldoFim).toBe(400000 + 195157 - 116500);
+    expect(r.baixo).toBe(false);
+  });
+
+  it("a month's own mesada (pinned) counts, and a low end is flagged", () => {
+    const r = rest({ balance: 0, mesadaMonths: [{ member_id: "mj", month: "2026-10-01", amount_cents: 20000 }], casa: 200000 });
+    expect(r.toGo.find((l) => l.label === "Mesadas por sair")).toBeUndefined();
+    expect(r.saldoFim).toBe(195157 - 86500);
+    expect(r.baixo).toBe(true);
   });
 });

@@ -12,6 +12,7 @@ import {
   dayShort,
   expectedByLine,
   howItCame,
+  incomeFirstSeen,
   incomeTag,
   mesadaStatus,
   missingIncomes,
@@ -30,6 +31,7 @@ import {
   type MonthBreakdown,
 } from "@/lib/month";
 import { modelMonth, planMesada } from "@/lib/plan";
+import { semCategoria, semCategoriaBanner } from "@/lib/semCategoria";
 import type { MonthsView } from "@/lib/view";
 import { AREA_COLORS, Eur, Pill, Section, StackedBar } from "./kit";
 import { JoanaDuetCard } from "./JoanaDuetCard";
@@ -107,9 +109,9 @@ function Banner({ children, to, action }: { children: ReactNode; to: string; act
   );
 }
 
-function StatusPill({ b, firstDataDate }: { b: MonthBreakdown; firstDataDate: string | null }) {
+function StatusPill({ b, sem, firstDataDate }: { b: MonthBreakdown; sem: number; firstDataDate: string | null }) {
   if (b.status === "completo") return <Pill tone="green">Completo</Pill>;
-  if (b.status === "provisorio") return <Pill tone="amber">Provisório · {b.semCount} sem categoria</Pill>;
+  if (b.status === "provisorio") return <Pill tone="amber">{sem > 0 ? `Provisório · ${sem} sem categoria` : "Provisório"}</Pill>;
   if (b.status === "a_decorrer") return <Pill>A decorrer</Pill>;
   const since = firstDataDate ? ` · dados desde ${Number(firstDataDate.slice(8, 10))} ${monthName(firstDataDate.slice(0, 7)).slice(0, 3)}` : "";
   return <Pill>Mês incompleto{since}</Pill>;
@@ -142,16 +144,25 @@ export function MonthReport({
   const resolve = useMemo(() => makeResolver(data.allCategories), [data]);
   const txById = useMemo(() => new Map(data.txs.map((t) => [t.id, t])), [data]);
   const hasPontuais = real.pontualIn + real.pontualOut > 0;
-  const semAmount = real.semIds.reduce((a, id) => a + Math.abs(txById.get(id)?.amount_cents ?? 0), 0);
+  // Counted as Movimentos lists them ("Por categorizar"), which the banner opens.
+  const sem = useMemo(() => {
+    const rows = semCategoria(data.txs, month);
+    const unknown = new Set(real.semIds);
+    return {
+      n: rows.length,
+      cents: rows.reduce((a, t) => a + Math.abs(t.amount_cents), 0),
+      unknown: rows.filter((t) => unknown.has(t.id)).length,
+    };
+  }, [data, month, real]);
   const q = (vista: string) => `/movimentos?mes=${month}&vista=${vista}`;
 
   return (
     <div className="space-y-6">
       <div className="space-y-2">
-        <StatusPill b={real} firstDataDate={data.ctx.firstDataDate} />
-        {real.semCount > 0 && (
+        <StatusPill b={real} sem={sem.n} firstDataDate={data.ctx.firstDataDate} />
+        {sem.n > 0 && (
           <Banner to={q("categorizar")} action="Categorizar">
-            Faltam categorizar {real.semCount} {real.semCount === 1 ? "movimento" : "movimentos"} ({formatEuros(semAmount)}). Até lá, os totais estão incompletos.
+            {semCategoriaBanner(sem.n, sem.cents, sem.unknown)}
           </Banner>
         )}
         {real.porValidar > 0 && (
@@ -310,11 +321,13 @@ function ModelHero({ sp, data, month, hasPontuais, status }: { sp: MonthBreakdow
 // ── O que entrou ────────────────────────────────────────────────────────────
 
 function Entradas({ b, data, month }: { b: MonthBreakdown; data: EngineData; month: string }) {
-  const expected = expectedByLine(data.incomes, month);
+  // An income set up now did not "faltar" in the months before it existed.
+  const firstSeen = useMemo(() => incomeFirstSeen(data.incomes, data.txs, data.ctx), [data]);
+  const expected = expectedByLine(data.incomes, month, firstSeen);
   const lines = b.entradas.filter((l) => l.cents !== 0);
   const joanaLine = lines.find((l) => l.key === "joana");
   const duet = month >= JOANA_FROM ? <JoanaDuetCard month={month} bankCents={joanaLine?.cents ?? 0} /> : null;
-  const missing = b.status === "parcial" ? [] : missingIncomes(b.entradas, data.incomes, month);
+  const missing = b.status === "parcial" ? [] : missingIncomes(b.entradas, data.incomes, month, firstSeen);
   const running = b.status === "a_decorrer";
 
   return (
@@ -388,6 +401,8 @@ function ParaOndeFoi({ b, data, month, txById }: { b: MonthBreakdown; data: Engi
   const trabalho = of("trabalho");
   const arrendada = casaArrendada(b);
   const catLink = (id: string) => `/movimentos?mes=${month}&cat=${id}`;
+  // The money out behind "Sem categoria" (a subset of the banner's count).
+  const semOut = b.semIds.filter((id) => (txById.get(id)?.amount_cents ?? 0) < 0).length;
 
   return (
     <Section title="Para onde foi" right={<Eur cents={saiu} className="font-semibold" />}>
@@ -447,11 +462,11 @@ function ParaOndeFoi({ b, data, month, txById }: { b: MonthBreakdown; data: Engi
 
         <ParaVoces b={b} data={data} month={month} txById={txById} />
 
-        {b.semCount > 0 && (
+        {semOut > 0 && (
           <Link to={`/movimentos?mes=${month}&vista=categorizar`} className="card px-4 py-3 text-sm flex items-center justify-between gap-3 active:opacity-60">
             <span className="min-w-0">
               <span className="block font-semibold text-base">Sem categoria</span>
-              <span className={`block text-xs ${muted}`}>{plural(b.semCount, "movimento", "movimentos")} · categorizar →</span>
+              <span className={`block text-xs ${muted}`}>{plural(semOut, "gasto", "gastos")} que a app não sabe onde pôr · categorizar →</span>
             </span>
             <Eur cents={b.semSaiu} className="font-semibold shrink-0" />
           </Link>

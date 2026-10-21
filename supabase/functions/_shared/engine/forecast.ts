@@ -18,6 +18,8 @@ export interface ExpectedIncome {
   /** Keyword in the bank description, as in the rules. */
   match_text: string | null;
   active: boolean;
+  /** When it was set up (the row's creation; never moved by an edit). */
+  created_at?: string | null;
 }
 
 export interface Credit {

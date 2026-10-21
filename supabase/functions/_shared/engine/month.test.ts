@@ -190,6 +190,36 @@ describe("pontualCandidates", () => {
     expect(pontualCandidates(aug, ctx, b)).toEqual([]); // already marked
     expect(pontualCandidates(aug, ctx, monthBreakdown([], ctx, "2026-09"))).toEqual([]);
   });
+  it("only after the salary, about the extra's size, not a regular transfer, and no more than the extra", () => {
+    // A raise: 3 000 € against the 1 951,57 € expected → an extra of 1 048,43 €.
+    const rows = [
+      t("2026-08-23", -60000, "MB WAY P/ JOANA C", "pa"), // last month: the same 600 € to Joana
+      t("2026-09-22", 300000, "Ordenado de Ntt Data Portugal s a", "ord"),
+      t("2026-09-01", -60000, "TRF IMED P/ JOAO M SILVA"), // before the salary
+      t("2026-09-23", -60000, "MB WAY P/ JOANA C", "pa"), // her regular 600 €
+      t("2026-09-25", -200000, "TRF IMED P/ JOAO M SILVA"), // far more than the extra
+      t("2026-09-26", -60000, "TRF IMED P/ JOAO M SILVA"),
+      t("2026-09-27", -55000, "MB WAY P/ JOANA C", "pa"),
+      t("2026-09-28", -60000, "TRF IMED P/ JOAO M SILVA"), // the extra is already accounted for
+    ];
+    const b = monthBreakdown(rows, ctx, "2026-09");
+    expect(b.entradas.find((l) => l.key === "extra")!.cents).toBe(104843);
+    expect(pontualCandidates(rows, ctx, b).map((c) => [c.date, c.cents])).toEqual([
+      ["2026-09-26", 60000],
+      ["2026-09-27", 55000],
+    ]);
+  });
+  it("a transfer made before the salary arrived is not its extra", () => {
+    const rows = [
+      t("2026-09-01", -45000, "TRF IMED P/ JOAO M SILVA"),
+      t("2026-09-22", 240000, "Ordenado de Ntt Data Portugal s a", "ord"),
+      t("2026-09-24", -45000, "TRF IMED P/ JOAO M SILVA"),
+    ];
+    const b = monthBreakdown(rows, ctx, "2026-09");
+    expect(b.entradas.find((l) => l.key === "extra")!.cents).toBe(44843);
+    expect(pontualCandidates(rows, ctx, b).map((c) => c.date)).toEqual(["2026-09-24"]);
+    expect(pontualCandidates(rows.slice(0, 2), ctx, monthBreakdown(rows.slice(0, 2), ctx, "2026-09"))).toEqual([]);
+  });
 });
 
 describe("review fixes", () => {
