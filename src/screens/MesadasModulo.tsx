@@ -17,6 +17,8 @@ import type { Member } from "@/lib/types";
 
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const shortMonth = (m: string) => formatMonth(m).split(" ")[0];
+/** Whole euros in the narrow table (cents in the details). */
+const euros = (cents: number) => `${Math.round(cents / 100).toLocaleString("pt-PT")} €`;
 const avg = (xs: number[]) => (xs.length ? Math.round(xs.reduce((a, b) => a + b, 0) / xs.length) : null);
 
 interface Base {
@@ -159,6 +161,28 @@ export function MesadasModulo() {
             </div>
           </Card>
 
+          <Card>
+            <div className="text-sm text-tinta/60 dark:text-creme/60">Contas reais desde {rows.length ? shortMonth(rows[0].month) : ""}</div>
+            <div className="mt-2 grid grid-cols-2 gap-3 text-sm">
+              <div>
+                <div className="text-tinta/50 dark:text-creme/50 text-xs">Pago a vocês (mesadas e retiradas)</div>
+                <div className="text-xl font-display tnum">{formatCents(rows.reduce((a, r) => a + r.retiradasCents, 0))}</div>
+              </div>
+              <div>
+                <div className="text-tinta/50 dark:text-creme/50 text-xs">Podia ter pago mais</div>
+                <div className={`text-xl font-display tnum ${rows.reduce((a, r) => a + r.podiaMaisCents, 0) < 0 ? "text-terracota" : "text-petroleo"}`}>
+                  {formatCents(rows.reduce((a, r) => a + r.podiaMaisCents, 0))}
+                </div>
+              </div>
+            </div>
+            {full.length > 0 && (
+              <p className="mt-2 text-xs text-tinta/50 dark:text-creme/50">
+                Em média, nos meses completos: pago {formatCents(avg(full.map((r) => r.retiradasCents)) ?? 0)} e podia mais{" "}
+                {formatCents(avg(full.map((r) => r.podiaMaisCents)) ?? 0)} por mês — a dividir por {people}.
+              </p>
+            )}
+          </Card>
+
           <section>
             <SectionTitle>Simulador</SectionTitle>
             <Card>
@@ -196,10 +220,11 @@ export function MesadasModulo() {
               <table className="w-full table-fixed text-sm tnum">
                 <thead className="text-xs text-tinta/50 dark:text-creme/50">
                   <tr>
-                    <th className="text-left font-normal w-[28%]">Mês</th>
+                    <th className="text-left font-normal w-[22%]">Mês</th>
                     <th className="text-right font-normal">Entra</th>
-                    <th className="text-right font-normal">Mesadas</th>
-                    <th className="text-right font-normal">Sobra</th>
+                    <th className="text-right font-normal">Despesas</th>
+                    <th className="text-right font-normal">Pago a vocês</th>
+                    <th className="text-right font-normal">Podia mais</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -216,9 +241,10 @@ export function MesadasModulo() {
                 </tbody>
               </table>
               <p className="mt-3 text-xs text-tinta/50 dark:text-creme/50 leading-relaxed">
-                Entra = as tuas entradas previstas no valor normal (sem prémios nem subsídios) + o que a Joana marcou como
-                recebido na App1. Sobra = entra − despesas da casa (fixas, variáveis, atividade) − mesadas do mês. As
-                retiradas e transferências reais ficam de fora. Toca num mês para ver as contas e mudar a mesada desse mês.
+                Entra = as tuas entradas previstas no valor normal (ordenado, despesas, renda — sem prémios nem subsídios) +
+                o que a Joana marcou como recebido na App1. Despesas = tudo o que saiu para a casa (prestações, fixas,
+                variáveis, atividade). Pago a vocês = mesadas e retiradas/transferências reais. Podia mais = o que ainda
+                sobrava. Toca num mês para ver as contas e mudar a mesada desse mês.
               </p>
             </div>
           </section>
@@ -255,20 +281,30 @@ function MonthRow({
           {shortMonth(r.month)}
           {r.partial && <span className="text-tinta/40 dark:text-creme/40">*</span>} {open ? "▾" : "▸"}
         </td>
-        <td className="text-right">{formatCents(r.joaoCents + r.joanaCents)}</td>
-        <td className="text-right">{formatCents(r.mesadasCents)}</td>
-        <td className={`text-right font-medium ${r.sobraCents < 0 ? "text-terracota" : "text-petroleo"}`}>
-          {formatCents(r.sobraCents)}
+        <td className="text-right">{euros(r.joaoCents + r.joanaCents)}</td>
+        <td className="text-right">{euros(r.despesasCents)}</td>
+        <td className="text-right">{euros(r.retiradasCents)}</td>
+        <td className={`text-right font-medium ${r.podiaMaisCents < 0 ? "text-terracota" : "text-petroleo"}`}>
+          {euros(r.podiaMaisCents)}
         </td>
       </tr>
       {open && (
         <tr>
-          <td colSpan={4} className="pb-3 text-xs text-tinta/60 dark:text-creme/60 space-y-0.5">
+          <td colSpan={5} className="pb-3 text-xs text-tinta/60 dark:text-creme/60 space-y-0.5">
             {r.partial && <div className="text-tinta/40 dark:text-creme/40">* mês com dados parciais</div>}
             {line("+ Entradas do João (valor normal)", r.joaoCents)}
             {line("+ Recebido pela Joana (App1)", r.joanaCents)}
-            {line("− Despesas da casa", r.despesasCents)}
-            {line("Fora: retiradas e transferências reais", r.retiradasCents, true)}
+            {line("− Despesas da casa (prestações, fixas, variáveis, atividade)", r.despesasCents)}
+            {line("− Pago em mesadas", r.mesadasPagasCents)}
+            {line("− Outras retiradas e transferências entre contas", r.retiradasCents - r.mesadasPagasCents)}
+            <div className={`flex justify-between gap-3 font-medium ${r.podiaMaisCents < 0 ? "text-terracota" : "text-petroleo"}`}>
+              <span>= Podia ter pago mais</span>
+              <span>{formatCents(r.podiaMaisCents)}</span>
+            </div>
+            <div className="flex justify-between gap-3 pt-1 text-tinta/50 dark:text-creme/50">
+              <span>Com as mesadas definidas ({formatCents(r.mesadasCents)}) sobrava</span>
+              <span>{formatCents(r.sobraCents)}</span>
+            </div>
             {r.semCategoriaCents > 0 && (
               <div className="text-terracota">
                 {formatCents(r.semCategoriaCents)} de saídas sem categoria não contam —{" "}

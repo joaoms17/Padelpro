@@ -25,6 +25,8 @@ describe("ensaio", () => {
       joanaCents: 80000,
       despesasCents: 41000,
       retiradasCents: 80000,
+      mesadasPagasCents: 30000,
+      podiaMaisCents: 240000 + 80000 - 41000 - 80000,
       semCategoriaCents: 1200,
       sobraCents: 240000 + 80000 - 41000 - 60000,
     });

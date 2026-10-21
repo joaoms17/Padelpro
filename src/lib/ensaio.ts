@@ -17,6 +17,10 @@ export interface EnsaioMonth {
   mesadasCents: number;
   /** Real mesadas, personal withdrawals and transfers out — replaced by the agreed mesadas. */
   retiradasCents: number;
+  /** Of which, paid in the mesada categories. */
+  mesadasPagasCents: number;
+  /** What was left after the house and what you really took: could have gone to the mesadas too. */
+  podiaMaisCents: number;
   /** Money out with no category: not counted until categorized. */
   semCategoriaCents: number;
   sobraCents: number;
@@ -48,12 +52,16 @@ export function ensaio(input: {
       : input.today.slice(0, 7) === month;
     let despesas = 0;
     let retiradas = 0;
+    let mesadasPagas = 0;
     let semCategoria = 0;
     for (const t of input.tx) {
       if (t.booking_date.slice(0, 7) !== month) continue;
       const g = t.category_id ? input.group.get(t.category_id) : undefined;
       if (g && HOUSE.includes(g)) despesas -= t.amount_cents;
-      else if (t.amount_cents < 0 && (g === "mesada" || g === "interna")) retiradas -= t.amount_cents;
+      else if (t.amount_cents < 0 && (g === "mesada" || g === "interna")) {
+        retiradas -= t.amount_cents;
+        if (g === "mesada") mesadasPagas -= t.amount_cents;
+      }
       else if (t.amount_cents < 0 && !g) semCategoria -= t.amount_cents;
     }
     let joao = 0;
@@ -77,6 +85,8 @@ export function ensaio(input: {
       despesasCents: despesas,
       mesadasCents: mesadas,
       retiradasCents: retiradas,
+      mesadasPagasCents: mesadasPagas,
+      podiaMaisCents: joao + joana - despesas - retiradas,
       semCategoriaCents: semCategoria,
       sobraCents: sobra,
     };
