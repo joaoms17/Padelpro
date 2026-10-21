@@ -28,8 +28,10 @@ async function closeHousehold(svc: SupabaseClient, householdId: string, month: s
     .upsert({ household_id: householdId, month, metrics, summary_text: null }, { onConflict: "household_id,month" });
   if (error) throw error;
 
-  // A month without movements (no bank yet) has nothing to tell.
-  if (b.txCount > 0) await pushToHousehold(svc, householdId, closeMessage(b), "fecho_mes");
+  // A month without movements (no bank yet) has nothing to tell. "Sem
+  // categoria" counts like the app's screens: no category, Apple Pay notes aside.
+  const semCount = data.txs.filter((t) => t.booking_date.slice(0, 7) === month && !t.category_id && t.source !== "applepay").length;
+  if (b.txCount > 0) await pushToHousehold(svc, householdId, closeMessage({ ...b, semCount }), "fecho_mes");
   return metrics;
 }
 
