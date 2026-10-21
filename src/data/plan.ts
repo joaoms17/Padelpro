@@ -1,16 +1,28 @@
 import { supabase } from "@/lib/supabase";
-import { addMonth } from "@/lib/forecast";
-import { JOANA_FROM, monthsBetween, todayLisbon } from "@/lib/month";
-import type { PlanSettings } from "@/lib/plan";
+import { todayLisbon } from "@/lib/month";
+import { normalizePlan, type PlanSettings } from "@/lib/plan";
+import { applyPatch, appliedPatch, planMonths, type PlanPatch } from "@/lib/planPatch";
 import type { Member } from "@/lib/types";
 import { setMesadaMonth } from "@/data/mesadas";
 
-/** Save the plan (settings.plan, migration 0015). */
-export async function savePlan(householdId: string, plan: PlanSettings): Promise<void> {
-  const { error } = await supabase
-    .from("settings")
-    .upsert({ household_id: householdId, plan }, { onConflict: "household_id" });
+/**
+ * Save changes to the plan (settings.plan, migration 0015): only the fields
+ * in `patch`, on top of the plan as the server has it now, so what the other
+ * phone saved in the meantime stays. `fill` completes the stored plan first
+ * (e.g. November's defaults). Returns the plan as saved.
+ */
+export async function savePlan(
+  householdId: string,
+  patch: PlanPatch,
+  fill: (p: PlanSettings) => PlanSettings = (p) => p,
+): Promise<PlanSettings> {
+  const { data, error: readErr } = await supabase.from("settings").select("plan").eq("household_id", householdId).maybeSingle();
+  if (readErr) throw readErr;
+  const stored = (data as { plan?: Partial<PlanSettings> | null } | null)?.plan ?? null;
+  const plan = applyPatch(fill(normalizePlan(stored)), patch);
+  const { error } = await supabase.from("settings").upsert({ household_id: householdId, plan }, { onConflict: "household_id" });
   if (error) throw error;
+  return plan;
 }
 
 /** A category's monthly limit (dia a dia) or expected value (contas fixas); null clears it. */
@@ -28,16 +40,19 @@ export async function setBudgets(values: Record<string, number | null>): Promise
 }
 
 /**
- * Put the plan in place from its first month: each one's mesada and day,
- * the transition months before it (João keeps his 500 €, Joana 0), and the
- * plan marked as active. The months already lived keep the mesada they had
- * (pinned per month), so changing the base value never rewrites the past.
+ * Put the plan in place from its first month (or update it): each one's
+ * mesada and day, the transition months before it (João keeps his 500 €,
+ * Joana 0), and the plan marked as active. The months already lived keep the
+ * mesada they had (pinned per month), so changing the base value never
+ * rewrites the past. Only the values applied here (and `active`) are written
+ * to the plan, on top of what the server has. Returns the plan as saved.
  */
 export async function putPlanInPlace(
   householdId: string,
   plan: PlanSettings,
   members: Pick<Member, "id">[],
-): Promise<void> {
+  fill?: (p: PlanSettings) => PlanSettings,
+): Promise<PlanSettings> {
   const [{ data: rows, error: mErr }, { data: first, error: tErr }, { data: existing, error: oErr }] = await Promise.all([
     supabase.from("members").select("id, mesada_cents").eq("household_id", householdId),
     supabase.from("transactions").select("booking_date").eq("household_id", householdId).order("booking_date").limit(1),
@@ -48,24 +63,25 @@ export async function putPlanInPlace(
   if (oErr) throw oErr;
   const base = new Map(((rows ?? []) as { id: string; mesada_cents: number }[]).map((r) => [r.id, r.mesada_cents || 0]));
   const pinned = new Set(((existing ?? []) as { member_id: string; month: string }[]).map((r) => `${r.member_id}:${r.month.slice(0, 7)}`));
-  const firstMonth = (first as { booking_date: string }[] | null)?.[0]?.booking_date?.slice(0, 7) ?? todayLisbon().slice(0, 7);
-  const lastPast = addMonth(plan.start_month, -1);
+  const today = todayLisbon();
+  const firstMonth = (first as { booking_date: string }[] | null)?.[0]?.booking_date?.slice(0, 7) ?? today.slice(0, 7);
+  const { keep, transition, from } = planMonths(firstMonth, today.slice(0, 7), plan.start_month);
 
   for (const m of members) {
-    // The past (until the transition) keeps what it was.
-    for (const month of firstMonth <= lastPast ? monthsBetween(firstMonth, lastPast) : []) {
-      if (month >= JOANA_FROM || pinned.has(`${m.id}:${month}`)) continue;
+    // The past (before the transition, and the plan's months already lived) keeps what it was.
+    for (const month of keep) {
+      if (pinned.has(`${m.id}:${month}`)) continue;
       await setMesadaMonth(householdId, m.id, month, base.get(m.id) ?? 0);
     }
-    for (let month = JOANA_FROM; month < plan.start_month; month = addMonth(month, 1)) {
+    for (const month of transition) {
       await setMesadaMonth(householdId, m.id, month, Math.max(0, plan.transition[m.id] ?? 0));
     }
-    // From the start the base value applies (no stale per-month values).
+    // From then on the base value applies (no stale per-month values).
     const { error: delErr } = await supabase
       .from("mesada_months")
       .delete()
       .eq("member_id", m.id)
-      .gte("month", `${plan.start_month}-01`);
+      .gte("month", `${from}-01`);
     if (delErr) throw delErr;
     const { error } = await supabase
       .from("members")
@@ -73,5 +89,5 @@ export async function putPlanInPlace(
       .eq("id", m.id);
     if (error) throw error;
   }
-  await savePlan(householdId, { ...plan, active: true });
+  return savePlan(householdId, appliedPatch(plan, members.map((m) => m.id)), fill);
 }

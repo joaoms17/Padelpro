@@ -2,8 +2,11 @@
 // budget tables, the steps that are done, the reality checks and the
 // checklist for the bank. Pure and testable.
 import { plain } from "@shared/suggest";
-import type { Credit } from "./forecast";
+import { addMonth, type Credit } from "./forecast";
+import { applePayPending, forecastParts, incomeProgress, mesadaRows, type ForecastItem } from "./esteMes";
 import { formatEuros, monthName, monthShort, parseCents } from "./format";
+import { mesadaFor } from "./mesadas";
+import type { MesadaMonth } from "@shared/engine/mesadas.ts";
 import {
   incomeKind,
   makeClassifier,
@@ -15,7 +18,16 @@ import {
   type IncomeKind,
   type MonthBreakdown,
 } from "./month";
-import { monthlyEq, seedBudget, transitionDefaults, type PlanSettings, type PlanTotals } from "./plan";
+import {
+  monthControl,
+  monthlyEq,
+  seedBudget,
+  transitionDefaults,
+  type JoanaHistory,
+  type PlanSettings,
+  type PlanTotals,
+  type ProjectionMonth,
+} from "./plan";
 import type { Category, Member } from "./types";
 
 export const KIND_LABELS: Record<IncomeKind, string> = {
@@ -197,6 +209,18 @@ export function duetByMonth(receipts: { date: string; amount_cents: number }[]):
   return out;
 }
 
+/** The first month to ask Duet for: the first closed month, but at most a year back. */
+export function duetFrom(closed: string[], current: string, maxMonths = 12): string {
+  const floor = addMonth(current, -maxMonths);
+  const first = closed[0] ?? current;
+  return first > floor ? first : floor;
+}
+
+/** Months before what was asked of Duet are unknown there (null), not 0. */
+export function withDuetRange(h: JoanaHistory, from: string): JoanaHistory {
+  return { ...h, months: h.months.map((m) => (m.duet != null && m.month < from ? { ...m, duet: null } : m)) };
+}
+
 export type IncomeCredit = Credit & { key: IncomeKey };
 
 /**
@@ -302,3 +326,52 @@ export function projMonthLabel(month: string): string {
 
 /** "2026-12" → "dezembro 2026". */
 export const startLabel = (month: string) => `${monthName(month)} ${month.slice(0, 4)}`;
+
+export interface MonthRest extends ProjectionMonth {
+  toCome: ForecastItem[];
+  toGo: ForecastItem[];
+}
+
+/**
+ * The rest of the current month as Este mês forecasts it ("Previsão a 31"):
+ * the balance today, plus what is still to come in (incomes not arrived yet,
+ * Joana's part), minus what is still to go out (contas fixas por pagar,
+ * mesadas por sair, the dia a dia to the end, Apple Pay not taken yet). The
+ * next months of the projection start from where this one ends.
+ */
+export function currentMonthRest(input: {
+  balance: number;
+  /** The current month's breakdowns, real and sem pontuais. */
+  real: MonthBreakdown;
+  sem: MonthBreakdown;
+  categories: Parameters<typeof monthControl>[1];
+  plan: PlanSettings;
+  incomes: EngineIncome[];
+  members: Pick<Member, "id" | "display_name" | "mesada_cents">[];
+  mesadaMonths: MesadaMonth[];
+  txs: Pick<EngineTx, "booking_date" | "source" | "amount_cents">[];
+  today: string;
+  /** One month of house costs (F + V + A): ending below it is low. */
+  casa: number;
+}): MonthRest {
+  const month = input.sem.month;
+  const control = monthControl(input.sem, input.categories, input.plan, input.today);
+  const incomes = incomeProgress(input.incomes, input.real);
+  const joanaArrived = input.real.entradas.find((l) => l.key === "joana")?.cents ?? 0;
+  const mesadaOf = (id: string) => {
+    const m = input.members.find((x) => x.id === id);
+    return m ? mesadaFor(m, month, input.mesadaMonths) : 0;
+  };
+  const { toCome, toGo } = forecastParts({
+    control,
+    incomes,
+    joana:
+      month >= input.plan.start_month && input.plan.joana_cents != null ? { plan: input.plan.joana_cents, arrived: joanaArrived } : null,
+    mesadas: mesadaRows(input.members, input.sem, input.real, mesadaOf),
+    applePay: applePayPending(input.txs, month, input.today),
+  });
+  const entra = toCome.reduce((a, l) => a + l.cents, 0);
+  const sai = toGo.reduce((a, l) => a + l.cents, 0);
+  const saldoFim = input.balance + entra - sai;
+  return { month, entra, sai, sobra: entra - sai, saldoFim, baixo: saldoFim < input.casa, toCome, toGo };
+}

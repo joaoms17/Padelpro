@@ -16,6 +16,8 @@ import { incomeKind, JOANA_FROM } from "@/lib/month";
 import { addMonth, suggestIncomes } from "@/lib/forecast";
 import { formatCents, formatEuros, formatPct, monthDay, monthName } from "@/lib/format";
 import { errorMessage } from "@/lib/errors";
+import { nextStamp } from "@/lib/sequence";
+import { applyPatch, isEmptyPatch, mergePatch, planDiff, unappliedChanges, type PlanPatch } from "@/lib/planPatch";
 import {
   KIND_LABELS,
   applyBudgets,
@@ -23,7 +25,9 @@ import {
   casaArrendada,
   commonMesada,
   coveredMean,
+  currentMonthRest,
   duetByMonth,
+  duetFrom,
   freqText,
   incomeCredits,
   mesadaChecklist,
@@ -39,6 +43,7 @@ import {
   stepsDone,
   suggestionCredits,
   withDefaults,
+  withDuetRange,
 } from "@/lib/planView";
 
 const muted = "text-tinta/60 dark:text-creme/60";
@@ -67,7 +72,7 @@ function go(id: string, behavior: ScrollBehavior = "smooth") {
   document.getElementById(id)?.scrollIntoView({ behavior, block: "start" });
 }
 
-function Header({ plan, current }: { plan: PlanSettings | null; current: string | null }) {
+function Header({ plan, current, pending = false }: { plan: PlanSettings | null; current: string | null; pending?: boolean }) {
   return (
     <header className="pr-12 space-y-1">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -80,6 +85,11 @@ function Header({ plan, current }: { plan: PlanSettings | null; current: string 
           ) : (
             <Pill>Rascunho</Pill>
           ))}
+        {pending && (
+          <button onClick={() => go("mesadas")} className="active:opacity-60">
+            <Pill tone="amber">Alterações por aplicar</Pill>
+          </button>
+        )}
       </div>
       <p className={`${muted} leading-relaxed`}>Quanto entra, quanto custa a casa e quanto pode ser a mesada de cada um.</p>
     </header>
@@ -181,40 +191,94 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
   const status = useSaveStatus();
   const { track } = status;
 
-  // ── The plan, kept here and saved a moment after each change ──────────────
-  const [plan, setPlanState] = useState<PlanSettings>(() => withDefaults(data.plan, members));
+  // ── The plan: the server's copy plus the changes made here ────────────────
+  // Only what changed here is saved (on top of the server's plan), so the
+  // other phone's changes stay. Every plan write goes through `chain`, one
+  // after the other, "Pôr o plano em vigor" included.
+  const membersRef = useRef(members);
+  membersRef.current = members;
+  const fill = useCallback((p: PlanSettings) => withDefaults(p, membersRef.current), []);
+  /** The plan as the server last had it. */
+  const server = useRef<PlanSettings>(data.plan);
+  /** Changes being saved. */
+  const sending = useRef<PlanPatch>({});
+  /** Changes not sent yet. */
+  const edits = useRef<PlanPatch>({});
+  /** Loads stamped before this did not see our last plan write. */
+  const writtenAt = useRef(0);
+  const shown = useCallback(
+    () => fill(applyPatch(applyPatch(server.current, sending.current), edits.current)),
+    [fill],
+  );
+  const [plan, setPlanState] = useState<PlanSettings>(shown);
   const latest = useRef(plan);
-  const dirty = useRef(false);
   const timer = useRef<number | undefined>();
   const chain = useRef<Promise<unknown>>(Promise.resolve());
 
-  // A reload (or the other person's change) shows up unless something is still being typed.
-  useEffect(() => {
-    if (dirty.current) return;
-    const p = withDefaults(data.plan, members);
+  const refresh = useCallback(() => {
+    const p = shown();
     latest.current = p;
     setPlanState(p);
-  }, [data.plan, members]);
+  }, [shown]);
+
+  // A reload (or the other person's change) shows up under what is still being typed;
+  // a load that started before our last write is older than what we have.
+  useEffect(() => {
+    if (data.stamp < writtenAt.current) return;
+    server.current = data.plan;
+    refresh();
+  }, [data, refresh]);
+
+  /** Run a plan write after the ones before it. */
+  const onChain = useCallback((job: () => Promise<boolean>) => {
+    const run = chain.current.then(job);
+    chain.current = run;
+    return run;
+  }, []);
+
+  /** After a plan write: the plan as the server has it now, then a reload. */
+  const written = useCallback(
+    async (saved: PlanSettings) => {
+      server.current = saved;
+      writtenAt.current = nextStamp();
+      refresh();
+      await reload();
+    },
+    [refresh, reload],
+  );
 
   const flush = useCallback((): Promise<unknown> => {
     window.clearTimeout(timer.current);
-    if (!dirty.current) return chain.current;
-    const p = latest.current;
-    chain.current = chain.current.then(() =>
-      track(async () => {
-        await savePlan(householdId, p);
-        if (latest.current === p) dirty.current = false;
-        await reload();
-      }),
-    );
-    return chain.current;
-  }, [householdId, reload, track]);
+    if (isEmptyPatch(edits.current)) return chain.current;
+    return onChain(async () => {
+      // Whatever was typed until now goes in this write.
+      const patch = edits.current;
+      if (isEmptyPatch(patch)) return true;
+      edits.current = {};
+      sending.current = patch;
+      return track(async () => {
+        let saved: PlanSettings;
+        try {
+          saved = await savePlan(householdId, patch, fill);
+        } catch (e) {
+          // Kept for the next try (with the next change, or on leaving).
+          edits.current = mergePatch(patch, edits.current);
+          sending.current = {};
+          refresh();
+          throw e;
+        }
+        sending.current = {};
+        await written(saved);
+      });
+    });
+  }, [fill, householdId, onChain, track, written]);
 
   const updatePlan = useCallback(
     (f: (p: PlanSettings) => PlanSettings, now = false) => {
-      const next = f(latest.current);
+      const prev = latest.current;
+      const next = f(prev);
+      edits.current = mergePatch(edits.current, planDiff(prev, next));
       latest.current = next;
-      dirty.current = true;
       setPlanState(next);
       window.clearTimeout(timer.current);
       if (now) void flush();
@@ -224,7 +288,7 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
   );
 
   // Leaving the screen: save what is pending.
-  useEffect(() => () => void (dirty.current && flush()), [flush]);
+  useEffect(() => () => void (!isEmptyPatch(edits.current) && flush()), [flush]);
 
   // ── Limits: shown at once, saved on blur ───────────────────────────────────
   const [overrides, setOverrides] = useState<Record<string, number | null>>({});
@@ -237,25 +301,31 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
     });
   }, [data.allCategories]);
 
+  // One limit write after the other: a limit typed while "Usar as médias" is
+  // still saving is written after it, so it is the one that stays.
+  const budgetChain = useRef<Promise<unknown>>(Promise.resolve());
   const saveBudgets = useCallback(
     (values: Record<string, number | null>) => {
       const norm = Object.fromEntries(Object.entries(values).map(([id, v]) => [id, v && v > 0 ? Math.round(v) : null]));
       if (Object.keys(norm).length === 0) return;
       setOverrides((prev) => ({ ...prev, ...norm }));
-      void track(async () => {
-        try {
-          await setBudgets(norm);
-        } catch (e) {
-          setOverrides((prev) => {
-            const next = { ...prev };
-            for (const id of Object.keys(norm)) delete next[id];
-            return next;
-          });
+      budgetChain.current = budgetChain.current.then(() =>
+        track(async () => {
+          try {
+            await setBudgets(norm);
+          } catch (e) {
+            // Back to the server's value, unless it was typed again since.
+            setOverrides((prev) => {
+              const next = { ...prev };
+              for (const [id, v] of Object.entries(norm)) if (next[id] === v) delete next[id];
+              return next;
+            });
+            await reload();
+            throw e;
+          }
           await reload();
-          throw e;
-        }
-        await reload();
-      });
+        }),
+      );
     },
     [reload, track],
   );
@@ -287,25 +357,46 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
   );
   const [editing, setEditing] = useState<IncomeDraft | null>(null);
 
-  // Joana: what reached the account, and what Duet says she received.
+  // Joana: what reached the account, and what Duet says she received (from
+  // the first closed month, at most a year back; older months show "—").
+  const duetStart = duetFrom(view.closed, current);
   const [duet, setDuet] = useState<Record<string, number> | null>(null);
   useEffect(() => {
     let alive = true;
-    void loadDuetReceipts(`${addMonth(current, -4)}-01`, today).then((r) => {
+    void loadDuetReceipts(`${duetStart}-01`, today).then((r) => {
       if (alive) setDuet(r.configured ? duetByMonth(r.receipts) : null);
     });
     return () => {
       alive = false;
     };
-  }, [current, today]);
+  }, [duetStart, today]);
   const joana = useMemo(
-    () => joanaHistory(view.closed.map((m) => view.semPontuais.get(m)!), duet),
-    [view, duet],
+    () => withDuetRange(joanaHistory(view.closed.map((m) => view.semPontuais.get(m)!), duet), duetStart),
+    [view, duet, duetStart],
   );
 
+  // The next months start from where this one ends, as Este mês forecasts it;
+  // the rest of this month is the first row.
+  const rest = useMemo(
+    () =>
+      currentMonthRest({
+        balance: data.balanceCents ?? 0,
+        real: view.real.get(current)!,
+        sem: view.semPontuais.get(current)!,
+        categories,
+        plan,
+        incomes: data.incomes,
+        members,
+        mesadaMonths: data.mesadaMonths,
+        txs: data.txs,
+        today,
+        casa: casaPlano,
+      }),
+    [data, view, current, categories, plan, members, today, casaPlano],
+  );
   const proj = useMemo(
-    () => projection(current, 6, data.balanceCents ?? 0, data.incomes, totals, plan, memberIds),
-    [current, data.balanceCents, data.incomes, totals, plan, memberIds],
+    () => [rest, ...projection(current, 6, rest.saldoFim, data.incomes, totals, plan, memberIds)],
+    [rest, current, data.incomes, totals, plan, memberIds],
   );
   const firstLow = proj.find((p) => p.baixo);
 
@@ -320,19 +411,23 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
   }
   const [activating, setActivating] = useState(false);
   const [activated, setActivated] = useState(false);
+  // With the plan active: what was changed but is not applied yet.
+  const unapplied = useMemo(
+    () => unappliedChanges(plan, members, data.mesadaMonths, current),
+    [plan, members, data.mesadaMonths, current],
+  );
+  const pendingApply = plan.active && !activating && unapplied.length > 0;
 
+  // On the plan's chain: the changes typed before go first, and the ones typed
+  // while it runs are saved after it (on top of what it saved).
   async function activate() {
     setActivating(true);
-    await flush();
-    const p = latest.current;
-    const ok = await track(async () => {
-      await putPlanInPlace(householdId, p, members);
-      const next = { ...p, active: true };
-      latest.current = next;
-      dirty.current = false;
-      setPlanState(next);
-      await reload();
-    });
+    void flush();
+    const ok = await onChain(() =>
+      track(async () => {
+        await written(await putPlanInPlace(householdId, latest.current, members, fill));
+      }),
+    );
     setActivating(false);
     if (ok) setActivated(true);
   }
@@ -384,7 +479,7 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
         </button>
       )}
 
-      <Header plan={plan} current={current} />
+      <Header plan={plan} current={current} pending={pendingApply} />
 
       {/* ── A. The decision ──────────────────────────────────────────────── */}
       <div ref={cardRef} id="decisao" className="card p-5 space-y-4 scroll-mt-16">
@@ -623,7 +718,7 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
                     <td className="py-1.5 text-right tnum">{formatEuros(m.bank)}</td>
                     {duet && (
                       <>
-                        <td className="py-1.5 text-right tnum">{formatEuros(m.duet ?? 0)}</td>
+                        <td className="py-1.5 text-right tnum">{m.duet == null ? "—" : formatEuros(m.duet)}</td>
                         <td className="py-1.5 text-right tnum">{m.duet ? formatPct(Math.round((m.bank / m.duet) * 100) / 100) : "—"}</td>
                       </>
                     )}
@@ -847,12 +942,33 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
             <p className="text-sm text-terracota">Atenção: com estas mesadas o plano não fecha (faltam {formatEuros(-totals.folga)}/mês).</p>
           )}
 
-          <button className="btn-primary w-full" disabled={activating || totals.mesadasTotal === 0} onClick={() => void activate()}>
+          {pendingApply && (
+            <div className="rounded-2xl bg-amber-500/10 p-3 space-y-2">
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-200">Alterações por aplicar</p>
+              <ul className="space-y-1.5 text-sm">
+                {unapplied.map((t) => (
+                  <li key={t} className="flex gap-2">
+                    <span className="text-amber-700 dark:text-amber-300">•</span>
+                    <span className="min-w-0">{t}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className={`text-xs ${muted}`}>
+                Até carregares em «Atualizar o plano», Este mês e os avisos continuam com os valores antigos.
+              </p>
+            </div>
+          )}
+
+          <button
+            className={`${plan.active && !pendingApply ? "btn-ghost" : "btn-primary"} w-full`}
+            disabled={activating || totals.mesadasTotal === 0}
+            onClick={() => void activate()}
+          >
             {activating ? "A guardar…" : plan.active ? "Atualizar o plano" : `Pôr o plano em vigor a ${monthDay(plan.start_month, "first")}`}
           </button>
           {totals.mesadasTotal === 0 && <p className={`text-xs ${faint}`}>Escolhe primeiro as mesadas (no topo ou aqui).</p>}
 
-          {plan.active && (
+          {plan.active && !pendingApply && (
             <div className="rounded-2xl bg-petroleo/10 p-3 space-y-2">
               <p className="text-sm font-medium text-petroleo">
                 {activated ? "Plano em vigor ✓" : "Em vigor"} · no banco, até {monthDay(plan.start_month, "first")}:
@@ -879,8 +995,8 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
           <div className="card p-3">
             <p className={`mb-2 text-xs ${faint}`}>
               {data.balanceCents != null
-                ? `A partir do saldo de hoje (${formatEuros(data.balanceCents)}).`
-                : "Sem saldo do banco ainda: começa em 0 €."}
+                ? `A partir do saldo de hoje (${formatEuros(data.balanceCents)}) e do que ainda falta entrar e sair em ${monthName(current)}.`
+                : `Sem saldo do banco ainda: começa em 0 € (mais o que ainda falta entrar e sair em ${monthName(current)}).`}
             </p>
             <table className="w-full table-fixed text-xs">
               <colgroup>
@@ -900,12 +1016,15 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
                 </tr>
               </thead>
               <tbody>
-                {proj.map((p) => (
+                {proj.map((p, i) => (
                   <tr
                     key={p.month}
                     className={`border-t border-areia/50 dark:border-white/5 ${p.baixo ? "bg-amber-500/10 text-amber-800 dark:text-amber-200" : ""}`}
                   >
-                    <td className="py-1.5 pl-1 leading-tight">{projMonthLabel(p.month)}</td>
+                    <td className="py-1.5 pl-1 leading-tight">
+                      {projMonthLabel(p.month)}
+                      {i === 0 && <span className={`block text-[10px] ${faint}`}>o resto</span>}
+                    </td>
                     <td className="py-1.5 text-right tnum">{formatEuros(p.entra)}</td>
                     <td className="py-1.5 text-right tnum">{formatEuros(p.sai)}</td>
                     <td className="py-1.5 text-right tnum">
@@ -924,7 +1043,8 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
               </p>
             )}
             <p className={`mt-2 text-[11px] ${faint}`}>
-              Entra: o que entra todos os meses{totals.J > 0 && " e a Joana (a partir de novembro)"}. Sai: contas fixas, dia a dia, trabalho
+              {capital(monthName(current))}: só o que ainda falta até {monthDay(current, "last")}, como na previsão de Este mês. Depois, entra: o
+              que entra todos os meses{totals.J > 0 && " e a Joana (a partir de novembro)"}. Sai: contas fixas, dia a dia, trabalho
               da Joana e mesadas{transitionMonths.length > 0 && ` (em ${monthName(transitionMonths[0])} as da transição)`}. A poupança fica no
               saldo; os extras não contam.
             </p>

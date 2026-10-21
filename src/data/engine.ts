@@ -6,10 +6,13 @@ import { normalizePlan, type PlanSettings } from "@/lib/plan";
 import { todayLisbon, type EngineCtx, type EngineIncome, type EngineTx } from "@/lib/month";
 import type { Category, Member } from "@/lib/types";
 import { errorMessage } from "@/lib/errors";
+import { latestOnly, nextStamp } from "@/lib/sequence";
 
 /** Everything the month and plan calculations need, loaded once per screen. */
 export interface EngineData {
   householdId: string;
+  /** When this load started (`nextStamp`): it may not have seen a write stamped later. */
+  stamp: number;
   txs: EngineTx[];
   ctx: EngineCtx;
   /** Every category (archived ones too, for movements still pointing at them). */
@@ -59,6 +62,7 @@ async function loadTxs(householdId: string): Promise<(EngineTx & { account_id: s
 }
 
 export async function loadEngineData(householdId: string): Promise<EngineData> {
+  const stamp = nextStamp();
   const [txs, catRes, memRes, incomes, mesadaMonths, setRes, accRes, connRes] = await Promise.all([
     loadTxs(householdId),
     supabase.from("categories").select("*").eq("household_id", householdId).order("sort"),
@@ -86,6 +90,7 @@ export async function loadEngineData(householdId: string): Promise<EngineData> {
 
   return {
     householdId,
+    stamp,
     txs: houseTxs,
     ctx: {
       categories: allCategories,
@@ -112,18 +117,24 @@ export function useEngineData(householdId: string | null) {
   const [data, setData] = useState<EngineData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Only the latest load counts: an older, slower one finishing last would
+  // bring back what a write just changed (a limit, the plan).
+  const [requests] = useState(latestOnly);
 
   const reload = useCallback(async () => {
     if (!householdId) return;
+    const id = requests.start();
     try {
-      setData(await loadEngineData(householdId));
+      const next = await loadEngineData(householdId);
+      if (!requests.isLatest(id)) return;
+      setData(next);
       setError(null);
     } catch (e) {
-      setError(errorMessage(e));
+      if (requests.isLatest(id)) setError(errorMessage(e));
     } finally {
-      setLoading(false);
+      if (requests.isLatest(id)) setLoading(false);
     }
-  }, [householdId]);
+  }, [householdId, requests]);
 
   useEffect(() => {
     setLoading(true);
