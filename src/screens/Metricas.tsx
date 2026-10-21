@@ -1,3 +1,4 @@
+import { Link } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 import {
   ResponsiveContainer,
@@ -73,6 +74,13 @@ export function Metricas() {
   return (
     <div className="space-y-6">
       <PageHeader title="Métricas" subtitle="Como está o mês e a almofada." />
+
+      <Link to="/ensaio" className="card p-4 block active:scale-[0.99] transition-transform">
+        <div className="font-medium">Ensaio das mesadas →</div>
+        <div className="text-xs text-tinta/50 dark:text-creme/50 mt-0.5">
+          Como fechava cada mês se entrasse tudo e só saíssem as mesadas
+        </div>
+      </Link>
 
       <div className="grid grid-cols-2 gap-3">
         <Card>
