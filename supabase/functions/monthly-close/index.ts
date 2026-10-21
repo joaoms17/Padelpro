@@ -12,13 +12,30 @@ import { householdIds, loadEngineData } from "../_shared/engineData.ts";
 import { closeMessage, closeMetrics, previousMonth } from "../_shared/alertRules.ts";
 import { monthBreakdown, monthEndBalances, todayLisbon } from "../_shared/engine/month.ts";
 import { planTotals } from "../_shared/engine/plan.ts";
+import { addMonth } from "../_shared/engine/forecast.ts";
+import { receiptsByMonth } from "../_shared/duetRead.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
+
+/** Joana's monthly average on Duet over the 12 months up to `month` (0 when unknown). */
+async function joanaAverage(month: string): Promise<number> {
+  try {
+    const from = `${addMonth(month, -11)}-01`;
+    const [y, m] = month.split("-").map(Number);
+    const to = `${month}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+    const byMonth = await receiptsByMonth(from, to);
+    const values = byMonth ? Object.values(byMonth) : [];
+    return values.length ? Math.round(values.reduce((a, x) => a + x, 0) / values.length) : 0;
+  } catch (_e) {
+    return 0;
+  }
+}
 
 async function closeHousehold(svc: SupabaseClient, householdId: string, month: string, now: Date) {
   const data = await loadEngineData(svc, householdId, now);
   const b = monthBreakdown(data.txs, data.ctx, month);
+  // Joana's part of the plan: her Duet average over the 12 months up to this one.
   const totals = data.rawPlan
-    ? planTotals(data.ctx.incomes, data.ctx.categories, data.plan, data.members.map((m) => m.id))
+    ? planTotals(data.ctx.incomes, data.ctx.categories, data.plan, data.members.map((m) => m.id), await joanaAverage(month))
     : null;
   const saldoFim = data.balanceCents == null ? null : (monthEndBalances(data.txs, data.balanceCents, [month]).get(month) ?? null);
   const metrics = closeMetrics(b, totals, saldoFim);

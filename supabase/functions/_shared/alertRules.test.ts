@@ -71,7 +71,7 @@ const december = [
   t("2026-12-10", 54160, "TRF DESPESAS JOAO"),
 ];
 
-const plan = normalizePlan({ start_month: "2026-12", active: true, joana_cents: 100000, mesadas: { mj: 60000, ma: 60000 } });
+const plan = normalizePlan({ start_month: "2026-12", active: true, mesadas: { mj: 60000, ma: 60000 } });
 const data = (today: string, txs: EngineTx[], over: Partial<AlertData> = {}): AlertData => ({
   txs,
   ctx: { categories, members, incomes, today, firstDataDate: "2026-07-20" },
@@ -131,13 +131,20 @@ describe("monthAlerts", () => {
     expect(more.some((a) => a.key === "mesada:mj")).toBe(false);
   });
 
-  it("Joana's money still to arrive, in the last days of the month", () => {
+  it("Joana's Duet money still to arrive, in the last days of the month", () => {
     const joana = t("2026-12-20", 60000, "TRF CRED SEPA+ DE JOANA CARNEIRO MORAES -300515672");
-    const late = monthAlerts(data("2026-12-29", [...history, ...december, joana]));
-    expect(late.find((a) => a.key === "joana")).toMatchObject({ pref: "joana", body: "Faltam 400 € da Duet chegarem ao Santander (combinado 1000 €)." });
-    expect(monthAlerts(data("2026-12-28", [...history, ...december, joana])).some((a) => a.key === "joana")).toBe(false);
+    const duet = { joanaDuet: 100000 };
+    const late = monthAlerts(data("2026-12-29", [...history, ...december, joana], duet));
+    expect(late.find((a) => a.key === "joana")).toMatchObject({
+      pref: "joana",
+      body: "Faltam 400 € da Duet chegarem à conta (recebido na Duet este mês: 1000 €).",
+    });
+    expect(monthAlerts(data("2026-12-28", [...history, ...december, joana], duet)).some((a) => a.key === "joana")).toBe(false);
     const all = t("2026-12-21", 40000, "TRF CRED SEPA+ DE JOANA CARNEIRO MORAES -300515672");
-    expect(monthAlerts(data("2026-12-29", [...history, ...december, joana, all])).some((a) => a.key === "joana")).toBe(false);
+    expect(monthAlerts(data("2026-12-29", [...history, ...december, joana, all], duet)).some((a) => a.key === "joana")).toBe(false);
+    // Marked "não é dívida", or Duet not readable: nothing.
+    expect(monthAlerts(data("2026-12-29", [...history, ...december, joana], { ...duet, joanaWaived: 40000 })).some((a) => a.key === "joana")).toBe(false);
+    expect(monthAlerts(data("2026-12-29", [...history, ...december, joana])).some((a) => a.key === "joana")).toBe(false);
   });
 });
 
@@ -216,7 +223,7 @@ describe("month close", () => {
   it("the snapshot keeps the engine's totals and the plan's", () => {
     const ctx: EngineCtx = { categories, members, incomes, today: "2026-12-01", firstDataDate: "2026-07-20" };
     const b = monthBreakdown(history, ctx, "2026-11");
-    const totals = planTotals(incomes, categories, plan, ["mj", "ma"]);
+    const totals = planTotals(incomes, categories, plan, ["mj", "ma"], 100000); // Joana's Duet average
     const m = closeMetrics(b, totals, 250000);
     expect(m).toMatchObject({ version: 2, status: "completo", entrou: 369317, fixas: 156000, casa: 156000, sobrou: 369317 - 156000, semCount: 0, saldoFim: 250000 });
     expect(m.plano).toMatchObject({ R: 369317, J: 100000, F: 173000, V: 90000, A: 10000, mesadasTotal: 120000 });

@@ -9,6 +9,7 @@ import { householdFromRequest, serviceClient } from "../_shared/db.ts";
 import { isCronRequest } from "../_shared/auth.ts";
 import { pushToHousehold } from "../_shared/push.ts";
 import { householdIds, loadEngineData, loadSettings } from "../_shared/engineData.ts";
+import { receiptsByMonth } from "../_shared/duetRead.ts";
 import { consentMessage, monthAlerts, pendingAlerts, planInForce, recordSent } from "../_shared/alertRules.ts";
 import { todayLisbon } from "../_shared/engine/month.ts";
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2.45.4";
@@ -27,6 +28,28 @@ async function consentAlert(svc: SupabaseClient, householdId: string, now: Date)
   return msg ? await pushToHousehold(svc, householdId, msg, "ligacao_banco") : 0;
 }
 
+/**
+ * What Joana received on Duet this month, and the part marked "não é dívida".
+ * Duet not set up or unreadable: null (no Joana alert, never a false one).
+ */
+async function joanaThisMonth(
+  svc: SupabaseClient,
+  householdId: string,
+  month: string,
+  today: string,
+): Promise<{ joanaDuet: number | null; joanaWaived: number }> {
+  let joanaDuet: number | null = null;
+  try {
+    const byMonth = await receiptsByMonth(`${month}-01`, today);
+    joanaDuet = byMonth ? (byMonth[month] ?? 0) : null;
+  } catch (_e) {
+    joanaDuet = null;
+  }
+  const { data } = await svc.from("settings").select("joana_waivers").eq("household_id", householdId).maybeSingle();
+  const waivers = ((data as { joana_waivers?: Record<string, number> } | null)?.joana_waivers) ?? {};
+  return { joanaDuet, joanaWaived: Math.max(0, waivers[month] ?? 0) };
+}
+
 async function planAlerts(svc: SupabaseClient, householdId: string, now: Date): Promise<number> {
   const settings = await loadSettings(svc, householdId);
   const month = todayLisbon(now).slice(0, 7);
@@ -34,7 +57,7 @@ async function planAlerts(svc: SupabaseClient, householdId: string, now: Date): 
   if (!settings.alertsSent || !planInForce(settings.plan, month)) return 0;
 
   const data = await loadEngineData(svc, householdId, now, settings);
-  const due = pendingAlerts(monthAlerts(data), settings.alertsSent, month, MAX_PER_DAY);
+  const due = pendingAlerts(monthAlerts({ ...data, ...(await joanaThisMonth(svc, householdId, month, todayLisbon(now))) }), settings.alertsSent, month, MAX_PER_DAY);
   if (due.length === 0) return 0;
 
   // Recorded first: an alert that could not be recorded would repeat every day.
