@@ -79,6 +79,19 @@ describe("mesadas over time", () => {
     expect(p[1].sai).toBe(270000 + 120000);
     expect(p[1].saldoFim).toBe(500000 + p[0].sobra + p[1].sobra);
   });
+  it("projection: what passes to the mesadas is still the house's before the plan's first month", () => {
+    const covers = normalizePlan({ ...plan, mesada_covers: ["sup"] });
+    const totals = planTotals(incomes, categories, covers, ["mj", "ma"]);
+    expect(totals).toMatchObject({ V: 30000, C: 60000 });
+    const p = projection("2026-10", 2, 500000, incomes, totals, covers, ["mj", "ma"]);
+    // November (transition, 500 € + 0 €): the house still pays the supermarket.
+    expect(p[0].sai).toBe(totals.F + 30000 + 60000 + totals.A + 50000);
+    // December: the mesadas pay it.
+    expect(p[1].sai).toBe(totals.F + 30000 + totals.A + 120000);
+    expect(p[1].saldoFim).toBe(500000 + p[0].sobra + p[1].sobra);
+    // Without C (older callers) nothing changes.
+    expect(projection("2026-10", 1, 0, incomes, { J: 0, F: 0, V: 0, A: 0 }, covers, ["mj", "ma"])[0].sai).toBe(50000);
+  });
   it("seedBudget rounds up to 10 €", () => {
     expect(seedBudget(41210)).toBe(42000);
     expect(seedBudget(-5)).toBe(0);
@@ -124,6 +137,42 @@ describe("review fixes", () => {
     expect(draft.categorias.find((c) => c.categoryId === "rou")!.budget).toBe(10000);
     const on = monthControl(b, categories, normalizePlan({ mesada_covers: ["rou"], active: true }), "2026-12-15");
     expect(on.categorias.find((c) => c.categoryId === "rou")!).toMatchObject({ budget: 0, porSair: 0 });
+  });
+  it("monthControl: a fixed cost charged at about its expected value is paid", () => {
+    const cats = [
+      c("luz", "fixa", "Luz, água, gás e internet", 13000), // "Usar as médias": 125,60 → 130 €
+      c("seg", "fixa", "Seguros", 5000),
+      c("pre", "fixa", "Prestação casa", 100000),
+      c("con", "fixa", "Condomínio", 6000),
+      c("imi", "fixa", "IMI e outras", 500),
+    ];
+    const rows = [
+      t("2026-12-03", -12560, "EDP", "luz"),
+      t("2026-12-04", -4300, "SEGURO", "seg"),
+      t("2026-12-05", -92000, "PRESTACAO", "pre"),
+      t("2026-12-06", -3000, "CONDOMINIO 1/2", "con"),
+    ];
+    const ctl = monthControl(monthBreakdown(rows, { ...ctx, categories: cats }, "2026-12"), cats, normalizePlan({}), "2026-12-15");
+    // Condomínio half paid; IMI not charged at all (even if small).
+    expect(ctl.fixasPendentes).toEqual([
+      { name: "Condomínio", cents: 3000 },
+      { name: "IMI e outras", cents: 500 },
+    ]);
+    expect(ctl.fixasPorPagar).toBe(3500);
+  });
+  it("monthControl: with a refund, the dia a dia still to go is what the hero says they can still spend", () => {
+    const rows = [
+      t("2026-12-05", -20000, "CONTINENTE", "sup"),
+      t("2026-12-10", 5000, "DEVOLUCAO CONTINENTE", "sup"),
+      t("2026-12-14", -2000, "PINGO DOCE", "sup", { source: "applepay" }),
+    ];
+    const ctl = monthControl(monthBreakdown(rows, ctx, "2026-12"), categories, normalizePlan({}), "2026-12-15");
+    expect(ctl.diaLeft).toBe(90000 - 17000);
+    const dia = ctl.categorias.filter((x) => x.grp === "variavel").reduce((a, x) => a + x.porSair, 0);
+    expect(dia).toBe(ctl.diaLeft);
+    // Early in the month too.
+    const early = monthControl(monthBreakdown(rows, { ...ctx, today: "2026-12-14" }, "2026-12"), categories, normalizePlan({}), "2026-12-05");
+    expect(early.categorias.find((x) => x.categoryId === "sup")!.porSair).toBe(60000 - 17000);
   });
 });
 

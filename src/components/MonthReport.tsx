@@ -12,6 +12,7 @@ import {
   dayShort,
   expectedByLine,
   howItCame,
+  incomeFirstSeen,
   incomeTag,
   mesadaStatus,
   missingIncomes,
@@ -320,11 +321,13 @@ function ModelHero({ sp, data, month, hasPontuais, status }: { sp: MonthBreakdow
 // ── O que entrou ────────────────────────────────────────────────────────────
 
 function Entradas({ b, data, month }: { b: MonthBreakdown; data: EngineData; month: string }) {
-  const expected = expectedByLine(data.incomes, month);
+  // An income set up now did not "faltar" in the months before it existed.
+  const firstSeen = useMemo(() => incomeFirstSeen(data.incomes, data.txs, data.ctx), [data]);
+  const expected = expectedByLine(data.incomes, month, firstSeen);
   const lines = b.entradas.filter((l) => l.cents !== 0);
   const joanaLine = lines.find((l) => l.key === "joana");
   const duet = month >= JOANA_FROM ? <JoanaDuetCard month={month} bankCents={joanaLine?.cents ?? 0} /> : null;
-  const missing = b.status === "parcial" ? [] : missingIncomes(b.entradas, data.incomes, month);
+  const missing = b.status === "parcial" ? [] : missingIncomes(b.entradas, data.incomes, month, firstSeen);
   const running = b.status === "a_decorrer";
 
   return (

@@ -79,6 +79,8 @@ export interface PlanTotals {
   F: number;
   /** Dia a dia limits (minus what becomes the mesadas'). */
   V: number;
+  /** The limits of the dia a dia categories the mesadas pay (plan.mesada_covers). */
+  C: number;
   /** Trabalho da Joana. */
   A: number;
   /** Savings. */
@@ -104,13 +106,14 @@ export function planTotals(
   const J = Math.max(0, plan.joana_cents ?? 0);
   const F = budgetSum(categories, "fixa");
   const V = budgetSum(categories, "variavel", plan.mesada_covers);
+  const C = budgetSum(categories, "variavel") - V;
   const A = budgetSum(categories, "atividade");
   const P = Math.max(0, plan.savings_cents);
   const D = R + J - F - V - A - P;
   const mesadaPossivel = Math.floor(Math.max(0, D) / 2 / 1000) * 1000;
   const mesadasTotal = memberIds.reduce((a, id) => a + Math.max(0, plan.mesadas[id] ?? 0), 0);
   const folga = D - mesadasTotal;
-  return { R, J, F, V, A, P, D, mesadaPossivel, mesadasTotal, folga, folgaSemJoana: folga - J };
+  return { R, J, F, V, C, A, P, D, mesadaPossivel, mesadasTotal, folga, folgaSemJoana: folga - J };
 }
 
 /** A limit from an average: up to the next 10 €. */
@@ -159,13 +162,17 @@ export interface ProjectionMonth {
   baixo: boolean;
 }
 
-/** The next months under the plan, starting from where this month ends. */
+/**
+ * The next months under the plan, starting from where this month ends.
+ * Before the plan's first month the house still pays the categories that
+ * then pass to the mesadas (`C`): the transition mesadas don't cover them.
+ */
 export function projection(
   fromMonth: string,
   count: number,
   startBalance: number,
   incomes: EngineIncome[],
-  totals: Pick<PlanTotals, "J" | "F" | "V" | "A">,
+  totals: Pick<PlanTotals, "J" | "F" | "V" | "A"> & Partial<Pick<PlanTotals, "C">>,
   plan: PlanSettings,
   memberIds: string[],
 ): ProjectionMonth[] {
@@ -177,9 +184,10 @@ export function projection(
       incomes.filter((x) => isDueInMonth(x, month)).reduce((a, x) => a + x.amount_cents, 0) +
       (month >= JOANA_FROM ? totals.J : 0);
     const mesadas = memberIds.reduce((a, id) => a + planMesada(plan, id, month), 0);
-    const sai = totals.F + totals.V + totals.A + mesadas;
+    const casa = totals.F + totals.V + totals.A + (month < plan.start_month ? Math.max(0, totals.C ?? 0) : 0);
+    const sai = casa + mesadas;
     saldo += entra - sai;
-    out.push({ month, entra, sai, sobra: entra - sai, saldoFim: saldo, baixo: saldo < totals.F + totals.V + totals.A });
+    out.push({ month, entra, sai, sobra: entra - sai, saldoFim: saldo, baixo: saldo < casa });
   }
   return out;
 }
@@ -253,6 +261,15 @@ export function modelMonth(
 
 // ── Current month ───────────────────────────────────────────────────────────
 
+/** Within this of its expected value (or at 90 % of it), a fixed cost is paid. */
+const FIXA_TOLERANCE = 1000;
+
+/** A fixed cost charged at about its expected value is paid: nothing more to come. */
+export function fixaPaid(charged: number, budget: number | null): boolean {
+  if (!(charged > 0) || !budget || budget <= 0) return false;
+  return budget - charged < FIXA_TOLERANCE || charged >= budget * 0.9;
+}
+
 export interface CategoryControl {
   categoryId: string;
   name: string;
@@ -291,7 +308,8 @@ export function monthControl(
   const dim = daysInMonth(month);
   const day = today.slice(0, 7) === month ? Number(today.slice(8, 10)) : dim;
   const spentOf = new Map(b.categorias.map((c) => [c.categoryId, c.cents]));
-  // What was charged, before refunds: a refund doesn't make more still to pay.
+  // What was charged, before refunds: a refund doesn't make a bill bigger, nor
+  // the month's pace faster.
   const chargedOf = new Map(b.categorias.map((c) => [c.categoryId, c.cents + c.refundCents]));
   const planOn = plan.active && month >= plan.start_month;
   const categorias: CategoryControl[] = categories
@@ -304,16 +322,20 @@ export function monthControl(
       const covered = planOn && plan.mesada_covers.includes(c.id);
       const projected = paceProjection(spent, day, dim);
       const pace = paceProjection(charged, day, dim);
-      // Fixed costs leave once; day-to-day ones at the month's pace (but not
-      // below the limit, which is what is expected to go).
+      // Fixed costs leave once, and a bill charged at about its expected
+      // value is paid (budgets from the averages are rounded up to 10 €).
+      // Day-to-day ones at the month's pace, but never less than what the
+      // limit still allows (net of refunds, as "Ainda podem gastar" counts).
       const porSair =
         c.grp === "fixa"
-          ? Math.max(0, (budget ?? 0) - charged)
+          ? fixaPaid(charged, budget)
+            ? 0
+            : Math.max(0, (budget ?? 0) - charged)
           : covered
             ? 0
             : day < 7
-              ? Math.max(0, (budget ?? 0) - charged)
-              : Math.max(0, Math.max(budget ?? 0, pace) - charged);
+              ? Math.max(0, (budget ?? 0) - spent)
+              : Math.max(0, (budget ?? 0) - spent, pace - charged);
       return {
         categoryId: c.id,
         name: c.name,

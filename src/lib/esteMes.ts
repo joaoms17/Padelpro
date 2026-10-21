@@ -4,7 +4,7 @@
 // plan. The totals themselves come from the month and plan engines. Pure and
 // testable.
 import { isDueInMonth } from "./forecast";
-import { inScope, incomeKind, type EngineIncome, type EngineTx, type IncomeKey, type IncomeKind, type MonthBreakdown } from "./month";
+import { inScope, incomeKind, todayLisbon, type EngineIncome, type EngineTx, type IncomeKey, type IncomeKind, type MonthBreakdown } from "./month";
 import type { MonthControl, PlanSettings, PlanTotals } from "./plan";
 import { formatEuros, monthName } from "./format";
 import { isSemCategoria, semCategoria } from "./semCategoria";
@@ -40,14 +40,21 @@ export function bankNotes(lastSyncAt: string | null, consentUntil: string | null
   } else {
     out.push({ tone: "grey", text: `Banco atualizado ${sinceLabel(lastSyncAt, nowMs)}` });
   }
-  if (consentUntil) {
-    const days = Math.ceil((Date.parse(consentUntil) - nowMs) / DAY);
+  const until = consentUntil ? Date.parse(consentUntil) : NaN;
+  if (Number.isFinite(until)) {
     const renew = { label: "Renovar", to: "/ligar-banco" };
-    if (days <= 0) out.push({ tone: "red", text: "A ligação ao Santander expirou", action: renew });
+    // Calendar days in Lisbon: on its last day it expires "hoje", all day long.
+    const days = Math.round((Date.parse(todayLisbon(new Date(until))) - Date.parse(todayLisbon(new Date(nowMs)))) / DAY);
+    if (until <= nowMs) out.push({ tone: "red", text: "A ligação ao Santander expirou", action: renew });
     else if (days <= 14) {
       out.push({
         tone: days <= 3 ? "red" : "amber",
-        text: days === 1 ? "A ligação ao Santander expira amanhã" : `A ligação ao Santander expira em ${days} dias`,
+        text:
+          days <= 0
+            ? "A ligação ao Santander expira hoje"
+            : days === 1
+              ? "A ligação ao Santander expira amanhã"
+              : `A ligação ao Santander expira em ${days} dias`,
         action: renew,
       });
     }
@@ -93,6 +100,33 @@ export function applePayPending(txs: Pick<EngineTx, "booking_date" | "source" | 
   return txs
     .filter((t) => t.source === "applepay" && t.amount_cents < 0 && inScope(t, month, today))
     .reduce((a, t) => a - t.amount_cents, 0);
+}
+
+/**
+ * Bank movements still pending (a card payment not booked yet): they already
+ * count as spent (or as in), but the balance the bank gives is the booked one
+ * (the sync prefers booked balance types), so they are still to leave (or come)
+ * by the end of `month`. One dated after it (scheduled) counts in its own month.
+ */
+export function bankPending(txs: Pick<EngineTx, "booking_date" | "source" | "status" | "amount_cents">[], month: string): { out: number; in: number } {
+  let out = 0;
+  let inn = 0;
+  for (const t of txs) {
+    if (t.source !== "banco" || t.status !== "provisorio" || t.booking_date.slice(0, 7) > month) continue;
+    if (t.amount_cents < 0) out -= t.amount_cents;
+    else inn += t.amount_cents;
+  }
+  return { out, in: inn };
+}
+
+/** What left with no category yet, split into bank movements and Apple Pay notes. */
+export function semSaiuBySource(
+  b: Pick<MonthBreakdown, "semIds" | "semSaiu">,
+  txs: Pick<EngineTx, "id" | "source" | "amount_cents">[],
+): { banco: number; applePay: number } {
+  const ids = new Set(b.semIds);
+  const applePay = txs.filter((t) => t.source === "applepay" && t.amount_cents < 0 && ids.has(t.id)).reduce((a, t) => a - t.amount_cents, 0);
+  return { banco: Math.max(0, b.semSaiu - applePay), applePay };
 }
 
 export interface IncomeGroup {
@@ -202,9 +236,12 @@ export function forecastParts(input: {
   joana: { plan: number; arrived: number } | null;
   mesadas: Pick<MesadaRow, "porSair">[];
   applePay: number;
+  /** Bank movements still pending (`bankPending`). */
+  pending?: { out: number; in: number };
 }): { toCome: ForecastItem[]; toGo: ForecastItem[] } {
   const toCome: ForecastItem[] = input.incomes.missing.map((g) => ({ label: `${g.label} (dia ${g.day})`, cents: g.pending }));
   if (input.joana) toCome.push({ label: "Joana (o que falta do plano)", cents: Math.max(0, input.joana.plan - input.joana.arrived) });
+  toCome.push({ label: "Entradas pendentes no banco", cents: input.pending?.in ?? 0 });
   const porSair = (grp: string) => input.control.categorias.filter((c) => c.grp === grp).reduce((a, c) => a + c.porSair, 0);
   const toGo: ForecastItem[] = [
     { label: "Contas fixas por pagar", cents: input.control.fixasPorPagar },
@@ -212,6 +249,7 @@ export function forecastParts(input: {
     { label: "Dia a dia até ao fim", cents: porSair("variavel") },
     { label: "Trabalho da Joana até ao fim", cents: porSair("atividade") },
     { label: "Apple Pay ainda por descontar", cents: input.applePay },
+    { label: "Pagamentos pendentes no banco", cents: input.pending?.out ?? 0 },
   ];
   return { toCome: toCome.filter((l) => l.cents > 0), toGo: toGo.filter((l) => l.cents > 0) };
 }

@@ -114,7 +114,7 @@ export function MonthCompare({ view, members }: { view: MonthsView; members: { i
           <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-300">
             * ainda com movimentos sem categoria
             {outOfAverage.length > 0 && " — fica fora da média"}.{" "}
-            <Link to="/movimentos?vista=categorizar" className="underline">
+            <Link to={`/movimentos?mes=${[...notEligible][0]}&vista=categorizar`} className="underline">
               Categorizar
             </Link>
           </p>

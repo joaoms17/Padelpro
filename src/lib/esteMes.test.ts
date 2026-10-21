@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   applePayPending,
   bankNotes,
+  bankPending,
   comArtigo,
   forecastParts,
   incomeProgress,
@@ -9,6 +10,7 @@ import {
   monthsLabel,
   prepSteps,
   reviewCount,
+  semSaiuBySource,
   sinceLabel,
 } from "./esteMes";
 import { monthBreakdown, type EngineCtx, type EngineTx } from "./month";
@@ -79,6 +81,16 @@ describe("sinceLabel / bankNotes", () => {
     expect(bankNotes("2026-10-21T07:00:00Z", "2026-10-20T00:00:00Z", now)[1]).toMatchObject({ tone: "red", text: "A ligação ao Santander expirou" });
     expect(bankNotes(null, null, now)).toEqual([{ tone: "amber", text: "Banco ainda não ligado", action: { label: "Ligar", to: "/ligar-banco" } }]);
   });
+  it("the consent in calendar days (Lisbon): 'hoje' on its last day, like the push", () => {
+    const consent = (until: string, at = now) => bankNotes("2026-10-21T07:00:00Z", until, at)[1]?.text;
+    expect(consent("2026-10-21T17:57:00Z")).toBe("A ligação ao Santander expira hoje");
+    expect(consent("2026-10-22T17:57:00Z")).toBe("A ligação ao Santander expira amanhã");
+    // Late in the evening, a link ending tomorrow afternoon is still "amanhã".
+    expect(consent("2026-10-22T17:57:00Z", Date.parse("2026-10-21T22:30:00Z"))).toBe("A ligação ao Santander expira amanhã");
+    // 3,33 days away: "em 3 dias" (not 4).
+    expect(consent("2026-10-24T18:00:00Z")).toBe("A ligação ao Santander expira em 3 dias");
+    expect(consent("2026-10-21T09:00:00Z")).toBe("A ligação ao Santander expirou");
+  });
 });
 
 describe("reviewCount / applePayPending", () => {
@@ -90,6 +102,22 @@ describe("reviewCount / applePayPending", () => {
   });
   it("Apple Pay notes still waiting for the bank (≤ 5 days old) are still to leave the balance", () => {
     expect(applePayPending(october, "2026-10", "2026-10-21")).toBe(1450);
+  });
+  it("bank movements still pending are not in the booked balance yet", () => {
+    const rows = [
+      t("2026-10-20", -8000, "COMPRA CONTINENTE", "sup", { status: "provisorio" }),
+      t("2026-09-30", -1500, "COMPRA CAFE", "res", { status: "provisorio" }),
+      t("2026-10-20", 2500, "TRF CRED DE ALGUEM", null, { status: "provisorio" }),
+      t("2026-11-01", -60000, "TRF AGENDADA P/ JOAO", null, { status: "provisorio" }), // scheduled for next month
+      t("2026-10-19", -1450, "CAFE", "res", { source: "applepay", status: "provisorio" }), // a note, not the bank
+      t("2026-10-18", -3000, "COMPRA LIDL", "sup", { status: "confirmado" }),
+    ];
+    expect(bankPending(rows, "2026-10")).toEqual({ out: 9500, in: 2500 });
+  });
+  it("what has no category, apart: bank movements and Apple Pay notes", () => {
+    const rows = [t("2026-10-12", -2899, "TEMU"), t("2026-10-20", -1500, "CAFE X", null, { source: "applepay" }), t("2026-10-11", 1000, "TRF CRED DE ALGUEM")];
+    const b = monthBreakdown(rows, ctx, "2026-10");
+    expect(semSaiuBySource(b, rows)).toEqual({ banco: 2899, applePay: 1500 });
   });
 });
 
@@ -148,6 +176,15 @@ describe("mesadaRows / forecastParts", () => {
     // Joana already put in more than the plan: nothing more to come from her.
     const f2 = forecastParts({ control, incomes: { missing: [] }, joana: { plan: 100000, arrived: 120000 }, mesadas: [], applePay: 0 });
     expect(f2.toCome).toEqual([]);
+  });
+  it("pending bank movements: still to leave (or come into) the booked balance", () => {
+    const control = monthControl(sem, categories, normalizePlan({}), "2026-10-21");
+    const f = forecastParts({ control, incomes: { missing: [] }, joana: null, mesadas: [], applePay: 1450, pending: { out: 8000, in: 2500 } });
+    expect(f.toCome).toEqual([{ label: "Entradas pendentes no banco", cents: 2500 }]);
+    expect(f.toGo.slice(-2)).toEqual([
+      { label: "Apple Pay ainda por descontar", cents: 1450 },
+      { label: "Pagamentos pendentes no banco", cents: 8000 },
+    ]);
   });
 });
 

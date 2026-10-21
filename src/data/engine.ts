@@ -25,7 +25,8 @@ export interface EngineData {
   consentUntil: string | null;
 }
 
-const TX_COLUMNS = "id, booking_date, amount_cents, category_id, category_source, description_raw, source, account_id, note, merchant_clean";
+// `status`: a pending bank movement is not in the booked balance yet (Este mês' forecast).
+const TX_COLUMNS = "id, booking_date, amount_cents, category_id, category_source, description_raw, source, status, account_id, note, merchant_clean";
 
 /** Every movement of the house account (paged: no row cap). */
 async function loadTxs(householdId: string): Promise<(EngineTx & { account_id: string })[]> {

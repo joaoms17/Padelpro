@@ -10,6 +10,7 @@ import { daysInMonth } from "@/lib/budget";
 import {
   applePayPending,
   bankNotes,
+  bankPending,
   comArtigo,
   forecastParts,
   incomeProgress,
@@ -17,6 +18,7 @@ import {
   monthsLabel,
   prepSteps,
   reviewCount,
+  semSaiuBySource,
   type MesadaRow,
   type ReviewCount,
   type StatusNote,
@@ -348,7 +350,10 @@ function Controlar({
     joana: month >= plan.start_month && plan.joana_cents != null ? { plan: plan.joana_cents, arrived: joanaArrived } : null,
     mesadas,
     applePay: applePayPending(data.txs, month, data.ctx.today),
+    pending: bankPending(data.txs, month),
   });
+  // Uncategorized Apple Pay notes are not in Movimentos' "Por categorizar".
+  const semSaiu = semSaiuBySource(sem, data.txs);
   const pontualDia = Math.max(0, real.dia - sem.dia);
   const over = control.diaLeft < 0;
   const paceOver = control.diaProjected > control.diaLimit;
@@ -389,11 +394,19 @@ function Controlar({
             Ao ritmo de agora, o dia a dia acaba em <Eur cents={control.diaProjected} /> (limite <Eur cents={control.diaLimit} />).
           </p>
         )}
-        {sem.semSaiu > 0 && (
+        {semSaiu.banco > 0 && (
           <p className="text-xs mt-2 text-amber-700 dark:text-amber-300">
-            <Eur cents={sem.semSaiu} /> ainda sem categoria não contam aqui.{" "}
+            <Eur cents={semSaiu.banco} /> ainda sem categoria não contam aqui.{" "}
             <Link to={`/movimentos?mes=${month}&vista=categorizar`} className="font-medium underline underline-offset-2">
               Categorizar
+            </Link>
+          </p>
+        )}
+        {semSaiu.applePay > 0 && (
+          <p className="text-xs mt-1 text-amber-700 dark:text-amber-300">
+            <Eur cents={semSaiu.applePay} /> do Apple Pay sem categoria também não contam.{" "}
+            <Link to={`/movimentos?mes=${month}&vista=todos`} className="font-medium underline underline-offset-2">
+              Ver
             </Link>
           </p>
         )}

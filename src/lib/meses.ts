@@ -3,14 +3,17 @@
 // both ends of a month, and the rows of the Comparar table. The totals
 // themselves always come from the month engine (lib/month.ts).
 import { plain } from "@shared/suggest";
-import { isDueInMonth } from "./forecast";
+import { isDueInMonth, looselyFits, maxPartFor } from "./forecast";
 import { daysLabel, formatEuros, monthName, monthShort } from "./format";
 import {
   incomeKind,
   INCOME_KEYS,
   lineLabel,
+  makeClassifier,
   type Averages,
+  type EngineCtx,
   type EngineIncome,
+  type EngineTx,
   type IncomeKey,
   type Line,
   type MonthBreakdown,
@@ -33,11 +36,56 @@ export interface ExpectedLine {
   incomes: EngineIncome[];
 }
 
-/** What was expected on each income line in a month (from the incomes set up). */
-export function expectedByLine(incomes: EngineIncome[], month: string): Map<IncomeKey, ExpectedLine> {
+/**
+ * The first month each income was seen coming in (income id → YYYY-MM): a
+ * credit with its keyword and about its amount or, without a keyword, a
+ * credit on its kind's line (a categorized rent). Never seen: not in the map.
+ */
+export function incomeFirstSeen(
+  incomes: EngineIncome[],
+  txs: Pick<EngineTx, "id" | "booking_date" | "amount_cents" | "category_id" | "category_source" | "description_raw" | "source">[],
+  ctx: Pick<EngineCtx, "categories" | "members" | "incomes">,
+): Map<string, string> {
+  const classify = makeClassifier(ctx);
+  const credits = txs
+    .filter((t) => t.amount_cents > 0 && t.source !== "applepay")
+    .sort((a, b) => a.booking_date.localeCompare(b.booking_date))
+    .map((t) => ({ t, k: classify(t) }));
+  const out = new Map<string, string>();
+  for (const i of incomes) {
+    const line = KIND_LINE[incomeKind(i)] ?? "outras";
+    const part = i.amount_cents / Math.max(1, i.parts);
+    const max = maxPartFor(i, incomes);
+    const first = credits.find(({ t, k }) =>
+      i.match_text?.trim()
+        ? looselyFits(t, i.match_text, part, max)
+        : line !== "outras" && k.area === "entrada" && k.key === line,
+    );
+    if (first) out.set(i.id, first.t.booking_date.slice(0, 7));
+  }
+  return out;
+}
+
+/**
+ * Did the income already exist in a month? Yes from the month it was set up,
+ * and before that only once it had been seen coming in: an income added now
+ * never "faltou" in the months before it.
+ */
+export function existedIn(i: Pick<EngineIncome, "id" | "created_at">, month: string, firstSeen: Map<string, string>): boolean {
+  const created = i.created_at?.slice(0, 7);
+  if (!created || month >= created) return true;
+  const seen = firstSeen.get(i.id);
+  return !!seen && seen <= month;
+}
+
+/**
+ * What was expected on each income line in a month (from the incomes set up,
+ * leaving out those that did not exist yet — see `existedIn`).
+ */
+export function expectedByLine(incomes: EngineIncome[], month: string, firstSeen: Map<string, string> = new Map()): Map<IncomeKey, ExpectedLine> {
   const out = new Map<IncomeKey, ExpectedLine>();
   for (const i of incomes) {
-    if (!isDueInMonth(i, month)) continue;
+    if (!isDueInMonth(i, month) || !existedIn(i, month, firstSeen)) continue;
     const key = KIND_LINE[incomeKind(i)] ?? "outras";
     const cur = out.get(key) ?? { key, cents: 0, day: 31, incomes: [] };
     cur.cents += i.amount_cents;
@@ -85,9 +133,9 @@ export interface MissingIncome {
  * Expected incomes that did not arrive at all (their line is empty). Never
  * added to the totals: only a warning under "O que entrou".
  */
-export function missingIncomes(entradas: Line[], incomes: EngineIncome[], month: string): MissingIncome[] {
+export function missingIncomes(entradas: Line[], incomes: EngineIncome[], month: string, firstSeen: Map<string, string> = new Map()): MissingIncome[] {
   const out: MissingIncome[] = [];
-  for (const e of expectedByLine(incomes, month).values()) {
+  for (const e of expectedByLine(incomes, month, firstSeen).values()) {
     const got = entradas.find((l) => l.key === e.key)?.cents ?? 0;
     if (got > 0) continue;
     // "Outras entradas" may be several things: name each one.
