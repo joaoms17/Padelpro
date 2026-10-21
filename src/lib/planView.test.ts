@@ -8,10 +8,14 @@ import {
   coveredMean,
   currentMonthRest,
   duetByMonth,
-  duetFrom,
+  duetHistory,
   euroNum,
+  eventsByMonth,
+  folgaRisk,
   freqText,
   incomeCredits,
+  joanaForMonth,
+  joanaRows,
   mesadaChecklist,
   monthsList,
   monthsOfHouse,
@@ -28,10 +32,9 @@ import {
   suggestionCredits,
   theName,
   withDefaults,
-  withDuetRange,
 } from "./planView";
 import { monthBreakdown, referenceAverages, type EngineCtx, type EngineTx } from "./month";
-import { normalizePlan } from "./plan";
+import { joanaHistory, normalizePlan } from "./plan";
 import { formatEuros } from "./format";
 
 const members = [
@@ -154,8 +157,12 @@ describe("steps and checks", () => {
     const plan = normalizePlan({});
     const s = stepsDone(incomes, categories, plan, ["mj", "ma"]);
     expect(s).toEqual({ entradas: true, joana: false, fixas: true, dia: false, poupanca: false, mesadas: false, ready: false });
-    const full = stepsDone(incomes, applyBudgets(categories, { sup: 40000 }), normalizePlan({ joana_cents: 0, savings_cents: 100, mesadas: { mj: 1 } }), ["mj", "ma"]);
+    // Joana: done once her Duet average is known (nothing to set).
+    const full = stepsDone(incomes, applyBudgets(categories, { sup: 40000 }), normalizePlan({ savings_cents: 100, mesadas: { mj: 1 } }), ["mj", "ma"], 210000);
     expect(full).toEqual({ entradas: true, joana: true, fixas: true, dia: true, poupanca: true, mesadas: true, ready: true });
+    // An old stored value doesn't count any more.
+    expect(stepsDone(incomes, categories, normalizePlan({ joana_cents: 100000 }), ["mj", "ma"]).joana).toBe(false);
+    expect(stepsDone(incomes, categories, plan, ["mj", "ma"], 0).joana).toBe(true);
   });
   it("the house in the plan against the reference months", () => {
     const r = realityCheck(averages, { F: 150000, V: 30000, A: 0 }, [])!;
@@ -235,18 +242,58 @@ describe("Joana and the bank", () => {
     expect(suggestionCredits(credits, [incomes[0]]).map((c) => c.key)).toEqual(["renda", "renda", "sem"]);
     expect(suggestionCredits(credits, [])).toHaveLength(5);
   });
-  it("Duet is asked from the first closed month, at most a year back", () => {
-    expect(duetFrom(["2026-08", "2026-09"], "2026-10")).toBe("2026-08");
-    expect(duetFrom(["2026-08", "2026-09", "2026-12"], "2027-01")).toBe("2026-08");
-    expect(duetFrom(["2024-01", "2024-02"], "2026-10")).toBe("2025-10");
-    expect(duetFrom([], "2026-10")).toBe("2026-10");
+  it("Joana's complete months on Duet: the last 12, from the first with money; empty months after it are 0", () => {
+    const receipts = [
+      { date: "2025-09-30", amount_cents: 99999 }, // more than 12 months back
+      { date: "2026-05-10", amount_cents: 120000 },
+      { date: "2026-05-20", amount_cents: 30000 },
+      { date: "2026-07-03", amount_cents: 200000 },
+      { date: "2026-10-04", amount_cents: 50000 }, // the current month: not complete
+    ];
+    expect(duetHistory(receipts, "2026-10")).toEqual({ "2026-05": 150000, "2026-06": 0, "2026-07": 200000, "2026-08": 0, "2026-09": 0 });
+    expect(duetHistory([{ date: "2026-10-04", amount_cents: 50000 }], "2026-10")).toEqual({});
+    expect(duetHistory([], "2026-10")).toEqual({});
+    // Feeds the engine: the average and the weakest month of those months.
+    const h = joanaHistory([], duetHistory(receipts, "2026-10"), "2026-10");
+    expect(h.count).toBe(5);
+    expect(h.average).toBe(70000);
+    expect(h.weakest).toBe(0);
   });
-  it("months before what was asked of Duet show as unknown, not 0", () => {
-    const h = { months: [{ month: "2026-08", bank: 100, duet: 0 }, { month: "2026-09", bank: 100, duet: 150 }], suggestion: 0, share: null };
-    expect(withDuetRange(h, "2026-09").months.map((m) => m.duet)).toEqual([null, 150]);
-    // Without Duet nothing changes.
-    const none = { ...h, months: h.months.map((m) => ({ ...m, duet: null })) };
-    expect(withDuetRange(none, "2026-09").months.map((m) => m.duet)).toEqual([null, null]);
+  it("the table: Duet and the account per month, unknown as null, the weakest marked once", () => {
+    const duet = { "2026-07": 150000, "2026-08": 172500, "2026-09": 150000 };
+    const h = joanaHistory([...breakdowns.values()], duet, "2026-10");
+    const rows = joanaRows(h, duet, months, "2026-07");
+    expect(rows).toEqual([
+      { month: "2026-07", duet: 150000, bank: null, weakest: true },
+      { month: "2026-08", duet: 172500, bank: 100000, weakest: false },
+      { month: "2026-09", duet: 150000, bank: 0, weakest: false },
+    ]);
+    expect(joanaRows(h, duet, months, "2026-08").map((r) => r.month)).toEqual(["2026-08", "2026-09"]);
+    // Without Duet: only what reached the account.
+    const none = joanaHistory([...breakdowns.values()], null, "2026-10");
+    expect(joanaRows(none, null, months, "2026-01")).toEqual([
+      { month: "2026-08", duet: null, bank: 100000, weakest: false },
+      { month: "2026-09", duet: null, bank: 0, weakest: false },
+    ]);
+  });
+  it("the coming months: what is booked on Duet, or the average if that is more", () => {
+    const booked = eventsByMonth([
+      { date: "2026-11-07", value_cents: 90000 },
+      { date: "2026-11-21", value_cents: 180000 },
+      { date: "2026-12-05", value_cents: 50000 },
+      { date: "2026-12-06", value_cents: 0 },
+    ]);
+    expect(booked).toEqual({ "2026-11": 270000, "2026-12": 50000 });
+    const f = joanaForMonth(booked, 210000);
+    expect(f("2026-11")).toBe(270000);
+    expect(f("2026-12")).toBe(210000);
+    expect(f("2027-01")).toBe(210000);
+    expect(joanaForMonth({}, 0)("2026-11")).toBe(0);
+  });
+  it("the risk lines: folga, or what the savings cover", () => {
+    expect(folgaRisk(12000)).toBe(`folga +${formatEuros(12000)}`);
+    expect(folgaRisk(0)).toBe(`folga +${formatEuros(0)}`);
+    expect(folgaRisk(-8000)).toBe(`faltam ${formatEuros(8000)} (cobertos pela poupança)`);
   });
 });
 
@@ -296,6 +343,21 @@ describe("the projection's first month: the rest of this one", () => {
     expect(r.sobra).toBe(195157 - 116500);
     expect(r.saldoFim).toBe(400000 + 195157 - 116500);
     expect(r.baixo).toBe(false);
+  });
+
+  it("from November: what Joana received on Duet and is not in the account yet is still to come", () => {
+    const nov = [...txs, t("2026-11-10", 100000, "TRF CRED SEPA+ DE JOANA CARNEIRO MORAES")];
+    const realNov = monthBreakdown(nov, { ...ctx, today: "2026-11-20" }, "2026-11");
+    const semNov = monthBreakdown(nov, { ...ctx, today: "2026-11-20" }, "2026-11", { semPontuais: true });
+    const r = (over: Partial<Parameters<typeof currentMonthRest>[0]>) =>
+      rest({ real: realNov, sem: semNov, txs: nov, today: "2026-11-20", ...over }).toCome.find((l) => l.label.startsWith("Joana"));
+    expect(r({ joanaDuet: 250000 })).toEqual({ label: "Joana (da Duet, por chegar)", cents: 150000 });
+    expect(r({ joanaDuet: 250000, joanaWaived: 150000 })).toBeUndefined();
+    expect(r({ joanaDuet: 100000 })).toBeUndefined();
+    // Without Duet: nothing assumed.
+    expect(r({ joanaDuet: null })).toBeUndefined();
+    // Before November, never (it is not a debt).
+    expect(rest({ joanaDuet: 500000 }).toCome.find((l) => l.label.startsWith("Joana"))).toBeUndefined();
   });
 
   it("a month's own mesada (pinned) counts, and a low end is flagged", () => {

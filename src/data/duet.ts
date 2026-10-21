@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import { invokeFn } from "@/lib/invoke";
 import { errorMessage } from "@/lib/errors";
+import { daysInMonth } from "@/lib/budget";
 import type { DuetEvent, DuetReceipt } from "@shared/duet";
 
 export type { DuetEvent, DuetReceipt };
@@ -35,4 +37,36 @@ export async function loadDuetReceipts(from: string, to: string): Promise<DuetRe
   } catch (e) {
     return { configured: false, receipts: [], error: errorMessage(e) };
   }
+}
+
+/** "2026-11" → "2026-11-30". */
+export const lastDayOf = (month: string) => `${month}-${String(daysInMonth(month)).padStart(2, "0")}`;
+
+/** What Joana marked as received on Duet in one month. */
+export interface DuetMonth {
+  /** False while Duet is not set up (or could not be reached: see `error`). */
+  configured: boolean;
+  /** The month's total received. */
+  cents: number;
+  /** How many receipts. */
+  count: number;
+  error?: string;
+}
+
+/** A month's Duet receipts, summed (null while loading; never throws). */
+export function useDuetMonth(month: string): DuetMonth | null {
+  const [res, setRes] = useState<{ month: string; value: DuetMonth } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void loadDuetReceipts(`${month}-01`, lastDayOf(month)).then((r) => {
+      if (!alive) return;
+      const cents = r.receipts.reduce((a, x) => a + x.amount_cents, 0);
+      setRes({ month, value: { configured: r.configured, cents, count: r.receipts.length, error: r.error } });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [month]);
+  // A month just switched to shows "loading", never the one before.
+  return res && res.month === month ? res.value : null;
 }

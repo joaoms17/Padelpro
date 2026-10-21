@@ -73,7 +73,7 @@ const budgetSum = (categories: BudgetCategory[], grp: string, skip: string[] = [
 export interface PlanTotals {
   /** Incomes set up (monthly value). */
   R: number;
-  /** Joana per month. */
+  /** Joana per month: her average on Duet (she puts in everything she receives). */
   J: number;
   /** Contas fixas (their expected values). */
   F: number;
@@ -96,14 +96,20 @@ export interface PlanTotals {
   folgaSemJoana: number;
 }
 
+/**
+ * The plan's month. Joana puts in the account everything she receives on
+ * Duet, so her part is not a value to set: `joanaCents` is her monthly
+ * average there (see joanaHistory), 0 when unknown.
+ */
 export function planTotals(
   incomes: EngineIncome[],
   categories: BudgetCategory[],
   plan: PlanSettings,
   memberIds: string[],
+  joanaCents = 0,
 ): PlanTotals {
   const R = incomes.filter((i) => i.active).reduce((a, i) => a + monthlyEq(i), 0);
-  const J = Math.max(0, plan.joana_cents ?? 0);
+  const J = Math.max(0, Math.round(joanaCents));
   const F = budgetSum(categories, "fixa");
   const V = budgetSum(categories, "variavel", plan.mesada_covers);
   const C = budgetSum(categories, "variavel") - V;
@@ -120,29 +126,40 @@ export function planTotals(
 export const seedBudget = (meanCents: number) => Math.max(0, Math.ceil(meanCents / 1000) * 1000);
 
 export interface JoanaHistory {
+  /** Each ended month: what she received on Duet and what reached the account. */
   months: { month: string; bank: number; duet: number | null }[];
-  /** A prudent monthly value: her weakest month so far, down to 50 €. */
-  suggestion: number | null;
-  /** Share of what she got on Duet that reached the account. */
-  share: number | null;
+  /** Her monthly average on Duet over the complete months (what the plan counts on). */
+  average: number | null;
+  /** Her weakest complete month on Duet. */
+  weakest: number | null;
+  /** How many months the average comes from. */
+  count: number;
 }
 
 /**
- * Joana, month by month: what reached the account and what Duet says she was
- * paid. The prudent value is the weakest month that reached the account.
+ * Joana, month by month. She puts in the account everything she receives on
+ * Duet, so her part of the plan is her Duet average over the complete months
+ * known (`duetByMonth`, e.g. the last 12), and the risk is her weakest month.
+ * Breakdowns give what reached the account in the months with bank data.
  */
-export function joanaHistory(breakdowns: MonthBreakdown[], duetByMonth: Record<string, number> | null): JoanaHistory {
+export function joanaHistory(
+  breakdowns: MonthBreakdown[],
+  duetByMonth: Record<string, number> | null,
+  currentMonth: string,
+): JoanaHistory {
   const ended = breakdowns.filter((b) => b.status === "provisorio" || b.status === "completo");
-  const months = ended.map((b) => ({
-    month: b.month,
-    bank: b.entradas.find((l) => l.key === "joana")?.cents ?? 0,
-    duet: duetByMonth ? (duetByMonth[b.month] ?? 0) : null,
+  const bankOf = new Map(ended.map((b) => [b.month, b.entradas.find((l) => l.key === "joana")?.cents ?? 0]));
+  const duetMonths = Object.keys(duetByMonth ?? {}).filter((m) => m < currentMonth);
+  const monthsSet = new Set([...ended.map((b) => b.month), ...duetMonths]);
+  const months = [...monthsSet].sort().map((month) => ({
+    month,
+    bank: bankOf.get(month) ?? 0,
+    duet: duetByMonth ? (duetByMonth[month] ?? 0) : null,
   }));
-  const withMoney = months.filter((m) => m.bank > 0);
-  const suggestion = withMoney.length ? Math.floor(Math.min(...withMoney.map((m) => m.bank)) / 5000) * 5000 : null;
-  const both = months.filter((m) => m.bank > 0 && (m.duet ?? 0) > 0);
-  const share = both.length ? both.reduce((a, m) => a + m.bank, 0) / both.reduce((a, m) => a + (m.duet ?? 0), 0) : null;
-  return { months, suggestion, share };
+  const values = duetMonths.map((m) => duetByMonth![m] ?? 0);
+  const average = values.length ? Math.round(values.reduce((a, x) => a + x, 0) / values.length) : null;
+  const weakest = values.length ? Math.min(...values) : null;
+  return { months, average, weakest, count: values.length };
 }
 
 /** A person's mesada in a month under the plan (transition before the start). */
@@ -175,6 +192,8 @@ export function projection(
   totals: Pick<PlanTotals, "J" | "F" | "V" | "A"> & Partial<Pick<PlanTotals, "C">>,
   plan: PlanSettings,
   memberIds: string[],
+  /** Joana in a month (e.g. what is already booked on Duet, or her average); default the average J. */
+  joanaFor?: (month: string) => number,
 ): ProjectionMonth[] {
   const out: ProjectionMonth[] = [];
   let saldo = startBalance;
@@ -182,7 +201,7 @@ export function projection(
     const month = addMonth(fromMonth, i);
     const entra =
       incomes.filter((x) => isDueInMonth(x, month)).reduce((a, x) => a + x.amount_cents, 0) +
-      (month >= JOANA_FROM ? totals.J : 0);
+      (month >= JOANA_FROM ? Math.max(0, joanaFor ? joanaFor(month) : totals.J) : 0);
     const mesadas = memberIds.reduce((a, id) => a + planMesada(plan, id, month), 0);
     const casa = totals.F + totals.V + totals.A + (month < plan.start_month ? Math.max(0, totals.C ?? 0) : 0);
     const sai = casa + mesadas;
@@ -209,8 +228,9 @@ export interface ModelMonth {
 /**
  * A month redone with the plan: João's normal incomes (the salary without
  * prémio; representação and renda at their monthly value even when paid in
- * batches), Joana's real transfers (her plan value from the start), the real
- * house costs, and the plan's mesadas instead of what each one took.
+ * batches), everything Joana received on Duet (her real transfers when Duet
+ * is unknown), the real house costs, and the plan's mesadas instead of what
+ * each one took.
  * `b` is the month's breakdown sem pontuais.
  */
 export function modelMonth(
@@ -218,6 +238,8 @@ export function modelMonth(
   incomes: EngineIncome[],
   plan: PlanSettings,
   members: Pick<Member, "id" | "display_name">[],
+  /** What Joana received on Duet that month (she puts it all in); null = unknown, use what reached the account. */
+  joanaDuet: number | null = null,
 ): ModelMonth {
   const line = (k: string) => b.entradas.find((l) => l.key === k)?.cents ?? 0;
   // Every income at its monthly value (2 400 € every 2 months = 1 200 € a month).
@@ -231,7 +253,8 @@ export function modelMonth(
     ordenado: expected("salario", line("ordenado")),
     representacao: expected("representacao", line("representacao")),
     renda: expected("renda", line("renda")),
-    joana: b.month >= plan.start_month ? Math.max(0, plan.joana_cents ?? 0) : line("joana"),
+    // With the model Joana puts in everything she receives on Duet.
+    joana: joanaDuet != null ? Math.max(0, joanaDuet) : line("joana"),
     outras: line("outras") + line("sem"),
   };
   const entrou = Object.values(entradas).reduce((a, x) => a + x, 0);

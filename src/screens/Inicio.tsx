@@ -2,10 +2,13 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useHousehold } from "@/data/household";
 import { useEngineData, type EngineData } from "@/data/engine";
+import { useDuetMonth, type DuetMonth } from "@/data/duet";
+import { useJoanaWaivers } from "@/data/incomes";
 import { buildMonthsView, type MonthsView } from "@/lib/view";
 import { avisos, modelMonth, monthControl, planTotals, type Aviso, type CategoryControl, type MonthControl } from "@/lib/plan";
 import { JOANA_FROM, type MonthBreakdown } from "@/lib/month";
 import { mesadaFor } from "@/lib/mesadas";
+import { joanaGap } from "@/lib/meses";
 import { daysInMonth } from "@/lib/budget";
 import {
   applePayPending,
@@ -57,6 +60,9 @@ function EsteMes({ data, view, error }: { data: EngineData; view: MonthsView; er
   const control = monthControl(sem, data.allCategories, data.plan, data.ctx.today);
   const controlar = control.diaLimit > 0;
   const lastClosed = view.lastClosed ? (view.real.get(view.lastClosed) ?? null) : null;
+  // Joana puts in everything she receives on Duet: what she got this month.
+  const duet = useDuetMonth(month);
+  const { waivers } = useJoanaWaivers(data.householdId);
 
   return (
     <div className="space-y-6">
@@ -66,9 +72,9 @@ function EsteMes({ data, view, error }: { data: EngineData; view: MonthsView; er
       </div>
       {error && <p className="text-sm text-terracota dark:text-orange-300">Não consegui atualizar: {error}</p>}
       {controlar ? (
-        <Controlar data={data} real={real} sem={sem} control={control} lastClosed={lastClosed} />
+        <Controlar data={data} real={real} sem={sem} control={control} lastClosed={lastClosed} duet={duet} waived={waivers?.[month] ?? 0} />
       ) : (
-        <Preparar data={data} view={view} real={real} sem={sem} control={control} lastClosed={lastClosed} />
+        <Preparar data={data} view={view} real={real} sem={sem} control={control} lastClosed={lastClosed} duet={duet} />
       )}
     </div>
   );
@@ -142,6 +148,7 @@ function Preparar({
   sem,
   control,
   lastClosed,
+  duet,
 }: {
   data: EngineData;
   view: MonthsView;
@@ -149,6 +156,7 @@ function Preparar({
   sem: MonthBreakdown;
   control: MonthControl;
   lastClosed: MonthBreakdown | null;
+  duet: DuetMonth | null;
 }) {
   const plan = data.plan;
   const month = real.month;
@@ -163,7 +171,8 @@ function Preparar({
     members: data.members,
   });
   const done = steps.filter((s) => s.done).length;
-  const model = modelMonth(sem, data.incomes, plan, data.members);
+  // With the model Joana puts in everything she received on Duet.
+  const model = modelMonth(sem, data.incomes, plan, data.members, duet?.configured ? duet.cents : null);
   const hasMesadas = Object.keys(plan.mesadas).length > 0;
   const top = real.categorias.filter((c) => c.area === "dia" && c.cents > 0).slice(0, 5);
   const avg = view.averages;
@@ -319,12 +328,17 @@ function Controlar({
   sem,
   control,
   lastClosed,
+  duet,
+  waived,
 }: {
   data: EngineData;
   real: MonthBreakdown;
   sem: MonthBreakdown;
   control: MonthControl;
   lastClosed: MonthBreakdown | null;
+  duet: DuetMonth | null;
+  /** The part of Joana's difference this month marked as not owed. */
+  waived: number;
 }) {
   const plan = data.plan;
   const month = control.month;
@@ -337,6 +351,9 @@ function Controlar({
   };
   const incomes = incomeProgress(data.incomes, real);
   const joanaArrived = real.entradas.find((l) => l.key === "joana")?.cents ?? 0;
+  // From November all she received on Duet is to reach the account.
+  const joanaDuet = month >= JOANA_FROM && duet?.configured ? duet.cents : null;
+  const joana = joanaDuet != null ? joanaGap(joanaDuet, joanaArrived, waived) : null;
   const mesadas = mesadaRows(data.members, sem, real, mesadaOf);
   const list = avisos(
     control,
@@ -347,7 +364,7 @@ function Controlar({
   const forecast = forecastParts({
     control,
     incomes,
-    joana: month >= plan.start_month && plan.joana_cents != null ? { plan: plan.joana_cents, arrived: joanaArrived } : null,
+    joana: joanaDuet != null ? { duet: joanaDuet, arrived: joanaArrived, waived } : null,
     mesadas,
     applePay: applePayPending(data.txs, month, data.ctx.today),
     pending: bankPending(data.txs, month),
@@ -475,17 +492,27 @@ function Controlar({
               </Link>
             </p>
           )}
-          {month >= JOANA_FROM && (
-            <p>
-              Joana: <Eur cents={joanaArrived} /> na conta este mês
-              {plan.joana_cents != null && (
-                <span className={muted}>
-                  {" "}
-                  (plano <Eur cents={plan.joana_cents} />)
-                </span>
-              )}
-            </p>
-          )}
+          {month >= JOANA_FROM &&
+            (joanaDuet != null && joana ? (
+              <p>
+                Joana: <Eur cents={joanaDuet} /> na Duet este mês · chegou <Eur cents={joanaArrived} />
+                {joana.missing > 0 ? (
+                  <span className={NEG}>
+                    {" "}
+                    · faltam <Eur cents={joana.missing} />
+                  </span>
+                ) : joana.waived > 0 ? (
+                  <span className={faint}> · o resto não é dívida</span>
+                ) : (
+                  joanaDuet > 0 && <span className={POS}> ✓</span>
+                )}
+              </p>
+            ) : (
+              <p>
+                Joana: <Eur cents={joanaArrived} /> na conta este mês
+                <span className={faint}>{duet === null ? " · a ver a Duet…" : " · sem dados da Duet"}</span>
+              </p>
+            ))}
           {real.entrou !== expectedIn && (
             <p className={`text-xs ${faint}`}>
               Ao todo entrou <Eur cents={real.entrou} /> este mês.

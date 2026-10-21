@@ -9,6 +9,7 @@ import { mesadaFor } from "./mesadas";
 import type { MesadaMonth } from "@shared/engine/mesadas.ts";
 import {
   incomeKind,
+  JOANA_FROM,
   makeClassifier,
   type Averages,
   type EngineCtx,
@@ -159,11 +160,13 @@ export interface StepsDone {
   ready: boolean;
 }
 
+/** `joanaAverage`: Joana's monthly average on Duet (null while unknown). */
 export function stepsDone(
   incomes: Pick<EngineIncome, "active">[],
   categories: Pick<Category, "grp" | "budget_cents" | "archived">[],
   plan: PlanSettings,
   memberIds: string[],
+  joanaAverage: number | null = null,
 ): StepsDone {
   const has = (grp: string) => categories.some((c) => c.grp === grp && !c.archived && (c.budget_cents ?? 0) > 0);
   const entradas = incomes.some((i) => i.active);
@@ -171,7 +174,7 @@ export function stepsDone(
   const dia = has("variavel");
   return {
     entradas,
-    joana: plan.joana_cents != null,
+    joana: joanaAverage != null,
     fixas,
     dia,
     poupanca: plan.savings_cents > 0,
@@ -209,16 +212,64 @@ export function duetByMonth(receipts: { date: string; amount_cents: number }[]):
   return out;
 }
 
-/** The first month to ask Duet for: the first closed month, but at most a year back. */
-export function duetFrom(closed: string[], current: string, maxMonths = 12): string {
-  const floor = addMonth(current, -maxMonths);
-  const first = closed[0] ?? current;
-  return first > floor ? first : floor;
+/**
+ * Joana's complete months on Duet for the plan: the last `maxMonths` before
+ * `current`, from the first one with money received (before it she was not
+ * using Duet yet); after it a month with nothing received counts as 0.
+ */
+export function duetHistory(receipts: { date: string; amount_cents: number }[], current: string, maxMonths = 12): Record<string, number> {
+  const by = duetByMonth(receipts);
+  const from = addMonth(current, -maxMonths);
+  const known = Object.keys(by)
+    .filter((m) => m >= from && m < current && by[m] > 0)
+    .sort();
+  const out: Record<string, number> = {};
+  if (known.length === 0) return out;
+  for (let m = known[0]; m < current; m = addMonth(m, 1)) out[m] = by[m] ?? 0;
+  return out;
 }
 
-/** Months before what was asked of Duet are unknown there (null), not 0. */
-export function withDuetRange(h: JoanaHistory, from: string): JoanaHistory {
-  return { ...h, months: h.months.map((m) => (m.duet != null && m.month < from ? { ...m, duet: null } : m)) };
+export interface JoanaRow {
+  month: string;
+  /** Received on Duet (null: unknown there). */
+  duet: number | null;
+  /** Reached the account (null: no bank data that month). */
+  bank: number | null;
+  /** Her weakest month (the first one, when tied). */
+  weakest: boolean;
+}
+
+/** Plano's table: each month from `from` on, what Duet has and what reached the account. */
+export function joanaRows(h: JoanaHistory, duet: Record<string, number> | null, bankMonths: string[], from: string): JoanaRow[] {
+  let marked = false;
+  return h.months
+    .filter((m) => m.month >= from)
+    .map((m) => {
+      const d = duet && m.month in duet ? duet[m.month] : null;
+      const weakest = !marked && d != null && h.count > 1 && d === h.weakest;
+      if (weakest) marked = true;
+      return { month: m.month, duet: d, bank: bankMonths.includes(m.month) ? m.bank : null, weakest };
+    });
+}
+
+/** What is already booked on Duet per month: the sum of the events' values. */
+export function eventsByMonth(events: { date: string; value_cents: number }[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const e of events) {
+    const m = e.date.slice(0, 7);
+    out[m] = (out[m] ?? 0) + Math.max(0, e.value_cents);
+  }
+  return out;
+}
+
+/** Joana in a coming month: what is already booked on Duet, or her average if that is more. */
+export function joanaForMonth(booked: Record<string, number>, average: number): (month: string) => number {
+  return (month) => Math.max(booked[month] ?? 0, Math.max(0, average));
+}
+
+/** "folga +120 €" / "faltam 80 € (cobertos pela poupança)". */
+export function folgaRisk(cents: number): string {
+  return cents >= 0 ? `folga +${formatEuros(cents)}` : `faltam ${formatEuros(-cents)} (cobertos pela poupança)`;
 }
 
 export type IncomeCredit = Credit & { key: IncomeKey };
@@ -335,7 +386,7 @@ export interface MonthRest extends ProjectionMonth {
 /**
  * The rest of the current month as Este mês forecasts it ("Previsão a 31"):
  * the balance today, plus what is still to come in (incomes not arrived yet,
- * Joana's part), minus what is still to go out (contas fixas por pagar,
+ * Joana's Duet money not in the account yet), minus what is still to go out (contas fixas por pagar,
  * mesadas por sair, the dia a dia to the end, Apple Pay not taken yet). The
  * next months of the projection start from where this one ends.
  */
@@ -353,6 +404,9 @@ export function currentMonthRest(input: {
   today: string;
   /** One month of house costs (F + V + A): ending below it is low. */
   casa: number;
+  /** What Joana received on Duet this month (null: unknown) and the part marked as not owed. */
+  joanaDuet?: number | null;
+  joanaWaived?: number;
 }): MonthRest {
   const month = input.sem.month;
   const control = monthControl(input.sem, input.categories, input.plan, input.today);
@@ -365,8 +419,11 @@ export function currentMonthRest(input: {
   const { toCome, toGo } = forecastParts({
     control,
     incomes,
+    // From November Joana puts in everything she received on Duet.
     joana:
-      month >= input.plan.start_month && input.plan.joana_cents != null ? { plan: input.plan.joana_cents, arrived: joanaArrived } : null,
+      month >= JOANA_FROM && input.joanaDuet != null
+        ? { duet: input.joanaDuet, arrived: joanaArrived, waived: input.joanaWaived ?? 0 }
+        : null,
     mesadas: mesadaRows(input.members, input.sem, input.real, mesadaOf),
     applePay: applePayPending(input.txs, month, input.today),
   });

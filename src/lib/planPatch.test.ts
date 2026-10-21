@@ -16,9 +16,9 @@ describe("plan patches", () => {
     expect(isEmptyPatch(planDiff(a, a))).toBe(true);
     expect(planDiff(a, { ...a, savings_cents: 25000 })).toEqual({ savings_cents: 25000 });
     expect(planDiff(a, { ...a, mesadas: { ...a.mesadas, mj: 70000 } })).toEqual({ mesadas: { mj: 70000 } });
-    expect(planDiff(a, { ...a, joana_cents: 100000, mesada_covers: ["c12"] })).toEqual({ joana_cents: 100000, mesada_covers: ["c12"] });
+    expect(planDiff(a, { ...a, extras_rule: "poupanca", mesada_covers: ["c12"] })).toEqual({ extras_rule: "poupanca", mesada_covers: ["c12"] });
     // Clearing a value is a change too.
-    expect(planDiff({ ...a, joana_cents: 100000 }, a)).toEqual({ joana_cents: null });
+    expect(planDiff({ ...a, mesada_covers: ["c12"] }, a)).toEqual({ mesada_covers: [] });
   });
 
   it("patches in a row: the later one wins, people add up", () => {
@@ -28,11 +28,11 @@ describe("plan patches", () => {
   });
 
   it("a patch on top of a plan leaves the rest as it was", () => {
-    const p = normalizePlan({ mesadas: { mj: 60000, ma: 60000 }, joana_cents: 100000, mesada_covers: ["c12"] });
+    const p = normalizePlan({ mesadas: { mj: 60000, ma: 60000 }, extras_rule: "decidir", mesada_covers: ["c12"] });
     const out = applyPatch(p, { mesadas: { mj: 70000 }, savings_cents: 5000 });
     expect(out.mesadas).toEqual({ mj: 70000, ma: 60000 });
     expect(out.savings_cents).toBe(5000);
-    expect(out.joana_cents).toBe(100000);
+    expect(out.extras_rule).toBe("decidir");
     expect(out.mesada_covers).toEqual(["c12"]);
     expect(p.mesadas.mj).toBe(60000); // untouched
   });
@@ -40,12 +40,12 @@ describe("plan patches", () => {
   it("two phones: João's change is written on top of what Joana saved meanwhile", () => {
     // Both opened the plan at 10:00.
     const loaded = withDefaults(normalizePlan({ mesadas: { mj: 60000, ma: 60000 } }), members);
-    // 10:05 Joana saves her value; the server now has it.
-    const server = applyPatch(loaded, { joana_cents: 100000 });
+    // 10:05 Joana changes where the extras go; the server now has it.
+    const server = applyPatch(loaded, { extras_rule: "poupanca" });
     // 10:07 João changes the poupança on his (stale) screen.
     const joao = { ...loaded, savings_cents: 30000 };
     const saved = applyPatch(server, planDiff(loaded, joao));
-    expect(saved.joana_cents).toBe(100000);
+    expect(saved.extras_rule).toBe("poupanca");
     expect(saved.savings_cents).toBe(30000);
   });
 

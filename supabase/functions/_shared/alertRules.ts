@@ -41,6 +41,10 @@ export interface AlertData {
   plan: PlanSettings;
   members: Pick<Member, "id" | "display_name" | "mesada_cents">[];
   mesadaMonths: MesadaMonth[];
+  /** What Joana received on Duet this month (null: Duet not set up or unreadable). */
+  joanaDuet?: number | null;
+  /** Part of this month's difference marked "não é dívida" in the app. */
+  joanaWaived?: number;
 }
 
 /** Whole euros, as the app shows them ("1250", "12 500"). */
@@ -166,17 +170,18 @@ export function monthAlerts(d: AlertData): Alert[] {
     }
   }
 
-  // Joana: what she agreed to put in the account (J), in the last 3 days.
-  const J = Math.max(0, d.plan.joana_cents ?? 0);
-  if (J > 0 && day >= dim - 2) {
-    const gap = J - (b.entradas.find((l) => l.key === "joana")?.cents ?? 0);
+  // Joana puts in the account everything she receives on Duet: in the last
+  // 3 days of the month, what is still to arrive.
+  if (d.joanaDuet != null && day >= dim - 2) {
+    const arrived = b.entradas.find((l) => l.key === "joana")?.cents ?? 0;
+    const gap = d.joanaDuet - arrived - Math.max(0, d.joanaWaived ?? 0);
     if (gap >= 100) {
       out.push({
         key: "joana",
         level: "info",
         pref: "joana",
         title: "Joana",
-        body: `Faltam ${eur(gap)} € da Duet chegarem ao Santander (combinado ${eur(J)} €).`,
+        body: `Faltam ${eur(gap)} € da Duet chegarem à conta (recebido na Duet este mês: ${eur(d.joanaDuet)} €).`,
         url: "/",
       });
     }
