@@ -755,6 +755,9 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
           {joana.average != null && (
             <p className={`text-xs ${muted}`}>Meses acima da média reforçam a poupança; meses abaixo são cobertos por ela.</p>
           )}
+          <Link to="/meses/joana" className="block text-sm font-medium text-petroleo dark:text-teal-300 active:opacity-60">
+            Ver o histórico completo →
+          </Link>
         </div>
       </Step>
 

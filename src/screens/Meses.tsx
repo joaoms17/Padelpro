@@ -4,6 +4,7 @@ import { PageHeader } from "@/components/ui";
 import { Chip, Loading, Segmented } from "@/components/kit";
 import { MonthReport, type ReportMode } from "@/components/MonthReport";
 import { MonthCompare } from "@/components/MonthCompare";
+import { JoanaHistory } from "@/components/JoanaHistory";
 import { useHousehold } from "@/data/household";
 import { useEngineData } from "@/data/engine";
 import { buildMonthsView } from "@/lib/view";
@@ -21,6 +22,8 @@ export function Meses() {
   const chipsRef = useRef<HTMLDivElement>(null);
 
   const comparar = mes === "comparar";
+  const joana = mes === "joana";
+  const special = comparar || joana;
   const month = view ? (mes && view.months.includes(mes) ? mes : (view.lastClosed ?? view.current)) : null;
 
   // Keep the chosen chip in sight when the row scrolls (many months).
@@ -28,7 +31,7 @@ export function Meses() {
     const row = chipsRef.current;
     const active = row?.querySelector<HTMLElement>("[data-active='true']");
     if (row && active) row.scrollLeft = Math.max(0, active.offsetLeft - row.clientWidth / 2 + active.clientWidth / 2);
-  }, [month, comparar, view]);
+  }, [month, mes, view]);
 
   const header = (
     <div className="pr-12">
@@ -55,8 +58,8 @@ export function Meses() {
 
       <div ref={chipsRef} className="flex gap-2 overflow-x-auto pb-1 min-w-0">
         {chips.map((c) => (
-          <span key={c.month} data-active={!comparar && c.month === month} className="shrink-0">
-            <Chip active={!comparar && c.month === month} onClick={() => navigate(`/meses/${c.month}`)}>
+          <span key={c.month} data-active={!special && c.month === month} className="shrink-0">
+            <Chip active={!special && c.month === month} onClick={() => navigate(`/meses/${c.month}`)}>
               {c.label}
             </Chip>
           </span>
@@ -66,12 +69,19 @@ export function Meses() {
             Comparar
           </Chip>
         </span>
+        <span data-active={joana} className="shrink-0">
+          <Chip active={joana} onClick={() => navigate("/meses/joana")}>
+            Joana
+          </Chip>
+        </span>
       </div>
 
       {error && <p className="text-sm text-terracota">Não consegui atualizar: {error}</p>}
 
       {comparar ? (
         <MonthCompare view={view} members={data.members} />
+      ) : joana ? (
+        <JoanaHistory data={data} view={view} />
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-2">

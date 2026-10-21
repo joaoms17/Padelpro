@@ -257,13 +257,15 @@ function categoryRows(sem: MonthBreakdown[], averages: Averages, area: "fixa" | 
 /**
  * The Comparar table: each month sem pontuais (`sem`) side by side with the
  * reference averages, plus the pontuais of each month from the real
- * breakdowns (`real`, same order).
+ * breakdowns (`real`, same order). With `duet`, a row of what Joana received
+ * on Duet each month (not part of "Entrou"), averaged as the plan does.
  */
 export function compareRows(
   sem: MonthBreakdown[],
   real: MonthBreakdown[],
   averages: Averages,
   members: { id: string; display_name: string }[],
+  duet?: { byMonth: Record<string, number>; average: number | null } | null,
 ): CompareRow[] {
   const rows: CompareRow[] = [
     { key: "entrou", label: "Entrou", values: sem.map((b) => b.entrou), avg: INCOME_KEYS.reduce((a, k) => a + averages.entradas[k], 0), kind: "total" },
@@ -272,6 +274,9 @@ export function compareRows(
     { key: "renda", label: "Renda", values: sem.map((b) => lineCents(b, "renda")), avg: averages.entradas.renda, kind: "sub" },
     { key: "joana", label: "Joana", values: sem.map((b) => lineCents(b, "joana")), avg: averages.entradas.joana, kind: "sub" },
   ];
+  if (duet) {
+    rows.push({ key: "joana-duet", label: "Joana na Duet", values: sem.map((b) => duet.byMonth[b.month] ?? 0), avg: duet.average, kind: "sub" });
+  }
   const outras = sem.map((b) => lineCents(b, "outras") + lineCents(b, "sem") + lineCents(b, "extra"));
   if (outras.some((x) => x !== 0)) {
     rows.push({ key: "outras", label: "Outras entradas", values: outras, avg: averages.entradas.outras + averages.entradas.sem + averages.entradas.extra, kind: "sub" });

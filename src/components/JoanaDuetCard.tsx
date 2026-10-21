@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import type { DuetMonth } from "@/data/duet";
 import { saveJoanaWaiver, useJoanaWaivers } from "@/data/incomes";
 import { errorMessage } from "@/lib/errors";
@@ -95,6 +96,9 @@ export function JoanaDuetCard({
         </div>
       )}
       {error && <p className="text-xs text-terracota dark:text-orange-300">Não consegui guardar: {error}</p>}
+      <Link to="/meses/joana" className="block text-xs font-medium text-petroleo dark:text-teal-300 active:opacity-60">
+        Histórico da Joana na Duet →
+      </Link>
     </div>
   );
 }
