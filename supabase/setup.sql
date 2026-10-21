@@ -970,7 +970,8 @@ create unique index if not exists categories_system_role_one
   on categories (household_id, system_role)
   where system_role in ('salario', 'representacao', 'renda', 'eventos') and not archived;
 
-alter table expected_incomes add column if not exists kind text not null default 'outra';
+-- Unset (null) = guessed from the name by the app.
+alter table expected_incomes add column if not exists kind text;
 do $$
 begin
   if not exists (select 1 from pg_constraint where conname = 'expected_incomes_kind_check') then
@@ -989,12 +990,11 @@ begin
   if not exists (select 1 from app_patches where id = '0015_income_kind') then
     update expected_incomes
     set kind = case
-      when label ~* '(ordenado|sal[áa]rio)' then 'salario'
+      when label ~* '(ordenado|sal[áa]rio|vencimento)' then 'salario'
       when label ~* '(despesa|represent)' then 'representacao'
       when label ~* 'renda' then 'renda'
-      else 'outra'
     end
-    where kind = 'outra';
+    where kind is null;
     insert into app_patches (id) values ('0015_income_kind');
   end if;
 end
@@ -1083,6 +1083,18 @@ begin
         end if;
       end if;
 
+      -- Moved to another group by the couple: bring it back instead of
+      -- creating a second one with the same name.
+      if v_target is null then
+        select c.id into v_target from categories c
+        where c.household_id = h.id and not c.archived and c.system_role is null
+          and lower(trim(c.name)) in (select lower(x) from unnest(s.sources || s.target) as x)
+        order by (lower(trim(c.name)) = lower(s.target)) desc, c.sort, c.id limit 1;
+        if v_target is not null then
+          update categories set name = s.target, grp = s.grp where id = v_target;
+        end if;
+      end if;
+
       if v_target is null then
         insert into categories (household_id, grp, name, sort, system_role)
         values (h.id, s.grp, s.target, s.sort, s.role)
@@ -1095,12 +1107,14 @@ begin
       where id = v_target;
 
       -- The other old ones join it (their movements, rules and budget too).
+      -- Any group: one moved elsewhere joins too; so does a second category
+      -- with the target's own name.
       for v_src in
         select c.id
         from categories c
-        where c.household_id = h.id and c.grp = s.grp and not c.archived
+        where c.household_id = h.id and not c.archived
           and c.id <> v_target and c.system_role is null
-          and lower(trim(c.name)) in (select lower(x) from unnest(s.sources) as x)
+          and lower(trim(c.name)) in (select lower(x) from unnest(s.sources || s.target) as x)
       loop
         perform merge_category(v_src, v_target);
       end loop;

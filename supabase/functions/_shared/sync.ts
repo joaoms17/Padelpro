@@ -204,12 +204,15 @@ async function reconcilePending(
 async function mergeInto(svc: SupabaseClient, householdId: string, fromId: string, intoId: string): Promise<void> {
   const [{ data: from }, { data: into }] = await Promise.all([
     svc.from("transactions").select("category_id, category_source, confidence, note").eq("id", fromId).maybeSingle(),
-    svc.from("transactions").select("category_id, note").eq("id", intoId).maybeSingle(),
+    svc.from("transactions").select("category_id, category_source, note").eq("id", intoId).maybeSingle(),
   ]);
   if (!from || !into) return;
 
+  // The pending row's category wins when someone chose it and the booked one
+  // only has an automatic guess (filed by the sync in between).
+  const chosen = (s: string | null) => s === "manual" || s === "rule" || s === "mesada" || s === "applepay";
   const patch: Record<string, unknown> = {};
-  if (from.category_id && !into.category_id) {
+  if (from.category_id && (!into.category_id || (chosen(from.category_source) && !chosen(into.category_source)))) {
     Object.assign(patch, {
       category_id: from.category_id,
       category_source: from.category_source,

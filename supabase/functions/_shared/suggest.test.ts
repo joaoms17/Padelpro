@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { incomeFor, makeSuggester, merchantSlot, plain, slotCategory, type SuggestCategoryRow } from "./suggest";
+import { guessIncomeKind, incomeFor, kindOf, makeSuggester, merchantSlot, plain, slotCategory, type SuggestCategoryRow } from "./suggest";
 
 const cats: SuggestCategoryRow[] = [
   ["entrada", "Ordenado João", "salario"],
@@ -55,6 +55,16 @@ describe("merchantSlot", () => {
     expect(merchantSlot("FARMACIA ESTACAO")).toBe("saude");
     expect(merchantSlot("BOOKING.COM HOTEL")).toBe("viagens");
   });
+  it("vets, Prime billed as AMZN, venues and chargers named after a brand", () => {
+    expect(merchantSlot("COMPRA 4512 HOSPITAL VETERINARIO DO RESTELO")).toBe("maggie");
+    expect(merchantSlot("COMPRA 4512 CLINICA VETERINARIA DE ALVALADE")).toBe("maggie");
+    expect(merchantSlot("AMZNPrime ES*AB12CD34")).toBe("subscricoes");
+    expect(merchantSlot("COMPRA RESTAURANTE BRISA DO MAR")).toBe("restaurantes");
+    expect(merchantSlot("COMPRA ALTICE ARENA LISBOA")).toBe("viagens");
+    expect(merchantSlot("COMPRA MEO KALORAMA")).toBe("viagens");
+    expect(merchantSlot("EDP CHARGE LISBOA")).toBe("carro");
+    expect(merchantSlot("VIA VERDE PORTUGAL")).toBe("carro");
+  });
   it("leaves unknown names and look-alike words alone", () => {
     expect(merchantSlot("MB WAY 912345678")).toBeNull();
     expect(merchantSlot("TRF RESTANTE SINAL")).toBeNull();
@@ -81,6 +91,26 @@ describe("incomeFor", () => {
     expect(incomeFor(3000, "TRF RENDA OUTUBRO", incomes)).toBeNull(); // too small to be it
     expect(incomeFor(-54160, "TRF DESPESAS JOAO", incomes)).toBeNull();
   });
+  it("same keyword for salary and representação: a direct fit beats a batch", () => {
+    const shared = [
+      { match_text: "ntt data", amount_cents: 195157, parts: 1, kind: "salario", active: true },
+      { match_text: "ntt data", amount_cents: 54160, parts: 1, kind: "representacao", active: true },
+    ];
+    expect(incomeFor(170000, "Ordenado de Ntt Data", shared)?.kind).toBe("salario");
+    expect(incomeFor(108320, "TRF NTT DATA", shared)?.kind).toBe("representacao");
+    expect(incomeFor(54160, "TRF NTT DATA", shared)?.kind).toBe("representacao");
+  });
+  it("the keyword is matched like the income form does (part of a word)", () => {
+    expect(incomeFor(54160, "TRF DESPESAS JOAO", [{ match_text: "despesa", amount_cents: 54160, parts: 1, active: true, label: "Despesas" }])?.match_text).toBe("despesa");
+  });
+  it("an income's kind is guessed from its name when not set", () => {
+    expect(guessIncomeKind("Ordenado Joao")).toBe("salario");
+    expect(guessIncomeKind("Despesas Joao")).toBe("representacao");
+    expect(guessIncomeKind("Renda Casa")).toBe("renda");
+    expect(guessIncomeKind("Bónus")).toBe("outra");
+    expect(kindOf({ kind: null, label: "Ordenado novo" })).toBe("salario");
+    expect(kindOf({ kind: "outra", label: "Ordenado novo" })).toBe("outra");
+  });
 });
 
 describe("makeSuggester", () => {
@@ -95,6 +125,8 @@ describe("makeSuggester", () => {
     expect(s(1299, "DEVOLUCAO AMAZON")).toBe("Compras online"); // a refund goes back to the shop's category
     expect(s(-1000, "MB WAY 912345678")).toBeUndefined();
     expect(s(-4500, "COMPRA GALP AREIAS S JOAO")).toBe("Carro e transportes"); // a place, not a person
+    expect(s(-1200, "COMPRA 4512 CANTINHO DO JOAO LISBOA")).toBeUndefined(); // a card purchase is never a person
+    expect(s(216640, "TRF DESPESAS JOAO")).toBeUndefined(); // income keyword, unusual amount: not money given back
   });
   it("plain() drops accents and symbols", () => {
     expect(plain("TRF P/ JOÃO")).toBe("trf p joao");

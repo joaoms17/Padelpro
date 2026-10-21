@@ -177,6 +177,41 @@ describe("status, scope and averages", () => {
   });
 });
 
+describe("review fixes", () => {
+  it("Poupança chosen by hand stays savings even when the description names one of you", () => {
+    const c = makeClassifier(ctx);
+    expect(c({ amount_cents: -100000, category_id: "pou", description_raw: "TRF P/ JOAO M SILVA", category_source: "manual" })).toMatchObject({ area: "poupanca", key: "para" });
+    expect(c({ amount_cents: -100000, category_id: "pou", description_raw: "TRF P/ JOAO M SILVA", category_source: "rule" })).toMatchObject({ area: "voces", memberId: "mj" });
+  });
+  it("an income keyword with an unusual amount is money in, not a person's", () => {
+    const c = makeClassifier(ctx);
+    expect(c({ amount_cents: 216640, category_id: null, description_raw: "TRF DESPESAS JOAO" })).toMatchObject({ area: "entrada", key: "sem" });
+  });
+  it("a salary marked pontual is split once, never dropped", () => {
+    const rows = [t("2026-08-22", 764388, "Ordenado de Ntt Data Portugal s a", "ord", { pontual: true })];
+    const real = monthBreakdown(rows, ctx, "2026-08");
+    expect(real.entradas.find((l) => l.key === "ordenado")!.cents).toBe(195157);
+    expect(real.entradas.find((l) => l.key === "extra")!.cents).toBe(569231);
+    expect(real.pontualIn).toBe(569231);
+    const sem = monthBreakdown(rows, ctx, "2026-08", { semPontuais: true });
+    expect(sem.entrou).toBe(195157);
+  });
+  it("without an expected salary, the part marked pontual is the extra", () => {
+    const noSalary = { ...ctx, incomes: ctx.incomes.filter((i) => i.id !== "i1") };
+    const rows = [t("2026-08-22", 195157, "Ordenado", "ord"), t("2026-08-23", 500000, "Premio", "ord", { pontual: true })];
+    const b = monthBreakdown(rows, noSalary, "2026-08");
+    expect(b.entradas.find((l) => l.key === "ordenado")!.cents).toBe(195157);
+    expect(b.entradas.find((l) => l.key === "extra")!.cents).toBe(500000);
+    expect(b.pontualIn).toBe(500000);
+    expect(monthBreakdown(rows, noSalary, "2026-08", { semPontuais: true }).entrou).toBe(195157);
+  });
+  it("an income without a kind is recognised by its name", () => {
+    const unset = { ...ctx, incomes: ctx.incomes.map((i) => ({ ...i, kind: null })) };
+    const b = monthBreakdown([t("2026-08-22", 764388, "Ordenado de Ntt Data Portugal s a")], unset, "2026-08");
+    expect(b.entradas.find((l) => l.key === "ordenado")!.cents).toBe(195157);
+  });
+});
+
 describe("helpers", () => {
   it("monthEndBalances walks back from today's balance (bank rows only)", () => {
     const rows = [t("2026-09-10", -1000, "A"), t("2026-10-05", 5000, "B"), t("2026-10-06", -700, "C", null, { source: "manual" })];

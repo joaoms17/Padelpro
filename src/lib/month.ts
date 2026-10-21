@@ -1,7 +1,7 @@
 // The month, as one set of accounts: what came in (and how), where it went
 // (the house, each of you, savings) and what was left. Every screen reads
 // its numbers from here, so they always agree. Pure and testable.
-import { incomeFor, isTransfer, makeNameFinder, plain } from "@shared/suggest";
+import { hasIncomeKeyword, incomeFor, isTransfer, kindOf, makeNameFinder, plain } from "@shared/suggest";
 import { displayMerchant, normalizeMerchant } from "@shared/categorize";
 import { isDueInMonth, type ExpectedIncome } from "./forecast";
 import type { Category, Member, TransactionSource } from "./types";
@@ -60,13 +60,9 @@ const GROUP_AREA: Record<string, Area> = { fixa: "fixa", variavel: "dia", ativid
 const ROLE_KEY: Record<string, IncomeKey> = { salario: "ordenado", representacao: "representacao", renda: "renda", eventos: "joana" };
 const KIND_KEY: Record<string, IncomeKey> = { salario: "ordenado", representacao: "representacao", renda: "renda", outra: "outras" };
 
-/** The kind of an income (before migration 0015 it is guessed from the name). */
+/** The kind of an income (as stored; guessed from its name when not set). */
 export function incomeKind(i: Pick<EngineIncome, "kind" | "label">): IncomeKind {
-  if (i.kind) return i.kind;
-  if (/ordenado|sal[áa]rio/i.test(i.label)) return "salario";
-  if (/despesa|represent/i.test(i.label)) return "representacao";
-  if (/renda/i.test(i.label)) return "renda";
-  return "outra";
+  return kindOf(i);
 }
 
 /**
@@ -86,9 +82,9 @@ export function makeClassifier(ctx: Pick<EngineCtx, "categories" | "members" | "
     const m = ctx.members.find((x) => plain(x.display_name).length >= 3 && words.includes(plain(x.display_name)));
     if (m) memberOfCategory.set(c.id, m.id);
   }
-  const incomes = ctx.incomes.filter((i) => i.active).map((i) => ({ ...i, kind: incomeKind(i) }));
+  const incomes = ctx.incomes.filter((i) => i.active);
 
-  return (t: Pick<EngineTx, "amount_cents" | "category_id" | "description_raw">): Classified => {
+  return (t: Pick<EngineTx, "amount_cents" | "category_id" | "description_raw"> & { category_source?: string | null }): Classified => {
     const credit = t.amount_cents > 0;
     const c = resolve(t.category_id);
     if (c) {
@@ -99,7 +95,9 @@ export function makeClassifier(ctx: Pick<EngineCtx, "categories" | "members" | "
         return { area: "voces", key: m ?? "?", categoryId: c.id, memberId: m };
       }
       if (c.grp === "interna") {
-        const m = byName(t.description_raw);
+        // Old "Entre contas" rows naming one of you were money for that
+        // person; a movement someone filed as Poupança by hand stays savings.
+        const m = t.category_source === "manual" ? null : byName(t.description_raw);
         if (m) return { area: "voces", key: m, categoryId: c.id, memberId: m };
         return { area: "poupanca", key: credit ? "de" : "para", categoryId: c.id, memberId: null };
       }
@@ -108,7 +106,9 @@ export function makeClassifier(ctx: Pick<EngineCtx, "categories" | "members" | "
     }
     if (credit) {
       const inc = incomeFor(t.amount_cents, t.description_raw, incomes);
-      if (inc) return { area: "entrada", key: KIND_KEY[inc.kind ?? "outra"] ?? "outras", categoryId: null, memberId: null };
+      if (inc) return { area: "entrada", key: KIND_KEY[kindOf(inc)] ?? "outras", categoryId: null, memberId: null };
+      // An income's keyword with an unusual amount is still money in, never a person's.
+      if (incomes.some((i) => hasIncomeKeyword(t.description_raw, i))) return { area: "entrada", key: "sem", categoryId: null, memberId: null };
       const who = byName(t.description_raw);
       if (who && who === joana) return { area: "entrada", key: "joana", categoryId: null, memberId: null };
       if (who && isTransfer(t.description_raw)) return { area: "voces", key: who, categoryId: null, memberId: who };
@@ -287,16 +287,20 @@ export function monthBreakdown(
   let txCount = 0;
   const houseDebits: TxRef[] = [];
 
+  let ordPontual = 0;
   for (const t of txs) {
     if (!inScope(t, month, ctx.today)) continue;
+    const k = classify(t);
     const pontual = !!t.pontual;
-    if (pontual && semPontuais) continue;
+    // The salary line is never dropped: its one-off part is split off below.
+    const salary = k.area === "entrada" && k.key === "ordenado" && t.amount_cents > 0;
+    if (pontual && semPontuais && !salary) continue;
     txCount++;
     if (t.source === "applepay") pendentes++;
     if (t.category_source && SUGGESTED.has(t.category_source) && t.category_id) porValidar++;
-    const k = classify(t);
     const amount = t.amount_cents;
-    if (pontual) {
+    if (pontual && salary) ordPontual += amount;
+    else if (pontual) {
       if (amount > 0) pontualIn += amount;
       else pontualOut -= amount;
     }
@@ -353,12 +357,18 @@ export function monthBreakdown(
   }
 
   // The salary that came with a prémio or subsídio: the normal part is the
-  // salary, the rest is a one-off extra.
+  // salary, the rest is a one-off extra. Without an expected salary, what was
+  // marked pontual is the extra.
   const E = expectedSalary(ctx.incomes, month);
   const ord = lines.get("ordenado")!;
-  if (E > 0 && ord.cents > Math.round(E * 1.15)) {
-    const extra = ord.cents - E;
-    ord.cents = E;
+  let extra = 0;
+  if (E > 0) {
+    if (ord.cents > Math.round(E * 1.15)) extra = ord.cents - E;
+  } else {
+    extra = Math.max(0, ordPontual);
+  }
+  if (extra > 0) {
+    ord.cents -= extra;
     if (!semPontuais) {
       const ex = lines.get("extra")!;
       ex.cents += extra;

@@ -106,6 +106,27 @@ describe("joanaHistory and modelMonth", () => {
   });
 });
 
+describe("review fixes", () => {
+  it("modelMonth: incomes at their monthly value every month; covered categories leave the house", () => {
+    const every2 = [inc("r", "Renda", 240000, "renda", "renda", 2)];
+    const plan = normalizePlan({ mesada_covers: ["rou"] });
+    const rows = [t("2026-08-10", -10000, "ROUPA", "rou"), t("2026-08-11", -20000, "CONTINENTE", "sup")];
+    const b = monthBreakdown(rows, { ...ctx, incomes: every2, today: "2026-10-21" }, "2026-08", { semPontuais: true });
+    const m = modelMonth(b, every2, plan, members);
+    expect(m.entradas.renda).toBe(120000);
+    expect(m.casa).toBe(20000);
+  });
+  it("monthControl: a refund doesn't create more to pay; covers only once the plan is on", () => {
+    const rows = [t("2026-12-03", -3000, "SEGURO", "luz"), t("2026-12-15", 8000, "REEMBOLSO", "luz"), t("2026-12-04", -5000, "ROUPA", "rou")];
+    const b = monthBreakdown(rows, ctx, "2026-12");
+    const draft = monthControl(b, categories, normalizePlan({ mesada_covers: ["rou"] }), "2026-12-15");
+    expect(draft.categorias.find((c) => c.categoryId === "luz")!.porSair).toBe(17000);
+    expect(draft.categorias.find((c) => c.categoryId === "rou")!.budget).toBe(10000);
+    const on = monthControl(b, categories, normalizePlan({ mesada_covers: ["rou"], active: true }), "2026-12-15");
+    expect(on.categorias.find((c) => c.categoryId === "rou")!).toMatchObject({ budget: 0, porSair: 0 });
+  });
+});
+
 describe("monthControl and avisos", () => {
   const plan = normalizePlan({ mesadas: { mj: 60000 } });
   const rows = [

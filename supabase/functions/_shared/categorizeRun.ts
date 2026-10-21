@@ -54,6 +54,10 @@ export async function categorizeHousehold(
       .select("id, description_raw, counterparty, amount_cents, booking_date")
       .eq("household_id", householdId)
       .is("category_id", null)
+      // Apple Pay notes already matched to a bank movement are done; a category
+      // someone cleared on purpose (source manual) stays cleared.
+      .is("matched_transaction_id", null)
+      .or("category_source.is.null,category_source.neq.manual")
       .order("booking_date", { ascending: false })
       .limit(400),
     svc.from("rules").select("field, match_type, pattern, category_id, priority").eq("household_id", householdId),
@@ -69,7 +73,7 @@ export async function categorizeHousehold(
       .in("category_source", ["manual", "rule", "mesada"])
       .order("booking_date", { ascending: false })
       .limit(1000),
-    svc.from("expected_incomes").select("match_text, amount_cents, parts, kind, active").eq("household_id", householdId),
+    svc.from("expected_incomes").select("label, match_text, amount_cents, parts, kind, active").eq("household_id", householdId),
   ]);
 
   const uncategorized = (uncatRes.data ?? []) as Tx[];
@@ -90,7 +94,7 @@ export async function categorizeHousehold(
   const suggest = makeSuggester({
     categories,
     members,
-    // Before migration 0015 there is no `kind`: treat each income as "outra".
+    // Without a stored kind (or before migration 0015) it is guessed from the name.
     incomes: ((incRes.data ?? []) as SuggestIncome[]),
   });
 
@@ -114,10 +118,8 @@ export async function categorizeHousehold(
       suggested++;
       continue;
     }
-    if (!opts.ai) {
-      updates.push({ id: tx.id, category_id: null, category_source: null, confidence: 0, merchant_clean });
-      continue;
-    }
+    // Without the AI step the row is left exactly as it is.
+    if (!opts.ai) continue;
     // Redact IBANs and the counterparty name before anything leaves the
     // device for the AI (spec 6.2).
     aiItems.push({

@@ -70,12 +70,16 @@ const SLOT_CATEGORY: Record<Slot, { grp: string; role?: string; names: string[] 
  * ones (uber eats, amazon prime, galp energia) come before the general ones.
  */
 export const MERCHANTS: [string[], Slot][] = [
+  // Venues and car charging named after a telecom/energy brand
+  [["altice arena", "meo arena", "meo kalorama", "~kalorama", "nos alive", "~nosalive", "super bock arena"], "viagens"],
+  [["edp charge", "~edpcharge", "galp electric", "~galpelectric"], "carro"],
   // Delivery before rides and restaurants
   [["uber eats", "~ubereats", "glovo", "bolt food", "too good to go", "takeaway"], "uber_eats"],
   // Subscriptions before online shops (Amazon Prime) and sports shops
   [
     [
       "netflix", "spotify", "disney", "hbo", "max com", "prime video", "~primevideo", "amazon prime", "~amazonprime",
+      "amzn prime", "~amznprime",
       "apple com bill", "~applecombill", "itunes", "icloud", "google one", "google storage", "youtube premium",
       "sporting clube", "sporting cp", "quotas sporting", "quota sporting", "sporting quotas", "sport tv", "dazn", "eleven sports",
       "chatgpt", "openai", "microsoft 365", "adobe", "audible", "kindle unlimited", "fitness hut", "holmes place",
@@ -126,13 +130,16 @@ export const MERCHANTS: [string[], Slot][] = [
   ],
   [
     [
-      "galp", "repsol", "cepsa", "moeve", "prio", "shell", "bp", "via verde", "brisa", "ascendi", "portagem",
-      "portagens", "emel", "saba", "empark", "parque", "parking", "estacionamento", "uber", "bolt", "free now",
-      "cabify", "cp comboios", "comboios de portugal", "metro", "carris", "fertagus", "navegante", "gira",
-      "oficina", "norauto", "midas", "carglass", "pneus", "miio", "mobi e", "ionity", "electrify",
+      "galp", "repsol", "cepsa", "moeve", "prio", "shell", "bp", "via verde", "brisa auto estradas", "brisa autoestradas",
+      "ascendi", "portagem", "portagens", "emel", "saba", "empark", "parque estacionamento", "parking", "estacionamento",
+      "uber", "bolt", "free now", "cabify", "cp comboios", "comboios de portugal", "metropolitano", "metro lisboa",
+      "metro do porto", "carris", "fertagus", "navegante", "gira", "oficina auto", "norauto", "midas", "carglass",
+      "pneus", "miio", "mobi e", "ionity", "electrify",
     ],
     "carro",
   ],
+  // Vets before health ("Hospital Veterinário", "Clínica Veterinária")
+  [["veterinario", "veterinaria", "~veterinar", "zooplus", "kiwoko", "tiendanimal", "animalife", "maggie"], "maggie"],
   [
     [
       "farmacia", "wells", "cuf", "hospital", "clinica", "luz saude", "lusiadas", "trofa saude", "dentista",
@@ -141,7 +148,6 @@ export const MERCHANTS: [string[], Slot][] = [
     ],
     "saude",
   ],
-  [["veterinario", "veterinaria", "~veterinar", "zooplus", "kiwoko", "tiendanimal", "animalife", "maggie"], "maggie"],
   [
     [
       "booking", "airbnb", "hotel", "hoteis", "hostel", "tap air", "~flytap", "ryanair", "easyjet", "vueling",
@@ -247,8 +253,33 @@ export interface SuggestIncome {
   match_text: string | null;
   amount_cents: number;
   parts: number;
+  /** salario | representacao | renda | outra; unset → guessed from the label. */
   kind?: string | null;
+  label?: string | null;
   active: boolean;
+}
+
+export type IncomeKind = "salario" | "representacao" | "renda" | "outra";
+
+/** What an income is from its name ("Ordenado Joao" → salario). */
+export function guessIncomeKind(label: string | null | undefined): IncomeKind {
+  const p = plain(label);
+  if (/\b(ordenado|salario|vencimento)\b/.test(p)) return "salario";
+  if (/\b(despesas?|representacao)\b/.test(p)) return "representacao";
+  if (/\brenda\b/.test(p)) return "renda";
+  return "outra";
+}
+
+/** The income's kind: as stored, or guessed from its name when not set. */
+export function kindOf(i: Pick<SuggestIncome, "kind" | "label">): IncomeKind {
+  const k = i.kind;
+  return k === "salario" || k === "representacao" || k === "renda" || k === "outra" ? k : guessIncomeKind(i.label);
+}
+
+/** Does the description carry an income's keyword (same test as the income form's preview)? */
+export function hasIncomeKeyword(desc: string | null | undefined, inc: Pick<SuggestIncome, "match_text" | "active">): boolean {
+  const kw = plain(inc.match_text);
+  return inc.active && kw.length >= 3 && plain(desc).includes(kw);
 }
 
 const INCOME_SLOT: Record<string, Slot> = {
@@ -259,9 +290,10 @@ const INCOME_SLOT: Record<string, Slot> = {
 };
 
 /**
- * The expected income a credit is, by keyword and size: the one whose part
- * (or 2–3 parts at once: a late batch) is closest to the amount. A salary
- * that came with a prémio is still the salary (bigger is fine for it).
+ * The expected income a credit is, by keyword and size: the one whose part is
+ * closest to the amount (half to double of it). Two or three parts at once
+ * (a late batch) also fit, but a direct fit on another income with the same
+ * keyword wins. A salary that came with a prémio is still the salary.
  */
 export function incomeFor(
   amountCents: number,
@@ -269,18 +301,19 @@ export function incomeFor(
   incomes: SuggestIncome[],
 ): SuggestIncome | null {
   if (amountCents <= 0) return null;
-  const p = ` ${plain(desc)} `;
   let best: { inc: SuggestIncome; gap: number } | null = null;
   for (const inc of incomes) {
-    const kw = plain(inc.match_text);
-    if (!inc.active || !kw || !p.includes(` ${kw} `)) continue;
+    if (!hasIncomeKeyword(desc, inc)) continue;
     const part = inc.amount_cents / Math.max(1, inc.parts);
     if (part <= 0) continue;
-    let gap = Infinity;
-    for (const k of [1, 2, 3]) gap = Math.min(gap, Math.abs(Math.log(amountCents / (part * k))));
-    // A salary paid with a prémio or subsídio: anything bigger still fits.
-    if (inc.kind === "salario" && amountCents >= part) gap = Math.min(gap, 0.05);
-    if (gap > Math.log(1.3)) continue;
+    const direct = Math.abs(Math.log(amountCents / part));
+    let gap = direct <= Math.log(2) ? direct : Infinity;
+    for (const k of [2, 3]) {
+      const batch = Math.abs(Math.log(amountCents / (part * k)));
+      if (batch <= Math.log(1.3)) gap = Math.min(gap, batch + 0.15);
+    }
+    if (kindOf(inc) === "salario" && amountCents >= part) gap = Math.min(gap, 0.05);
+    if (gap === Infinity) continue;
     if (!best || gap < best.gap) best = { inc, gap };
   }
   return best?.inc ?? null;
@@ -310,10 +343,10 @@ export function makeSuggester(ctx: SuggestContext): (tx: { amount_cents: number;
   return (tx) => {
     if (tx.amount_cents > 0) {
       const inc = incomeFor(tx.amount_cents, tx.description_raw, ctx.incomes);
-      if (inc) {
-        const s = pick(INCOME_SLOT[inc.kind ?? "outra"] ?? "outras_entradas", "entrada");
-        if (s) return s;
-      }
+      if (inc) return pick(INCOME_SLOT[kindOf(inc)], "entrada");
+      // An income's keyword with an unusual amount (a catch-up, a partial
+      // refund of expenses): not a person's money back — leave it to them.
+      if (ctx.incomes.some((i) => hasIncomeKeyword(tx.description_raw, i))) return null;
     }
     // Joana's transfers in are her events money; any other credit from one
     // of you is money given back; a debit is money for that person.
@@ -328,8 +361,7 @@ export function makeSuggester(ctx: SuggestContext): (tx: { amount_cents: number;
     if (who && isTransfer(tx.description_raw)) return person(who);
     const slot = merchantSlot(tx.description_raw);
     // A refund goes back into the shop's category.
-    if (slot) return pick(slot, "loja");
-    return who ? person(who) : null;
+    return slot ? pick(slot, "loja") : null;
   };
 }
 

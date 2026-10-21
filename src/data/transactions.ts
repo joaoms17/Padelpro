@@ -90,7 +90,8 @@ export async function setCategory(
     .from("transactions")
     .update({
       category_id: categoryId,
-      category_source: categoryId ? "manual" : null,
+      // A category cleared by hand stays cleared (the automatic filing skips it).
+      category_source: "manual",
       updated_at: new Date().toISOString(),
     })
     .eq("id", transactionId);
@@ -104,7 +105,7 @@ export async function setCategoryMany(ids: string[], categoryId: string | null):
       .from("transactions")
       .update({
         category_id: categoryId,
-        category_source: categoryId ? "manual" : null,
+        category_source: "manual",
         updated_at: new Date().toISOString(),
       })
       .in("id", ids.slice(i, i + 100));

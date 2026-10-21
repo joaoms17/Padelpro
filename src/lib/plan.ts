@@ -212,10 +212,11 @@ export function modelMonth(
   members: Pick<Member, "id" | "display_name">[],
 ): ModelMonth {
   const line = (k: string) => b.entradas.find((l) => l.key === k)?.cents ?? 0;
-  const due = (kind: string) =>
-    incomes.filter((i) => incomeKind(i) === kind && isDueInMonth(i, b.month)).reduce((a, i) => a + monthlyEq(i), 0);
+  // Every income at its monthly value (2 400 € every 2 months = 1 200 € a month).
+  const monthly = (kind: string) =>
+    incomes.filter((i) => i.active && incomeKind(i) === kind).reduce((a, i) => a + monthlyEq(i), 0);
   const expected = (kind: string, real: number) => {
-    const e = due(kind);
+    const e = monthly(kind);
     return e > 0 ? e : real;
   };
   const entradas = {
@@ -226,6 +227,9 @@ export function modelMonth(
     outras: line("outras") + line("sem"),
   };
   const entrou = Object.values(entradas).reduce((a, x) => a + x, 0);
+  // What becomes each one's own (paid from the mesada) leaves the house.
+  const covered = b.categorias.filter((c) => plan.mesada_covers.includes(c.categoryId)).reduce((a, c) => a + c.cents, 0);
+  const casa = b.casa - covered;
   const mesada = (id: string) => Math.max(0, plan.mesadas[id] ?? 0);
   const pessoas = members.map((m) => ({
     memberId: m.id,
@@ -238,10 +242,10 @@ export function modelMonth(
     month: b.month,
     entradas,
     entrou,
-    casa: b.casa,
+    casa,
     semSaiu: b.semSaiu,
     mesadas,
-    sobra: entrou - b.casa - b.semSaiu - mesadas,
+    sobra: entrou - casa - b.semSaiu - mesadas,
     sobrouReal: b.sobrou,
     pessoas,
   };
@@ -287,24 +291,29 @@ export function monthControl(
   const dim = daysInMonth(month);
   const day = today.slice(0, 7) === month ? Number(today.slice(8, 10)) : dim;
   const spentOf = new Map(b.categorias.map((c) => [c.categoryId, c.cents]));
+  // What was charged, before refunds: a refund doesn't make more still to pay.
+  const chargedOf = new Map(b.categorias.map((c) => [c.categoryId, c.cents + c.refundCents]));
+  const planOn = plan.active && month >= plan.start_month;
   const categorias: CategoryControl[] = categories
     .filter((c) => !c.archived && (c.grp === "fixa" || c.grp === "variavel" || c.grp === "atividade"))
     .sort((a, b2) => a.sort - b2.sort)
     .map((c) => {
       const spent = spentOf.get(c.id) ?? 0;
+      const charged = chargedOf.get(c.id) ?? 0;
       const budget = c.budget_cents && c.budget_cents > 0 ? c.budget_cents : null;
-      const covered = plan.mesada_covers.includes(c.id);
+      const covered = planOn && plan.mesada_covers.includes(c.id);
       const projected = paceProjection(spent, day, dim);
+      const pace = paceProjection(charged, day, dim);
       // Fixed costs leave once; day-to-day ones at the month's pace (but not
       // below the limit, which is what is expected to go).
       const porSair =
         c.grp === "fixa"
-          ? Math.max(0, (budget ?? 0) - spent)
+          ? Math.max(0, (budget ?? 0) - charged)
           : covered
             ? 0
             : day < 7
-              ? Math.max(0, (budget ?? 0) - spent)
-              : Math.max(0, Math.max(budget ?? 0, projected) - spent);
+              ? Math.max(0, (budget ?? 0) - charged)
+              : Math.max(0, Math.max(budget ?? 0, pace) - charged);
       return {
         categoryId: c.id,
         name: c.name,
