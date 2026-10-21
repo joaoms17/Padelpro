@@ -156,13 +156,13 @@ describe("mesadaRows / forecastParts", () => {
     ]);
     expect(mesadaRows(members, sem, real, () => 40000)[0]).toMatchObject({ alem: 10000, porSair: 0 });
   });
-  it("still to come in and to go out: incomes missing, Joana's plan, fixas, mesadas, dia a dia, Apple Pay", () => {
+  it("still to come in and to go out: incomes missing, Joana's Duet money, fixas, mesadas, dia a dia, Apple Pay", () => {
     const plan = normalizePlan({});
     const control = monthControl(sem, categories, plan, "2026-10-21");
-    const f = forecastParts({ control, incomes: incomeProgress(incomes, real), joana: { plan: 100000, arrived: 40000 }, mesadas: rows, applePay: 1450 });
+    const f = forecastParts({ control, incomes: incomeProgress(incomes, real), joana: { duet: 100000, arrived: 40000 }, mesadas: rows, applePay: 1450 });
     expect(f.toCome).toEqual([
       { label: "Ordenado (dia 23)", cents: 195157 },
-      { label: "Joana (o que falta do plano)", cents: 60000 },
+      { label: "Joana (da Duet, por chegar)", cents: 60000 },
     ]);
     const dia = control.categorias.filter((x) => x.grp === "variavel").reduce((a, x) => a + x.porSair, 0);
     expect(f.toGo).toEqual([
@@ -173,9 +173,12 @@ describe("mesadaRows / forecastParts", () => {
       { label: "Apple Pay ainda por descontar", cents: 1450 },
     ]);
     expect(dia).toBe(60000 - 30000 + 25000 - 1450);
-    // Joana already put in more than the plan: nothing more to come from her.
-    const f2 = forecastParts({ control, incomes: { missing: [] }, joana: { plan: 100000, arrived: 120000 }, mesadas: [], applePay: 0 });
+    // Joana already put in all she received on Duet: nothing more to come from her.
+    const f2 = forecastParts({ control, incomes: { missing: [] }, joana: { duet: 100000, arrived: 120000 }, mesadas: [], applePay: 0 });
     expect(f2.toCome).toEqual([]);
+    // A difference marked as not owed is not expected either.
+    const f3 = forecastParts({ control, incomes: { missing: [] }, joana: { duet: 100000, arrived: 40000, waived: 60000 }, mesadas: [], applePay: 0 });
+    expect(f3.toCome).toEqual([]);
   });
   it("pending bank movements: still to leave (or come into) the booked balance", () => {
     const control = monthControl(sem, categories, normalizePlan({}), "2026-10-21");
@@ -204,21 +207,21 @@ describe("prepSteps", () => {
     t("2026-10-12", -2899, "TEMU.COM DUBLIN"),
   ];
   const totals = planTotals(incomes, categories, normalizePlan({}), ["mj", "ma"]);
-  it("the six steps to the plan, each with its link", () => {
+  it("the five steps to the plan, each with its link (Joana's money is read from Duet, not set)", () => {
     const s = prepSteps({ closed, txs, incomes: [], plan: normalizePlan({}), categories: categories.map((x) => ({ ...x, budget_cents: null })), totals, members });
     expect(s.map((x) => [x.key, x.done])).toEqual([
       ["categorizar", false],
       ["entradas", false],
-      ["joana", false],
       ["fixas", false],
       ["dia", false],
       ["mesadas", false],
     ]);
     expect(s[0]).toMatchObject({ label: "Categorizar agosto e setembro", sub: "3 sem categoria · 2 por confirmar", to: "/movimentos?mes=2026-09&vista=categorizar" });
-    expect(s.map((x) => x.to).slice(1)).toEqual(["/plano#entradas", "/plano#joana", "/plano#fixas", "/plano#dia-a-dia", "/plano#mesadas"]);
+    expect(s.map((x) => x.to).slice(1)).toEqual(["/plano#entradas", "/plano#fixas", "/plano#dia-a-dia", "/plano#mesadas"]);
+    expect(s.some((x) => /Joana/.test(x.label))).toBe(false);
   });
   it("ticks what is filled in", () => {
-    const plan = normalizePlan({ joana_cents: 100000, mesadas: { mj: 60000, ma: 60000 } });
+    const plan = normalizePlan({ mesadas: { mj: 60000, ma: 60000 } });
     const filed = txs.map((x) => (x.booking_date.startsWith("2026-09") ? { ...x, category_id: "sup" } : x));
     const s = prepSteps({ closed, txs: filed, incomes, plan, categories, totals, members });
     expect(s.every((x) => x.done)).toBe(false);
@@ -227,7 +230,8 @@ describe("prepSteps", () => {
     const all = prepSteps({ closed: [closed[0]], txs, incomes, plan: { ...plan, active: true }, categories, totals, members });
     expect(all.every((x) => x.done)).toBe(true);
     expect(all[0].label).toBe("Categorizar agosto");
-    expect(all[5].sub.startsWith("Em vigor")).toBe(true);
+    expect(all).toHaveLength(5);
+    expect(all[4].sub.startsWith("Em vigor")).toBe(true);
   });
   it("counts what Movimentos lists as por categorizar, also what the engine already places", () => {
     const sept = monthBreakdown(txs, ctx, "2026-09");

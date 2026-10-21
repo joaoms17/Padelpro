@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { displayMerchant } from "@shared/categorize";
 import { setPontual } from "@/data/transactions";
+import { useDuetMonth, type DuetMonth } from "@/data/duet";
 import { rowTitle } from "@/lib/triage";
 import type { EngineData } from "@/data/engine";
 import { errorMessage } from "@/lib/errors";
@@ -155,6 +156,8 @@ export function MonthReport({
     };
   }, [data, month, real]);
   const q = (vista: string) => `/movimentos?mes=${month}&vista=${vista}`;
+  // What Joana received on Duet this month (the model counts all of it).
+  const duet = useDuetMonth(month);
 
   return (
     <div className="space-y-6">
@@ -176,10 +179,10 @@ export function MonthReport({
       {mode === "real" ? (
         <RealHero b={b} real={real} view={view} month={month} semPontuais={semPontuais} />
       ) : (
-        <ModelHero sp={sp} data={data} month={month} hasPontuais={hasPontuais} status={real.status} />
+        <ModelHero sp={sp} data={data} month={month} hasPontuais={hasPontuais} status={real.status} duet={duet} />
       )}
 
-      {mode === "real" && <Entradas b={b} data={data} month={month} />}
+      {mode === "real" && <Entradas b={b} data={data} month={month} duet={duet} />}
 
       <ParaOndeFoi b={b} data={data} month={month} txById={txById} />
 
@@ -248,11 +251,28 @@ function RealHero({ b, real, view, month, semPontuais }: { b: MonthBreakdown; re
 
 // ── Hero: com o modelo ──────────────────────────────────────────────────────
 
-function ModelHero({ sp, data, month, hasPontuais, status }: { sp: MonthBreakdown; data: EngineData; month: string; hasPontuais: boolean; status: MonthBreakdown["status"] }) {
-  const mm = modelMonth(sp, data.incomes, data.plan, data.members);
+function ModelHero({
+  sp,
+  data,
+  month,
+  hasPontuais,
+  status,
+  duet,
+}: {
+  sp: MonthBreakdown;
+  data: EngineData;
+  month: string;
+  hasPontuais: boolean;
+  status: MonthBreakdown["status"];
+  duet: DuetMonth | null;
+}) {
+  // With the model Joana puts in all she received on Duet; while loading (or
+  // without Duet) what reached the account.
+  const joanaDuet = duet?.configured ? duet.cents : null;
+  const mm = modelMonth(sp, data.incomes, data.plan, data.members, joanaDuet);
   const left = mm.sobra >= 0;
   const noMesadas = Object.keys(data.plan.mesadas).length === 0;
-  const joanaLabel = month >= data.plan.start_month ? "Joana (valor do plano)" : lineLabel("joana", month);
+  const joanaLabel = joanaDuet != null ? "Joana (tudo o que recebeu na Duet)" : lineLabel("joana", month);
   const entradas: [string, number][] = [
     ["Ordenado do João (normal)", mm.entradas.ordenado],
     ["Despesas de representação", mm.entradas.representacao],
@@ -312,7 +332,8 @@ function ModelHero({ sp, data, month, hasPontuais, status }: { sp: MonthBreakdow
       )}
       {status === "a_decorrer" && <p className="text-xs text-amber-700 dark:text-amber-300">O mês ainda não acabou: o modelo já conta com as entradas do mês inteiro.</p>}
       <p className={`text-xs ${muted}`}>
-        Ordenado normal (sem prémio), representação e renda no valor do mês, o que a Joana pôs na conta, a casa real e as mesadas do plano.
+        Ordenado normal (sem prémio), representação e renda no valor do mês,{" "}
+        {joanaDuet != null ? "tudo o que a Joana recebeu na Duet" : "o que a Joana pôs na conta"}, a casa real e as mesadas do plano.
       </p>
     </div>
   );
@@ -320,13 +341,15 @@ function ModelHero({ sp, data, month, hasPontuais, status }: { sp: MonthBreakdow
 
 // ── O que entrou ────────────────────────────────────────────────────────────
 
-function Entradas({ b, data, month }: { b: MonthBreakdown; data: EngineData; month: string }) {
+function Entradas({ b, data, month, duet }: { b: MonthBreakdown; data: EngineData; month: string; duet: DuetMonth | null }) {
   // An income set up now did not "faltar" in the months before it existed.
   const firstSeen = useMemo(() => incomeFirstSeen(data.incomes, data.txs, data.ctx), [data]);
   const expected = expectedByLine(data.incomes, month, firstSeen);
   const lines = b.entradas.filter((l) => l.cents !== 0);
   const joanaLine = lines.find((l) => l.key === "joana");
-  const duet = month >= JOANA_FROM ? <JoanaDuetCard month={month} bankCents={joanaLine?.cents ?? 0} /> : null;
+  // From November everything she received on Duet is to reach the account.
+  const duetCard =
+    month >= JOANA_FROM ? <JoanaDuetCard month={month} bankCents={joanaLine?.cents ?? 0} duet={duet} householdId={data.householdId} /> : null;
   const missing = b.status === "parcial" ? [] : missingIncomes(b.entradas, data.incomes, month, firstSeen);
   const running = b.status === "a_decorrer";
 
@@ -357,11 +380,11 @@ function Entradas({ b, data, month }: { b: MonthBreakdown; data: EngineData; mon
               {l.key === "joana" && month < JOANA_FROM && (
                 <p className={`text-xs ${muted} pb-2 -mt-1`}>Antes de novembro a Joana ainda não passava tudo para a conta — não é dívida.</p>
               )}
-              {l.key === "joana" && duet && <div className="pb-2">{duet}</div>}
+              {l.key === "joana" && duetCard && <div className="pb-2">{duetCard}</div>}
             </Line>
           );
         })}
-        {!joanaLine && duet && <div className="py-2">{duet}</div>}
+        {!joanaLine && duetCard && <div className="py-2">{duetCard}</div>}
       </div>
       {missing.length > 0 && (
         <div className="mt-2 text-xs text-amber-700 dark:text-amber-300 space-y-0.5 px-1">

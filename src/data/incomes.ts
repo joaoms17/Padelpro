@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import type { Credit, ExpectedIncome } from "@/lib/forecast";
 import type { EngineIncome, IncomeKind } from "@/lib/month";
@@ -79,7 +80,10 @@ export async function loadCredits(
   return (data as (Credit & { category_id: string | null })[]) ?? [];
 }
 
-/** Per month, the part of Joana's App1-vs-bank gap that is not owed (cents). */
+/**
+ * Per month, the part of the difference between what Joana received on Duet
+ * and what reached the account that is not owed ("Não é dívida"), in cents.
+ */
 export async function loadJoanaWaivers(householdId: string): Promise<Record<string, number>> {
   const { data, error } = await supabase
     .from("settings")
@@ -101,4 +105,23 @@ export async function saveJoanaWaiver(householdId: string, month: string, cents:
     .from("settings")
     .upsert({ household_id: householdId, joana_waivers: next }, { onConflict: "household_id" });
   if (error) throw error;
+}
+
+/** The months whose Duet difference was marked as not owed (null while loading). */
+export function useJoanaWaivers(householdId: string | null): { waivers: Record<string, number> | null; reload: () => Promise<void> } {
+  const [waivers, setWaivers] = useState<Record<string, number> | null>(null);
+  const seq = useRef(0);
+  const reload = useCallback(async () => {
+    if (!householdId) return;
+    const n = ++seq.current;
+    const w = await loadJoanaWaivers(householdId);
+    // Only the latest load counts.
+    if (n === seq.current) setWaivers(w);
+  }, [householdId]);
+  useEffect(() => {
+    void reload();
+    // Forget a load still running when the screen goes away.
+    return () => void seq.current++;
+  }, [reload]);
+  return { waivers, reload };
 }

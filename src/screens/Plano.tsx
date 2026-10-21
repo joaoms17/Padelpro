@@ -6,7 +6,8 @@ import { Link, useLocation } from "react-router-dom";
 import { useHousehold } from "@/data/household";
 import { useEngineData, type EngineData } from "@/data/engine";
 import { putPlanInPlace, savePlan, setBudgets } from "@/data/plan";
-import { loadDuetReceipts } from "@/data/duet";
+import { lastDayOf, loadDuetEvents, loadDuetReceipts, type DuetReceipt } from "@/data/duet";
+import { useJoanaWaivers } from "@/data/incomes";
 import { BudgetTable, EuroInput } from "@/components/BudgetTable";
 import { IncomeSheet, draftFromSuggestion, newIncomeDraft, amountText, type IncomeDraft } from "@/components/IncomeSheet";
 import { Chip, Eur, Loading, Pill, Row, Section } from "@/components/kit";
@@ -14,7 +15,7 @@ import { buildMonthsView } from "@/lib/view";
 import { joanaHistory, monthlyEq, planTotals, projection, type ExtrasRule, type PlanSettings } from "@/lib/plan";
 import { incomeKind, JOANA_FROM } from "@/lib/month";
 import { addMonth, suggestIncomes } from "@/lib/forecast";
-import { formatCents, formatEuros, formatPct, monthDay, monthName } from "@/lib/format";
+import { formatCents, formatEuros, monthDay, monthName } from "@/lib/format";
 import { errorMessage } from "@/lib/errors";
 import { nextStamp } from "@/lib/sequence";
 import { applyPatch, isEmptyPatch, mergePatch, planDiff, unappliedChanges, type PlanPatch } from "@/lib/planPatch";
@@ -27,9 +28,13 @@ import {
   coveredMean,
   currentMonthRest,
   duetByMonth,
-  duetFrom,
+  duetHistory,
+  eventsByMonth,
+  folgaRisk,
   freqText,
   incomeCredits,
+  joanaForMonth,
+  joanaRows,
   mesadaChecklist,
   monthsList,
   monthsOfHouse,
@@ -43,7 +48,6 @@ import {
   stepsDone,
   suggestionCredits,
   withDefaults,
-  withDuetRange,
 } from "@/lib/planView";
 
 const muted = "text-tinta/60 dark:text-creme/60";
@@ -334,8 +338,50 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
     () => applyBudgets(data.allCategories.filter((c) => !c.archived), overrides),
     [data.allCategories, overrides],
   );
-  const totals = useMemo(() => planTotals(data.incomes, categories, plan, memberIds), [data.incomes, categories, plan, memberIds]);
-  const steps = useMemo(() => stepsDone(data.incomes, categories, plan, memberIds), [data.incomes, categories, plan, memberIds]);
+  // ── Joana: everything she receives on Duet goes to the account ───────────
+  // So her part is not a value to set: the plan counts on her Duet average
+  // over the last 12 complete months (this month's receipts so far are for
+  // the rest of it). undefined: loading; null: Duet not set up.
+  const duetFirst = addMonth(current, -12);
+  const [duetRes, setDuetRes] = useState<DuetReceipt[] | null | undefined>(undefined);
+  useEffect(() => {
+    let alive = true;
+    void loadDuetReceipts(`${duetFirst}-01`, today).then((r) => {
+      if (alive) setDuetRes(r.configured ? r.receipts : null);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [duetFirst, today]);
+  const duet = useMemo(() => (duetRes ? duetHistory(duetRes, current) : null), [duetRes, current]);
+  const duetNow = duetRes ? (duetByMonth(duetRes)[current] ?? 0) : null;
+  const joana = useMemo(
+    () => joanaHistory(view.closed.map((m) => view.real.get(m)!), duet, current),
+    [view, duet, current],
+  );
+  const joanaTable = useMemo(() => joanaRows(joana, duet, view.closed, duetFirst), [joana, duet, view, duetFirst]);
+  const weakestMonth = joanaTable.find((r) => r.weakest)?.month ?? null;
+  const { waivers } = useJoanaWaivers(householdId);
+  // The coming months: what is already booked on Duet (the events' values).
+  const [booked, setBooked] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let alive = true;
+    void loadDuetEvents(`${addMonth(current, 1)}-01`, lastDayOf(addMonth(current, 6))).then((r) => {
+      if (alive) setBooked(r.configured ? eventsByMonth(r.events) : {});
+    });
+    return () => {
+      alive = false;
+    };
+  }, [current]);
+
+  const totals = useMemo(
+    () => planTotals(data.incomes, categories, plan, memberIds, joana.average ?? 0),
+    [data.incomes, categories, plan, memberIds, joana.average],
+  );
+  const steps = useMemo(
+    () => stepsDone(data.incomes, categories, plan, memberIds, joana.average),
+    [data.incomes, categories, plan, memberIds, joana.average],
+  );
 
   // ── What the steps show ────────────────────────────────────────────────────
   // The last two closed months as columns (the average may cover more).
@@ -357,24 +403,6 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
   );
   const [editing, setEditing] = useState<IncomeDraft | null>(null);
 
-  // Joana: what reached the account, and what Duet says she received (from
-  // the first closed month, at most a year back; older months show "—").
-  const duetStart = duetFrom(view.closed, current);
-  const [duet, setDuet] = useState<Record<string, number> | null>(null);
-  useEffect(() => {
-    let alive = true;
-    void loadDuetReceipts(`${duetStart}-01`, today).then((r) => {
-      if (alive) setDuet(r.configured ? duetByMonth(r.receipts) : null);
-    });
-    return () => {
-      alive = false;
-    };
-  }, [duetStart, today]);
-  const joana = useMemo(
-    () => withDuetRange(joanaHistory(view.closed.map((m) => view.semPontuais.get(m)!), duet), duetStart),
-    [view, duet, duetStart],
-  );
-
   // The next months start from where this one ends, as Este mês forecasts it;
   // the rest of this month is the first row.
   const rest = useMemo(
@@ -391,12 +419,15 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
         txs: data.txs,
         today,
         casa: casaPlano,
+        joanaDuet: duetNow,
+        joanaWaived: waivers?.[current] ?? 0,
       }),
-    [data, view, current, categories, plan, members, today, casaPlano],
+    [data, view, current, categories, plan, members, today, casaPlano, duetNow, waivers],
   );
+  // Joana in each coming month: what is already booked on Duet, or her average.
   const proj = useMemo(
-    () => [rest, ...projection(current, 6, rest.saldoFim, data.incomes, totals, plan, memberIds)],
-    [rest, current, data.incomes, totals, plan, memberIds],
+    () => [rest, ...projection(current, 6, rest.saldoFim, data.incomes, totals, plan, memberIds, joanaForMonth(booked, totals.J))],
+    [rest, current, data.incomes, totals, plan, memberIds, booked],
   );
   const firstLow = proj.find((p) => p.baixo);
 
@@ -486,8 +517,8 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
         <div>
           <Row label="Entra todos os meses" right={<Eur cents={totals.R} />} onClick={() => go("entradas")} />
           <Row
-            label="+ Joana"
-            sub={plan.joana_cents == null ? "por definir" : undefined}
+            label="+ Joana (média na Duet)"
+            sub={duetRes === undefined ? "a ver a Duet…" : joana.average == null ? "sem dados da Duet" : undefined}
             right={<Eur cents={totals.J} />}
             onClick={() => go("joana")}
           />
@@ -564,15 +595,12 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
         {totals.mesadasTotal > 0 && (
           <div className="space-y-1">
             <p className={`font-medium ${totals.folga >= 0 ? "text-petroleo" : "text-terracota"}`}>{folgaText(totals.folga)}</p>
-            {totals.J > 0 && (
+            {totals.J > 0 && joana.weakest != null && joana.weakest < totals.J && (
               <p className={`text-sm ${muted}`}>
-                Num mês sem dinheiro da Joana:{" "}
-                {totals.folgaSemJoana >= 0
-                  ? `folga +${formatEuros(totals.folgaSemJoana)}`
-                  : `faltam ${formatEuros(-totals.folgaSemJoana)} (cobrir com a poupança)`}
-                .
+                Num mês fraco da Joana ({formatEuros(joana.weakest)}): {folgaRisk(totals.folga - (totals.J - joana.weakest))}.
               </p>
             )}
+            {totals.J > 0 && <p className={`text-sm ${muted}`}>Num mês sem eventos: {folgaRisk(totals.folgaSemJoana)}.</p>}
           </div>
         )}
 
@@ -675,65 +703,58 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
       {/* 2. Joana */}
       <Step id="joana" n={2} title="Joana" done={steps.joana}>
         <div className="card p-4 space-y-3">
-          <div>
-            <label className="label" htmlFor="joana-mes">
-              Quanto a Joana põe na conta por mês (já líquido)
-            </label>
-            <EuroInput
-              id="joana-mes"
-              value={plan.joana_cents}
-              onChange={(v) => updatePlan((p) => ({ ...p, joana_cents: v }))}
-              onCommit={() => void flush()}
-            />
-          </div>
-          {joana.suggestion != null && joana.suggestion !== plan.joana_cents && (
-            <div className="flex items-center justify-between gap-3">
-              <span className={`min-w-0 text-xs ${muted}`}>Prudente: o mês mais fraco até agora, arredondado para baixo.</span>
-              <button
-                className="btn-ghost shrink-0 px-3 py-1.5 text-sm"
-                onClick={() => updatePlan((p) => ({ ...p, joana_cents: joana.suggestion }), true)}
-              >
-                Usar {formatEuros(joana.suggestion)}
-              </button>
-            </div>
+          <p className="font-medium">A Joana põe na conta tudo o que recebe na Duet.</p>
+          {duetRes === undefined ? (
+            <p className={`text-sm ${faint}`}>A ver a Duet…</p>
+          ) : duetRes === null ? (
+            <p className={`text-sm ${muted}`}>Sem dados da Duet: o plano conta com 0 € da Joana.</p>
+          ) : joana.average == null ? (
+            <p className={`text-sm ${muted}`}>Nada recebido na Duet nos últimos 12 meses: o plano conta com 0 € da Joana.</p>
+          ) : (
+            <p className="text-sm">
+              Média <Eur cents={joana.average} className="font-semibold" />
+              /mês
+              {joana.weakest != null && weakestMonth && (
+                <>
+                  {" "}
+                  · mês mais fraco <Eur cents={joana.weakest} /> ({monthName(weakestMonth)})
+                </>
+              )}
+              <span className={muted}>
+                {" "}
+                · {joana.count} {joana.count === 1 ? "mês" : "meses"}
+              </span>
+            </p>
           )}
-          {joana.months.length > 0 && (
+          {joanaTable.length > 0 && (
             <table className="w-full table-fixed text-xs">
               <thead>
                 <tr className={`text-[11px] ${faint}`}>
                   <th className="pb-1 text-left font-medium">Mês</th>
+                  <th className="pb-1 text-right font-medium">Duet recebido</th>
                   <th className="pb-1 text-right font-medium">Chegou à conta</th>
-                  {duet && (
-                    <>
-                      <th className="pb-1 text-right font-medium">Na Duet</th>
-                      <th className="pb-1 text-right font-medium">Chegou</th>
-                    </>
-                  )}
                 </tr>
               </thead>
               <tbody>
-                {joana.months.map((m) => (
-                  <tr key={m.month} className="border-t border-areia/50 dark:border-white/5">
-                    <td className="py-1.5">{capital(monthName(m.month))}</td>
-                    <td className="py-1.5 text-right tnum">{formatEuros(m.bank)}</td>
-                    {duet && (
-                      <>
-                        <td className="py-1.5 text-right tnum">{m.duet == null ? "—" : formatEuros(m.duet)}</td>
-                        <td className="py-1.5 text-right tnum">{m.duet ? formatPct(Math.round((m.bank / m.duet) * 100) / 100) : "—"}</td>
-                      </>
-                    )}
+                {joanaTable.map((r) => (
+                  <tr key={r.month} className="border-t border-areia/50 dark:border-white/5">
+                    <td className="py-1.5">
+                      {capital(monthName(r.month))}
+                      {r.weakest && <span className={faint}> · mais fraco</span>}
+                    </td>
+                    <td className="py-1.5 text-right tnum">{r.duet == null ? "—" : formatEuros(r.duet)}</td>
+                    <td className="py-1.5 text-right tnum">{r.bank == null ? "—" : formatEuros(r.bank)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
-          {joana.months.length > 0 && joana.months.every((m) => m.month < JOANA_FROM) && (
+          {joanaTable.some((r) => r.month < JOANA_FROM && r.bank != null) && (
             <p className={`text-xs ${faint}`}>Antes de novembro a Joana ainda não passava tudo para a conta — não é dívida.</p>
           )}
-          <ul className={`space-y-1 text-xs ${muted} list-disc pl-4`}>
-            <li>Conta só o que chega à conta (depois dos impostos dela).</li>
-            <li>Meses acima deste valor reforçam a poupança; meses abaixo são cobertos por ela.</li>
-          </ul>
+          {joana.average != null && (
+            <p className={`text-xs ${muted}`}>Meses acima da média reforçam a poupança; meses abaixo são cobertos por ela.</p>
+          )}
         </div>
       </Step>
 
@@ -1044,9 +1065,12 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
             )}
             <p className={`mt-2 text-[11px] ${faint}`}>
               {capital(monthName(current))}: só o que ainda falta até {monthDay(current, "last")}, como na previsão de Este mês. Depois, entra: o
-              que entra todos os meses{totals.J > 0 && " e a Joana (a partir de novembro)"}. Sai: contas fixas, dia a dia, trabalho
+              que entra todos os meses e a Joana (a partir de novembro). Sai: contas fixas, dia a dia, trabalho
               da Joana e mesadas{transitionMonths.length > 0 && ` (em ${monthName(transitionMonths[0])} as da transição)`}. A poupança fica no
               saldo; os extras não contam.
+            </p>
+            <p className={`mt-1 text-[11px] ${faint}`}>
+              {duetRes === null ? "Joana: sem dados da Duet (conta 0 €)." : "Joana: o que já está marcado na Duet, ou a média."}
             </p>
           </div>
         )}

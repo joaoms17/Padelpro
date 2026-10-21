@@ -197,10 +197,28 @@ export function paraLabel(name: string): string {
   return `Para ${/a$/i.test(plain(name)) ? "a" : "o"} ${name}`;
 }
 
-/** Sum of the receipts and the share of them that reached the account. */
-export function duetShare(receipts: { amount_cents: number }[], bankCents: number): { duet: number; bank: number; share: number | null } {
-  const duet = receipts.reduce((a, r) => a + r.amount_cents, 0);
-  return { duet, bank: bankCents, share: duet > 0 ? bankCents / duet : null };
+/** Within this, everything Joana received on Duet reached the account. */
+const JOANA_TOLERANCE = 100;
+
+export interface JoanaGap {
+  /** Received on Duet but not in the account (never negative). */
+  gap: number;
+  /** The part of it marked as not owed ("Não é dívida"). */
+  waived: number;
+  /** Still to reach the account (0 within 1 €). */
+  missing: number;
+}
+
+/**
+ * From November Joana puts in the account everything she receives on Duet:
+ * what Duet has and the account doesn't is still to arrive, unless a month's
+ * difference was marked as not owed (`waived`, see saveJoanaWaiver).
+ */
+export function joanaGap(duet: number, bank: number, waived = 0): JoanaGap {
+  const gap = Math.max(0, duet - bank);
+  const w = Math.min(Math.max(0, waived), gap);
+  const rest = gap - w;
+  return { gap, waived: w, missing: rest <= JOANA_TOLERANCE ? 0 : rest };
 }
 
 // ── Comparar ────────────────────────────────────────────────────────────────

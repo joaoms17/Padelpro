@@ -5,12 +5,12 @@ import {
   compactEuros,
   compareRows,
   dayShort,
-  duetShare,
   existedIn,
   expectedByLine,
   howItCame,
   incomeFirstSeen,
   incomeTag,
+  joanaGap,
   mesadaStatus,
   missingIncomes,
   monthChips,
@@ -191,11 +191,26 @@ describe("month details", () => {
     expect(mesadaStatus(0, -500)).toEqual({ dentro: 0, alem: 0, completa: false });
   });
 
-  it("names and Duet share", () => {
+  it("names", () => {
     expect(paraLabel("João")).toBe("Para o João");
     expect(paraLabel("Joana")).toBe("Para a Joana");
-    expect(duetShare([{ amount_cents: 100000 }, { amount_cents: 50000 }], 120000)).toEqual({ duet: 150000, bank: 120000, share: 0.8 });
-    expect(duetShare([], 50000).share).toBeNull();
+  });
+  it("Joana: what she received on Duet and is not in the account yet is still to arrive", () => {
+    expect(joanaGap(150000, 120000)).toEqual({ gap: 30000, waived: 0, missing: 30000 });
+    // Within 1 €: everything arrived.
+    expect(joanaGap(150000, 149900)).toEqual({ gap: 100, waived: 0, missing: 0 });
+    expect(joanaGap(150000, 149899).missing).toBe(101);
+    // More in the account than on Duet: nothing missing.
+    expect(joanaGap(100000, 120000)).toEqual({ gap: 0, waived: 0, missing: 0 });
+    expect(joanaGap(0, 0)).toEqual({ gap: 0, waived: 0, missing: 0 });
+  });
+  it("a difference marked as not owed is not missing (and only up to the difference)", () => {
+    expect(joanaGap(150000, 120000, 30000)).toEqual({ gap: 30000, waived: 30000, missing: 0 });
+    // Duet got more after the mark: the new part is missing again.
+    expect(joanaGap(180000, 120000, 30000)).toEqual({ gap: 60000, waived: 30000, missing: 30000 });
+    // She put it in after all: the mark no longer counts.
+    expect(joanaGap(150000, 150000, 30000)).toEqual({ gap: 0, waived: 0, missing: 0 });
+    expect(joanaGap(150000, 120000, -5)).toMatchObject({ waived: 0, missing: 30000 });
   });
 });
 

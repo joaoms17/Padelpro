@@ -7,6 +7,7 @@ import { isDueInMonth } from "./forecast";
 import { inScope, incomeKind, todayLisbon, type EngineIncome, type EngineTx, type IncomeKey, type IncomeKind, type MonthBreakdown } from "./month";
 import type { MonthControl, PlanSettings, PlanTotals } from "./plan";
 import { formatEuros, monthName } from "./format";
+import { joanaGap } from "./meses";
 import { isSemCategoria, semCategoria } from "./semCategoria";
 import type { Category, Member } from "./types";
 
@@ -232,15 +233,20 @@ export interface ForecastItem {
 export function forecastParts(input: {
   control: Pick<MonthControl, "categorias" | "fixasPorPagar">;
   incomes: Pick<IncomeProgress, "missing">;
-  /** Joana's plan value and what she put in so far (from the plan's first month); null before. */
-  joana: { plan: number; arrived: number } | null;
+  /**
+   * From November: what Joana received on Duet this month, what reached the
+   * account and what was marked as not owed; null before (or without Duet).
+   */
+  joana: { duet: number; arrived: number; waived?: number } | null;
   mesadas: Pick<MesadaRow, "porSair">[];
   applePay: number;
   /** Bank movements still pending (`bankPending`). */
   pending?: { out: number; in: number };
 }): { toCome: ForecastItem[]; toGo: ForecastItem[] } {
   const toCome: ForecastItem[] = input.incomes.missing.map((g) => ({ label: `${g.label} (dia ${g.day})`, cents: g.pending }));
-  if (input.joana) toCome.push({ label: "Joana (o que falta do plano)", cents: Math.max(0, input.joana.plan - input.joana.arrived) });
+  if (input.joana) {
+    toCome.push({ label: "Joana (da Duet, por chegar)", cents: joanaGap(input.joana.duet, input.joana.arrived, input.joana.waived).missing });
+  }
   toCome.push({ label: "Entradas pendentes no banco", cents: input.pending?.in ?? 0 });
   const porSair = (grp: string) => input.control.categorias.filter((c) => c.grp === grp).reduce((a, c) => a + c.porSair, 0);
   const toGo: ForecastItem[] = [
@@ -268,14 +274,17 @@ export function monthsLabel(months: string[]): string {
 }
 
 export interface PrepStep {
-  key: "categorizar" | "entradas" | "joana" | "fixas" | "dia" | "mesadas";
+  key: "categorizar" | "entradas" | "fixas" | "dia" | "mesadas";
   label: string;
   done: boolean;
   sub: string;
   to: string;
 }
 
-/** The six things to decide before the plan's first month. */
+/**
+ * The five things to decide before the plan's first month. Joana is not one
+ * of them: she puts in everything she receives on Duet (the plan reads it).
+ */
 export function prepSteps(input: {
   /** The closed months' breakdowns (real), oldest first. */
   closed: Pick<MonthBreakdown, "month" | "porValidar">[];
@@ -284,7 +293,7 @@ export function prepSteps(input: {
   incomes: EngineIncome[];
   plan: PlanSettings;
   categories: Pick<Category, "grp" | "budget_cents" | "archived">[];
-  totals: Pick<PlanTotals, "R" | "J" | "F" | "V">;
+  totals: Pick<PlanTotals, "R" | "F" | "V">;
   members: Pick<Member, "id" | "display_name">[];
 }): PrepStep[] {
   const { closed, plan, totals } = input;
@@ -311,13 +320,6 @@ export function prepSteps(input: {
       done: input.incomes.length > 0,
       sub: input.incomes.length > 0 ? `${nIncomes} ${nIncomes === 1 ? "entrada" : "entradas"} · ${formatEuros(totals.R)}/mês` : "Ordenado, representação, renda",
       to: "/plano#entradas",
-    },
-    {
-      key: "joana",
-      label: "Quanto a Joana põe por mês",
-      done: plan.joana_cents != null,
-      sub: plan.joana_cents != null ? `${formatEuros(totals.J)}/mês` : "O que chega à conta, já líquido",
-      to: "/plano#joana",
     },
     {
       key: "fixas",
