@@ -87,3 +87,31 @@ export function takenByMember(
   }
   return out;
 }
+
+/**
+ * What a credit into the account is, for the ensaio: Joana's own transfers
+ * (and anything filed as event money) are her App1 earnings, already counted
+ * from the App1; a transfer from João is money put back; "between accounts"
+ * is skipped; everything else is real income (salary, prémios, rent, refunds).
+ */
+export function makeCreditKind(
+  categories: Pick<Category, "id" | "grp" | "name" | "system_role">[],
+  members: Pick<Member, "id" | "display_name">[],
+): (t: PaidTx) => "income" | "joana" | "back" | "skip" {
+  const group = new Map(categories.map((c) => [c.id, c]));
+  const keys = members
+    .map((m) => plain(m.display_name))
+    .filter((k) => k.length >= 3)
+    .sort((a, b) => b.length - a.length);
+  const joanaKey = keys.find((k) => k === "joana");
+  return (t) => {
+    const c = t.category_id ? group.get(t.category_id) : undefined;
+    if (c?.system_role === "eventos") return "joana";
+    const words = ` ${plain(t.description_raw)} `;
+    const who = keys.find((k) => words.includes(` ${k} `));
+    if (who && who === joanaKey) return "joana";
+    if (who) return "back";
+    if (c?.grp === "interna") return "skip";
+    return "income";
+  };
+}
