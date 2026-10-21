@@ -1,8 +1,11 @@
 import { supabase } from "@/lib/supabase";
 import type { Credit, ExpectedIncome } from "@/lib/forecast";
+import type { EngineIncome, IncomeKind } from "@/lib/month";
 import { normalizeKeyword } from "@shared/categorize";
 
-export async function listIncomes(householdId: string): Promise<ExpectedIncome[]> {
+const KINDS: IncomeKind[] = ["salario", "representacao", "renda", "outra"];
+
+export async function listIncomes(householdId: string): Promise<EngineIncome[]> {
   const { data, error } = await supabase
     .from("expected_incomes")
     .select("*")
@@ -10,10 +13,13 @@ export async function listIncomes(householdId: string): Promise<ExpectedIncome[]
     .order("created_at");
   // Before migration 0011 the table does not exist: simply nothing set up.
   if (error) return [];
-  return (data as ExpectedIncome[]) ?? [];
+  return (data as EngineIncome[]) ?? [];
 }
 
-export type IncomeInput = Omit<ExpectedIncome, "id" | "household_id" | "active">;
+export type IncomeInput = Omit<ExpectedIncome, "id" | "household_id" | "active"> & {
+  /** What it is (migration 0015): ordenado, representação, renda or outra. */
+  kind?: IncomeKind | null;
+};
 
 function clean(input: IncomeInput) {
   const label = input.label.trim();
@@ -27,16 +33,26 @@ function clean(input: IncomeInput) {
     every_months: Math.min(12, Math.max(1, Math.round(input.every_months))),
     anchor_month: `${input.anchor_month.slice(0, 7)}-01`,
     match_text: normalizeKeyword(input.match_text ?? "") || null,
+    // Left as it is when not given; anything unknown is "outra".
+    ...(input.kind !== undefined ? { kind: input.kind && KINDS.includes(input.kind) ? input.kind : ("outra" as IncomeKind) } : {}),
   };
 }
 
+/** Before migration 0015 there is no `kind` column: write without it. */
+const missingKind = (e: { message?: string } | null) => !!e && /kind/i.test(e.message ?? "");
+const withoutKind = ({ kind: _kind, ...rest }: ReturnType<typeof clean>) => rest;
+
 export async function createIncome(householdId: string, input: IncomeInput): Promise<void> {
-  const { error } = await supabase.from("expected_incomes").insert({ household_id: householdId, ...clean(input) });
+  const row = clean(input);
+  let { error } = await supabase.from("expected_incomes").insert({ household_id: householdId, ...row });
+  if (missingKind(error)) ({ error } = await supabase.from("expected_incomes").insert({ household_id: householdId, ...withoutKind(row) }));
   if (error) throw error;
 }
 
 export async function updateIncome(id: string, input: IncomeInput): Promise<void> {
-  const { error } = await supabase.from("expected_incomes").update(clean(input)).eq("id", id);
+  const row = clean(input);
+  let { error } = await supabase.from("expected_incomes").update(row).eq("id", id);
+  if (missingKind(error)) ({ error } = await supabase.from("expected_incomes").update(withoutKind(row)).eq("id", id));
   if (error) throw error;
 }
 

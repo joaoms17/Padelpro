@@ -98,6 +98,22 @@ export async function setCategory(
   if (error) throw error;
 }
 
+/** Movements waiting for a category, plus those filed by a suggestion and not confirmed yet. */
+export async function countToReview(householdId: string): Promise<number> {
+  const base = () =>
+    supabase
+      .from("transactions")
+      .select("id", { count: "exact", head: true })
+      .eq("household_id", householdId)
+      .is("matched_transaction_id", null)
+      .neq("source", "applepay");
+  const [none, suggested] = await Promise.all([
+    base().is("category_id", null),
+    base().not("category_id", "is", null).in("category_source", ["sugestao", "ai"]),
+  ]);
+  return (none.count ?? 0) + (suggested.count ?? 0);
+}
+
 /** File several movements at once (a group in "Por categorizar"). */
 export async function setCategoryMany(ids: string[], categoryId: string | null): Promise<void> {
   for (let i = 0; i < ids.length; i += 100) {

@@ -1,12 +1,12 @@
-// End-of-month forecast: what is still coming in (expected incomes, Joana's
-// events) and going out, from today's balance. Pure and testable.
+// Expected incomes: when each one is due, what of it already arrived this
+// month and what is still to come; regular incomes found in the bank. Pure
+// and testable.
 import {
   isUsableKeyword,
   normalizeKeyword,
   normalizeMerchant,
   suggestRuleKeyword,
 } from "@shared/categorize";
-import { daysInMonth, paceProjection } from "./budget";
 
 export interface ExpectedIncome {
   id: string;
@@ -282,56 +282,4 @@ export function suggestIncomes(
     }
   }
   return out.sort((a, b) => b.amount_cents - a.amount_cents).slice(0, 6);
-}
-
-export interface ForecastLine {
-  key: string;
-  label: string;
-  cents: number;
-  detail?: string;
-}
-
-export interface Forecast {
-  balanceCents: number;
-  incoming: ForecastLine[];
-  outgoing: ForecastLine[];
-  endCents: number;
-}
-
-/** Variable spending still to come this month, at the pace so far. */
-export function variaveisRestantes(gastoCents: number, month: string, today: string): number {
-  const dim = daysInMonth(month);
-  const sameMonth = today.slice(0, 7) === month;
-  const day = sameMonth ? Number(today.slice(8, 10)) : dim;
-  return Math.max(0, paceProjection(gastoCents, day, dim) - gastoCents);
-}
-
-/** Balance today + what still comes in − what still goes out = end of month. */
-export function buildForecast(input: {
-  balanceCents: number;
-  incoming: ForecastLine[];
-  fixasPorSairCents: number;
-  mesadasPorSairCents: number;
-  variaveisGastoCents: number;
-  month: string;
-  today: string;
-}): Forecast {
-  const incoming = input.incoming.filter((l) => l.cents > 0);
-  const outgoing: ForecastLine[] = [
-    { key: "fixas", label: "Fixas por pagar", cents: Math.max(0, input.fixasPorSairCents) },
-    { key: "mesadas", label: "Mesadas por sair", cents: Math.max(0, input.mesadasPorSairCents) },
-    {
-      key: "variaveis",
-      label: "Variáveis até ao fim do mês",
-      cents: variaveisRestantes(input.variaveisGastoCents, input.month, input.today),
-      detail: "ao ritmo de gastos deste mês",
-    },
-  ].filter((l) => l.cents > 0);
-  const sum = (ls: ForecastLine[]) => ls.reduce((a, l) => a + l.cents, 0);
-  return {
-    balanceCents: input.balanceCents,
-    incoming,
-    outgoing,
-    endCents: input.balanceCents + sum(incoming) - sum(outgoing),
-  };
 }

@@ -1,12 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
-  buildForecast,
   incomeStatus,
   isDueInMonth,
   matchingCredits,
   nextDueMonth,
   suggestIncomes,
-  variaveisRestantes,
   type Credit,
   type ExpectedIncome,
 } from "./forecast";
@@ -131,25 +129,5 @@ describe("suggestIncomes", () => {
   it("skips what is already set up", () => {
     const s = suggestIncomes(history, [{ match_text: "NTT Data", amount_cents: 249000, parts: 1 }], "2026-10-20");
     expect(s.map((x) => x.parts)).toEqual([2]);
-  });
-});
-
-describe("buildForecast", () => {
-  it("balance + to receive − to pay − variable pace", () => {
-    const f = buildForecast({
-      balanceCents: 500000,
-      incoming: [
-        { key: "a", label: "Ordenado", cents: 250000 },
-        { key: "b", label: "Nada", cents: 0 },
-      ],
-      fixasPorSairCents: 20000,
-      mesadasPorSairCents: 30000,
-      variaveisGastoCents: 20000,
-      month: "2026-01",
-      today: "2026-01-10",
-    });
-    expect(f.incoming.map((l) => l.key)).toEqual(["a"]);
-    expect(variaveisRestantes(20000, "2026-01", "2026-01-10")).toBe(42000);
-    expect(f.endCents).toBe(500000 + 250000 - 20000 - 30000 - 42000);
   });
 });

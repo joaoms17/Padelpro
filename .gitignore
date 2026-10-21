@@ -10,7 +10,7 @@ dev.vars
 .dev.vars
 
 # Node / build
-node_modules/
+node_modules
 dist/
 dist-ssr/
 *.local
