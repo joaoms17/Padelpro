@@ -85,8 +85,9 @@ export function TriageGroup({
   onDone: (notice: { tone: "ok" | "error"; text: string }) => Promise<void> | void;
 }) {
   const [catId, setCatId] = useState<string | null>(group.suggestion);
-  // A person's name is in money in and out alike: no rule unless asked.
-  const [applyRule, setApplyRule] = useState(!!group.keyword && !group.transfer);
+  // A rule is only made when asked (and never for transfers: a person's name
+  // is in money in and out alike).
+  const [applyRule, setApplyRule] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ids = group.rows.map((r) => r.id);
@@ -96,21 +97,26 @@ export function TriageGroup({
   async function save(categoryId: string) {
     setBusy(true);
     setError(null);
+    let saved = 0;
     try {
-      await setCategoryMany(ids, categoryId);
+      saved = await setCategoryMany(ids, categoryId);
     } catch (e) {
       setError(errorMessage(e));
       setBusy(false);
       return;
     }
-    const done = `${plural(n, "movimento", "movimentos")} em ${categoryName(categoryId)}`;
+    const skipped = n - saved;
+    const done =
+      `${plural(saved, "movimento", "movimentos")} em ${categoryName(categoryId)}` +
+      (skipped > 0 ? ` (${skipped} já tinham sido categorizados por um de vocês e ficaram como estavam)` : "");
     let notice: { tone: "ok" | "error"; text: string } = { tone: "ok", text: `Guardado: ${done}.` };
-    if (applyRule && group.keyword) {
+    if (applyRule && group.keyword && !group.transfer) {
       try {
-        const more = await learnKeywordRule({ householdId, keyword: group.keyword, categoryId, createdBy, applyToPast: true });
+        // Only the movements still to come: the past is never re-filed from here.
+        await learnKeywordRule({ householdId, keyword: group.keyword, categoryId, createdBy, applyToPast: false });
         notice = {
           tone: "ok",
-          text: `Guardado: ${done}. Os próximos com “${group.keyword}” ficam já categorizados` + (more > 0 ? ` (e mais ${more} de outros meses).` : "."),
+          text: `Guardado: ${done}. Os próximos com “${group.keyword}” ficam já nesta categoria.`,
         };
       } catch (e) {
         notice = { tone: "error", text: `Guardado: ${done}, mas a regra para “${group.keyword}” falhou: ${errorMessage(e)}` };
@@ -156,7 +162,7 @@ export function TriageGroup({
         )}
       </div>
 
-      {group.keyword && (
+      {group.keyword && !group.transfer && (
         <label className="flex items-start gap-2 text-sm text-tinta/70 dark:text-creme/70">
           <input
             type="checkbox"

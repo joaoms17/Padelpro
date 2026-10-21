@@ -143,8 +143,9 @@ export function TransactionSheet({
     setBusy(true);
     setError(null);
     try {
-      // Saving the category makes it the couple's own (confirms a suggestion).
-      await setCategory(tx.id, categoryId);
+      // A new category, or saving a suggested one (confirms it), makes it the
+      // couple's own; changing only the note or Pontual leaves it as it was.
+      if (categoryChanged || (suggested && categoryId)) await setCategory(tx.id, categoryId);
       if (applyAlways && canRule && categoryId && householdId) {
         await learnKeywordRule({
           householdId,

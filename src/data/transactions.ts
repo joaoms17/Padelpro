@@ -114,19 +114,28 @@ export async function countToReview(householdId: string): Promise<number> {
   return (none.count ?? 0) + (suggested.count ?? 0);
 }
 
-/** File several movements at once (a group in "Por categorizar"). */
-export async function setCategoryMany(ids: string[], categoryId: string | null): Promise<void> {
+/**
+ * File several movements at once (a group in "Por categorizar"). Only rows
+ * still without a category (or with an automatic guess) change: a choice one
+ * of you made meanwhile, on the other phone, is kept. Returns how many changed.
+ */
+export async function setCategoryMany(ids: string[], categoryId: string | null): Promise<number> {
+  let changed = 0;
   for (let i = 0; i < ids.length; i += 100) {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("transactions")
       .update({
         category_id: categoryId,
         category_source: "manual",
         updated_at: new Date().toISOString(),
       })
-      .in("id", ids.slice(i, i + 100));
+      .in("id", ids.slice(i, i + 100))
+      .or("category_id.is.null,category_source.in.(sugestao,ai,history)")
+      .select("id");
     if (error) throw error;
+    changed += data?.length ?? 0;
   }
+  return changed;
 }
 
 /** Confirm what a suggestion (or the AI) filed: it becomes the couple's own choice. */
