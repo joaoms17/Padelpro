@@ -9,7 +9,7 @@ import { loadMembers } from "@/data/settings";
 import { loadMesadaMonths, setMesadaMonth, type MesadaMonth } from "@/data/mesadas";
 import { incomeMonths, type IncomeMonth } from "@/lib/conferir";
 import { ensaio, fullMonths, sustainableMesada, withMesada, type EnsaioMonth } from "@/lib/ensaio";
-import { isOverride, makePaidOut, mesadaFor, takenByMember, type PaidTx } from "@/lib/mesadas";
+import { isOverride, makeCreditKind, makePaidOut, mesadaFor, takenByMember, type PaidTx } from "@/lib/mesadas";
 import { addMonth } from "@/lib/forecast";
 import { formatCents, formatMonth, parseCents } from "@/lib/format";
 import { errorMessage } from "@/lib/errors";
@@ -92,6 +92,7 @@ export function MesadasModulo() {
 
   const group = useMemo(() => new Map(categories.map((c) => [c.id, c.grp])), [categories]);
   const paidOut = useMemo(() => makePaidOut(categories, members), [categories, members]);
+  const creditKind = useMemo(() => makeCreditKind(categories, members), [categories, members]);
   const rows = useMemo(
     () =>
       base &&
@@ -101,8 +102,9 @@ export function MesadasModulo() {
         group,
         mesadasFor: (month) => members.reduce((a, m) => a + mesadaFor(m, month, overrides), 0),
         isPaidOut: (t) => paidOut(t).paid,
+        creditKind,
       }),
-    [base, group, members, overrides, paidOut],
+    [base, group, members, overrides, paidOut, creditKind],
   );
   const taken = useMemo(
     () => (base ? takenByMember(base.tx, paidOut, members) : new Map<string, Map<string, Taken>>()),
@@ -245,8 +247,8 @@ export function MesadasModulo() {
                 </tbody>
               </table>
               <p className="mt-3 text-xs text-tinta/50 dark:text-creme/50 leading-relaxed">
-                Entra = as tuas entradas previstas pelo que entrou de facto (ordenado com prémios, despesas, renda) +
-                o que a Joana marcou como recebido na App1. Despesas = tudo o que saiu para a casa (prestações, fixas,
+                Entra = tudo o que entrou no Santander (ordenado com prémios, despesas, renda, reembolsos…) + as entradas previstas que ainda não chegaram +
+                o que a Joana marcou como recebido na App1 (as transferências dela não contam a dobrar). Despesas = tudo o que saiu para a casa (prestações, fixas,
                 variáveis, atividade). Pago a vocês = mesadas e retiradas/transferências reais. Podia mais = o que ainda
                 sobrava. Toca num mês para ver as contas e mudar a mesada desse mês.
               </p>
@@ -296,7 +298,7 @@ function MonthRow({
         <tr>
           <td colSpan={5} className="pb-3 text-xs text-tinta/60 dark:text-creme/60 space-y-0.5">
             {r.partial && <div className="text-tinta/40 dark:text-creme/40">* mês com dados parciais</div>}
-            {line("+ Entradas do João", r.joaoCents)}
+            {line("+ Entradas no Santander (ordenado, renda, reembolsos…) e previstas em falta", r.joaoCents)}
             {line("+ Recebido pela Joana (App1)", r.joanaCents)}
             {line("− Despesas da casa (prestações, fixas, variáveis, atividade)", r.despesasCents)}
             {line("− Pago a vocês (transferências e mesadas)", r.retiradasCents)}

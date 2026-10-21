@@ -7,7 +7,7 @@ export interface EnsaioMonth {
   month: string;
   /** Bank data only covers part of it (history starts, or the month is not over). */
   partial: boolean;
-  /** João's expected incomes: what really arrived (prémios included), or the expected value if nothing did. */
+  /** Every real income into the account (salary with prémios, rent, refunds…) + expected incomes still missing. */
   joaoCents: number;
   /** Joana: what she marked as received in the App1. */
   joanaCents: number;
@@ -48,6 +48,13 @@ export function ensaio(input: {
   mesadasFor: (month: string) => number;
   /** Money out that went to one of you (default: mesada and "between accounts" categories). */
   isPaidOut?: (t: EnsaioTx) => boolean;
+  /**
+   * What a credit is: real income ("income"), Joana's own transfer (her
+   * money is already counted from the App1), one of you putting money back
+   * ("back": lowers what was paid to you) or a move between own accounts
+   * ("skip"). Default: "between accounts" is skipped, the rest is income.
+   */
+  creditKind?: (t: EnsaioTx) => "income" | "joana" | "back" | "skip";
 }): EnsaioMonth[] {
   const paidOut =
     input.isPaidOut ??
@@ -55,6 +62,9 @@ export function ensaio(input: {
       const g = t.category_id ? input.group.get(t.category_id) : undefined;
       return t.amount_cents < 0 && (g === "mesada" || g === "interna");
     });
+  const creditKind =
+    input.creditKind ??
+    ((t: EnsaioTx) => (t.category_id && input.group.get(t.category_id) === "interna" ? "skip" : "income"));
   return input.months.map((month) => {
     const partial = input.dataFrom.slice(0, 7) === month && input.dataFrom.slice(8, 10) !== "01"
       ? true
@@ -63,22 +73,25 @@ export function ensaio(input: {
     let retiradas = 0;
     let mesadasPagas = 0;
     let semCategoria = 0;
+    let joao = 0;
     for (const t of input.tx) {
       if (t.booking_date.slice(0, 7) !== month) continue;
       const g = t.category_id ? input.group.get(t.category_id) : undefined;
       if (g && HOUSE.includes(g)) despesas -= t.amount_cents;
+      else if (t.amount_cents > 0) {
+        const kind = creditKind(t);
+        if (kind === "income") joao += t.amount_cents;
+        else if (kind === "back") retiradas -= t.amount_cents;
+      }
       else if (paidOut(t)) {
         retiradas -= t.amount_cents;
         if (g === "mesada") mesadasPagas -= t.amount_cents;
       } else if (t.amount_cents < 0 && !g) semCategoria -= t.amount_cents;
     }
-    let joao = 0;
+    // Expected incomes that did not arrive (yet) are assumed to come in.
     for (const rows of input.incomeRows) {
       const r = rows.find((x) => x.month === month);
-      if (!r || r.noData) continue;
-      // What really came in (a prémio too — when passed on to João it shows up
-      // as paid to him); the expected value when nothing arrived.
-      joao += r.due ? Math.max(r.receivedCents, r.expectedCents) : r.receivedCents;
+      if (r && r.due && !r.noData) joao += r.missingCents;
     }
     const joana = input.joanaReceipts
       .filter((r) => r.date.slice(0, 7) === month)

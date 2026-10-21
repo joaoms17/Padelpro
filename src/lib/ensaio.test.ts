@@ -13,9 +13,10 @@ describe("ensaio", () => {
       months: ["2026-09"],
       dataFrom: "2026-07-20",
       today: "2026-10-21",
-      tx: [tx("sup", -40000), tx("sup", 5000), tx("luz", -6000), tx("mes", -30000), tx("int", -50000), tx(null, -1200), tx("sal", 240000)],
+      tx: [tx("sup", -40000), tx("sup", 5000), tx("luz", -6000), tx("mes", -30000), tx("int", -50000), tx(null, -1200), tx("int", 70000)],
       group,
       incomeRows: [[{ month: "2026-09", due: true, expectedCents: 240000, receivedCents: 0, missingCents: 240000, noData: false, credits: [] }]],
+      // salary missing → assumed; the "between accounts" credit is not income
       joanaReceipts: [{ date: "2026-09-05", amount_cents: 80000 }, { date: "2026-08-05", amount_cents: 999 }],
       mesadasFor: () => 60000,
     });
@@ -31,14 +32,21 @@ describe("ensaio", () => {
       sobraCents: 240000 + 80000 - 41000 - 60000,
     });
   });
-  it("João counts what really came in, prémio included; transfers to him count as paid", () => {
+  it("every real income counts (prémio, refunds…); Joana's transfers and money put back don't", () => {
     const [m] = ensaio({
-      months: ["2026-08"], dataFrom: "2026-07-20", today: "2026-10-21", group, joanaReceipts: [], mesadasFor: () => 0,
-      tx: [{ category_id: null, amount_cents: -764388, booking_date: "2026-08-25", description_raw: "TRF P/ JOAO" }],
-      isPaidOut: (t) => (t.description_raw ?? "").includes("JOAO"),
+      months: ["2026-08"], dataFrom: "2026-07-20", today: "2026-10-21", group, joanaReceipts: [{ date: "2026-08-03", amount_cents: 60000 }], mesadasFor: () => 0,
+      tx: [
+        { category_id: "sal", amount_cents: 764388, booking_date: "2026-08-22", description_raw: "NTT DATA" },
+        { category_id: null, amount_cents: 12000, booking_date: "2026-08-10", description_raw: "REEMBOLSO SEGURO" },
+        { category_id: null, amount_cents: 50000, booking_date: "2026-08-11", description_raw: "TRF DE JOANA" },
+        { category_id: null, amount_cents: 20000, booking_date: "2026-08-12", description_raw: "TRF DE JOAO" },
+        { category_id: null, amount_cents: -764388, booking_date: "2026-08-25", description_raw: "TRF P/ JOAO" },
+      ],
+      isPaidOut: (t) => t.amount_cents < 0 && (t.description_raw ?? "").includes("JOAO"),
+      creditKind: (t) => ((t.description_raw ?? "").includes("JOANA") ? "joana" : (t.description_raw ?? "").includes("JOAO") ? "back" : "income"),
       incomeRows: [[{ month: "2026-08", due: true, expectedCents: 195157, receivedCents: 764388, missingCents: 0, noData: false, credits: [] }]],
     });
-    expect(m).toMatchObject({ joaoCents: 764388, retiradasCents: 764388, semCategoriaCents: 0, podiaMaisCents: 0 });
+    expect(m).toMatchObject({ joaoCents: 776388, joanaCents: 60000, retiradasCents: 744388, podiaMaisCents: 776388 + 60000 - 744388 });
   });
   it("the first month (history from the 20th) and the current one are partial", () => {
     const r = ensaio({ months: ["2026-07", "2026-08", "2026-10"], dataFrom: "2026-07-20", today: "2026-10-21", tx: [], group, incomeRows: [], joanaReceipts: [], mesadasFor: () => 0 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { makePaidOut, mesadaFor, takenByMember } from "./mesadas";
+import { makeCreditKind, makePaidOut, mesadaFor, takenByMember } from "./mesadas";
 
 const joao = { id: "j", display_name: "João", mesada_cents: 30000 };
 const joana = { id: "a", display_name: "Joana", mesada_cents: 25000 };
@@ -39,5 +39,16 @@ describe("mesadas", () => {
     const t = takenByMember(tx, paid, [joao, joana]);
     expect(t.get("j")!.get("2026-08")!.cents).toBe(814388);
     expect(t.get("a")!.get("2026-08")!.cents).toBe(35000);
+  });
+  it("credits: Joana's transfers and event money are hers, João's are money back, the rest is income", () => {
+    const kind = makeCreditKind([...cats, { id: "ev", grp: "entrada" as const, name: "Eventos Joana", system_role: "eventos" as const }], [joao, joana]);
+    const c = (desc: string, category_id: string | null = null) => ({ category_id, amount_cents: 100, booking_date: "2026-08-01", description_raw: desc });
+    expect([
+      kind(c("TRF CRED SEPA+ DE JOANA CARNEIRO MORAES")),
+      kind(c("QUALQUER", "ev")),
+      kind(c("TRF DE JOAO M SILVA")),
+      kind(c("ORDENADO DE NTT DATA PORTUGAL")),
+      kind(c("POUPANCA", "int")),
+    ]).toEqual(["joana", "joana", "back", "income", "skip"]);
   });
 });
