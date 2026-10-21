@@ -10,8 +10,8 @@ import {
   projection,
   seedBudget,
   transitionDefaults,
-} from "./plan";
-import { monthBreakdown, type EngineCtx, type EngineTx } from "./month";
+} from "./plan.ts";
+import { monthBreakdown, type EngineCtx, type EngineTx } from "./month.ts";
 
 const members = [
   { id: "mj", display_name: "João" },

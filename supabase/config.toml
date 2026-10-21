@@ -5,9 +5,6 @@ project_id = "contas-a-dois"
 # (householdFromRequest), crons via x-cron-secret (_shared/auth.ts), and
 # ingest-applepay via the member's personal token. JWT verification at the
 # gateway is therefore off — it would also reject the new non-JWT API keys.
-[functions.ai-ask]
-verify_jwt = false
-
 [functions.alerts]
 verify_jwt = false
 

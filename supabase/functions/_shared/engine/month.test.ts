@@ -13,7 +13,7 @@ import {
   topMerchants,
   type EngineCtx,
   type EngineTx,
-} from "./month";
+} from "./month.ts";
 
 const cat = (id: string, grp: string, name: string, system_role: string | null = null, extra: Record<string, unknown> = {}) =>
   ({ id, grp, name, system_role, archived: false, merged_into: null, sort: 0, budget_cents: null, ...extra }) as EngineCtx["categories"][number];

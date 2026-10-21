@@ -1,23 +1,7 @@
-// AI tasks of the app (spec 6.2 / 11): batch categorisation and the
-// month-close summary, on whichever provider is configured (see llm.ts —
-// Gemini or Claude, fast tier). Only redacted descriptions, amounts and dates
-// are sent: no IBANs, no full names.
+// AI task of the app (spec 6.2): batch categorisation, on whichever provider
+// is configured (see llm.ts — Gemini or Claude, fast tier). Only redacted
+// descriptions, amounts and dates are sent: no IBANs, no full names.
 import { generateText, llmProvider } from "./llm.ts";
-
-/** Friendly month-close summary (spec 11). Returns "" if no key or on failure. */
-export async function summarizeMonth(metrics: Record<string, number | null>): Promise<string> {
-  if (!llmProvider()) return "";
-  const prompt = `És o assistente de finanças de um casal (João e Joana) em Portugal.
-Escreve um resumo curto e simpático (2-3 frases, PT-PT) do fecho do mês, com o
-que correu bem, o que fugiu ao esperado e uma sugestão prática. Valores em cêntimos:
-${JSON.stringify(metrics)}
-Responde só com o texto, sem markdown.`;
-  try {
-    return await generateText({ tier: "fast", prompt, maxTokens: 2048 });
-  } catch {
-    return "";
-  }
-}
 
 export interface AICatItem {
   id: string;

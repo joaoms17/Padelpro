@@ -1,5 +1,9 @@
 // Budget + recurring-fixed logic — pure and testable (spec 6.3, 7).
 // Amounts are integer cents; expenses are negative, entradas positive.
+import { budgetLevel, daysInMonth, paceProjection, type BudgetLevel } from "@shared/engine/budget.ts";
+
+// Limits and pace: shared with the Edge Functions.
+export * from "@shared/engine/budget.ts";
 
 export interface MonthTx {
   category_id: string | null;
@@ -11,8 +15,6 @@ export interface MonthTx {
   id?: string;
   description_raw?: string | null;
 }
-
-export type BudgetLevel = "ok" | "warn" | "over";
 
 export interface CategoryProgress {
   categoryId: string;
@@ -34,29 +36,6 @@ export function spentByCategory(txs: MonthTx[]): Map<string, number> {
     out.set(t.category_id, (out.get(t.category_id) ?? 0) + expense);
   }
   return out;
-}
-
-export function budgetLevel(spent: number, budget: number | null): BudgetLevel {
-  if (!budget || budget <= 0) return "ok";
-  const pct = spent / budget;
-  if (pct >= 1) return "over";
-  if (pct >= 0.8) return "warn";
-  return "ok";
-}
-
-/** Project month-end spend from the pace so far. */
-export function paceProjection(
-  spentCents: number,
-  dayOfMonth: number,
-  daysInMonth: number,
-): number {
-  if (dayOfMonth <= 0) return spentCents;
-  return Math.round((spentCents / dayOfMonth) * daysInMonth);
-}
-
-export function daysInMonth(month: string): number {
-  const [y, m] = month.split("-").map(Number);
-  return new Date(y, m, 0).getDate();
 }
 
 export function categoryProgress(

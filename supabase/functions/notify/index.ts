@@ -1,11 +1,15 @@
 // notify — sends Web Push notifications.
 //   • { test: true } from a signed-in user → a test notification to their household
-//   • { type: "weekly" } (service role, cron) → weekly summary to all households
+//   • { type: "weekly" } (service role, cron on Sunday) → each household's week
+//     on the dia a dia and what is still within the month's limit
 //   • { household_id, title, body, prefKey? } (service role) → a custom push
+// Never logs amounts or movements: only counts.
 import { corsHeaders, json } from "../_shared/cors.ts";
 import { householdFromRequest, serviceClient } from "../_shared/db.ts";
 import { isCronRequest } from "../_shared/auth.ts";
 import { pushToHousehold } from "../_shared/push.ts";
+import { householdIds, loadEngineData } from "../_shared/engineData.ts";
+import { weeklySummary } from "../_shared/alertRules.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -30,21 +34,21 @@ Deno.serve(async (req) => {
     if (!isService) return json({ error: "não autorizado" }, 401);
 
     if (body.type === "weekly") {
-      const { data: households } = await svc.from("households").select("id");
+      const ids = await householdIds(svc);
+      const now = new Date();
       let total = 0;
-      for (const h of households ?? []) {
+      let failed = 0;
+      for (const id of ids) {
         try {
-          total += await pushToHousehold(
-            svc,
-            h.id as string,
-            { title: "Resumo da semana", body: "Vê como correu a semana nas Contas a Dois.", url: "/metricas" },
-            "resumo_semana",
-          );
+          const data = await loadEngineData(svc, id, now);
+          const week = weeklySummary(data.txs, data.ctx, data.plan);
+          total += await pushToHousehold(svc, id, { title: "Resumo da semana", body: week.body, url: "/" }, "resumo_semana");
         } catch (_e) {
-          /* isolate per-household failures */
+          failed++; // isolate per-household failures
         }
       }
-      return json({ sent: total });
+      console.log(JSON.stringify({ fn: "notify", type: "weekly", households: ids.length, sent: total, failed }));
+      return json({ sent: total, failed });
     }
 
     if (body.household_id && body.title) {

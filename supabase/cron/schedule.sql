@@ -5,9 +5,12 @@
 --
 -- Horas em UTC. Lisboa = UTC+1 no verão (WEST) e UTC no inverno (WET).
 --   eb-sync-morning / eb-sync-evening  06:00 e 18:00  sincronizar o banco
---   daily-alerts                       08:30          consentimento do banco a expirar
---   monthly-close                      dia 1, 08:00   fecho do mês + resumo IA
---   weekly-summary                     domingo 19:00  resumo semanal (push)
+--   daily-alerts                       08:30          avisos: banco a expirar e, com o plano
+--                                                     em vigor, limites, contas fixas,
+--                                                     entradas, mesadas e Joana (1× por mês)
+--   monthly-close                      dia 1, 08:00   fecho do mês (contas do motor, sem IA) + push
+--   weekly-summary                     domingo 19:00  resumo da semana: dia a dia e o que ainda
+--                                                     podem gastar (push)
 --   cron-cleanup                       domingo 03:00  limpa o histórico dos crons
 
 create extension if not exists pg_cron with schema pg_catalog;

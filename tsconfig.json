@@ -22,6 +22,12 @@
       "@shared/*": ["supabase/functions/_shared/*"]
     }
   },
-  "include": ["src", "supabase/functions/_shared/categorize.ts"],
+  "include": [
+    "src",
+    "supabase/functions/_shared/categorize.ts",
+    "supabase/functions/_shared/engine",
+    "supabase/functions/_shared/alertRules.ts",
+    "supabase/functions/_shared/alertRules.test.ts"
+  ],
   "exclude": ["src/sw.ts"]
 }
