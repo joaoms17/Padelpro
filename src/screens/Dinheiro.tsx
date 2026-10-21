@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { PageHeader, Card } from "@/components/ui";
 import { useHousehold } from "@/data/household";
 import { loadMembers, updateMesada } from "@/data/settings";
@@ -49,6 +49,13 @@ export function Dinheiro() {
         ‹ Definições
       </button>
       <PageHeader title="Mesadas" subtitle="Quanto vai para cada um, e quando." />
+
+      <Link to="/ensaio" className="card p-4 block active:scale-[0.99] transition-transform">
+        <div className="font-medium">Ensaio das mesadas →</div>
+        <div className="text-xs text-tinta/50 dark:text-creme/50 mt-0.5">
+          Como fechava cada mês se entrasse tudo e só saíssem as mesadas
+        </div>
+      </Link>
 
       {saved && <p className="text-sm text-petroleo">Guardado ✓</p>}
 

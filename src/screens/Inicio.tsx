@@ -9,6 +9,7 @@ import { ForecastCard } from "@/components/ForecastCard";
 import { formatCents } from "@/lib/format";
 
 const QUICK_LINKS = [
+  { to: "/ensaio", label: "Ensaio das mesadas", hint: "Como fechava o mês só com mesadas" },
   { to: "/por-rever", label: "Por rever", hint: "Correções e correspondências" },
   { to: "/orcamento", label: "Orçamento", hint: "Limites por categoria" },
   { to: "/objetivos", label: "Objetivos", hint: "Reservas da almofada" },

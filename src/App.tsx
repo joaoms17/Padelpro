@@ -12,6 +12,7 @@ import { Regras } from "@/screens/Regras";
 import { Categorias } from "@/screens/Categorias";
 import { EntradasPrevistas } from "@/screens/EntradasPrevistas";
 import { Conferir } from "@/screens/Conferir";
+import { Ensaio } from "@/screens/Ensaio";
 import { Orcamento } from "@/screens/Orcamento";
 import { Dinheiro } from "@/screens/Dinheiro";
 import { Objetivos } from "@/screens/Objetivos";
@@ -89,6 +90,7 @@ function Gate() {
           <Route path="/categorias" element={<Categorias />} />
           <Route path="/entradas-previstas" element={<EntradasPrevistas />} />
           <Route path="/conferir" element={<Conferir />} />
+          <Route path="/ensaio" element={<Ensaio />} />
           <Route path="/dinheiro" element={<Dinheiro />} />
           <Route path="/apple-pay" element={<ApplePay />} />
           <Route path="/notificacoes" element={<Notificacoes />} />
