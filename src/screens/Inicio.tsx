@@ -88,7 +88,7 @@ const TONE: Record<StatusNote["tone"], string> = {
 };
 
 function StatusLine({ notes, review }: { notes: StatusNote[]; review: ReviewCount }) {
-  const parts = [review.sem > 0 && `${review.sem} por categorizar`, review.validar > 0 && `${review.validar} por confirmar`].filter(Boolean);
+  const parts = [review.sem > 0 && `${review.sem} sem categoria`, review.validar > 0 && `${review.validar} por confirmar`].filter(Boolean);
   return (
     <div className="space-y-2 text-sm">
       {notes.map((n) => (
@@ -153,6 +153,7 @@ function Preparar({
   const totals = planTotals(data.incomes, data.allCategories, plan, data.members.map((m) => m.id));
   const steps = prepSteps({
     closed: view.closed.map((m) => view.real.get(m)!),
+    txs: data.txs,
     incomes: data.incomes,
     plan,
     categories: data.allCategories,

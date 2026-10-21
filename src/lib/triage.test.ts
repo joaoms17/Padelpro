@@ -5,14 +5,19 @@ import {
   groupByCategory,
   groupByDay,
   groupUncategorized,
+  inIncomeLine,
   matchesSearch,
   parseVista,
   rowTitle,
+  ruleReach,
+  salaryNote,
+  salarySplit,
   titleCase,
   transferKeyword,
   transferTargets,
   type TriageTx,
 } from "./triage";
+import { monthBreakdown, type EngineCtx, type MonthBreakdown } from "./month";
 
 let n = 0;
 const t = (date: string, cents: number, desc: string | null, category_id: string | null = null) => ({
@@ -191,5 +196,63 @@ describe("transferTargets", () => {
   });
   it("without members: the app's own 'Para vocês' categories", () => {
     expect(transferTargets(cats, []).map((x) => x.id)).toEqual(["pj", "pa", "pou"]);
+  });
+});
+
+describe("ruleReach (group 'Aplicar também aos próximos')", () => {
+  it("says how many movements the word catches today, besides the group's own", () => {
+    expect(ruleReach(9, 9)).toBe("Apanha 9 movimentos até hoje: só estes.");
+    expect(ruleReach(1, 1)).toBe("Apanha 1 movimento até hoje: só este.");
+    expect(ruleReach(23, 9)).toBe("Apanha 23 movimentos até hoje: estes 9 e mais 14, que ficam como estão.");
+    expect(ruleReach(2, 1)).toBe("Apanha 2 movimentos até hoje: este e mais 1, que fica como está.");
+    // The group's rows always contain the word: never fewer than them.
+    expect(ruleReach(0, 3)).toBe("Apanha 3 movimentos até hoje: só estes.");
+  });
+});
+
+describe("income lines (linha filter)", () => {
+  const sp = (s: string | null) => s?.replace(/ /g, " ") ?? null;
+  const salary = { area: "entrada" as const, key: "ordenado" };
+  it("the extra is the salary movement, only in a month that had one", () => {
+    const withExtra = new Set(["2026-08"]);
+    expect(inIncomeLine(salary, "ordenado", "2026-09", withExtra)).toBe(true);
+    expect(inIncomeLine(salary, "extra", "2026-08", withExtra)).toBe(true);
+    expect(inIncomeLine(salary, "extra", "2026-09", withExtra)).toBe(false);
+    expect(inIncomeLine({ area: "entrada", key: "representacao" }, "extra", "2026-08", withExtra)).toBe(false);
+    expect(inIncomeLine({ area: "entrada", key: "representacao" }, "representacao", "2026-08", withExtra)).toBe(true);
+    expect(inIncomeLine({ area: "voces", key: "mj" }, "ordenado", "2026-08", withExtra)).toBe(false);
+  });
+  it("splits the salary movement's total as Meses does", () => {
+    const line = (key: string, cents: number) => ({ key, cents }) as unknown as MonthBreakdown["entradas"][number];
+    const august = { entradas: [line("ordenado", 195157), line("extra", 569231)] };
+    const september = { entradas: [line("ordenado", 195157), line("extra", 0)] };
+    expect(salarySplit(august)).toEqual({ normal: 195157, extra: 569231 });
+    expect(sp(salaryNote("ordenado", salarySplit(august), 1))).toBe("Este total inclui o extra (prémio, subsídio): 1 951,57 € de ordenado + 5 692,31 € de extra.");
+    expect(sp(salaryNote("extra", salarySplit(august), 1))).toBe("O extra veio junto com o ordenado, neste movimento: 1 951,57 € de ordenado + 5 692,31 € de extra.");
+    expect(sp(salaryNote("extra", salarySplit(august), 2))).toContain("nestes movimentos");
+    expect(salaryNote("ordenado", salarySplit(september), 1)).toBeNull();
+    expect(salaryNote("extra", salarySplit(september), 1)).toBeNull();
+  });
+  it("with the engine: the parts add up to the salary movements listed", () => {
+    const cats = [
+      { id: "ord", grp: "entrada", name: "Ordenado João", system_role: "salario", archived: false, merged_into: null, sort: 0, budget_cents: null },
+    ] as EngineCtx["categories"];
+    const ctx: EngineCtx = {
+      categories: cats,
+      members: [],
+      incomes: [
+        { id: "i1", household_id: "h", label: "Ordenado Joao", amount_cents: 195157, parts: 1, day: 23, every_months: 1, anchor_month: "2026-07-01", match_text: "ntt data", active: true, kind: "salario" },
+      ] as EngineCtx["incomes"],
+      today: "2026-10-21",
+      firstDataDate: "2026-07-01",
+    };
+    const txs = [
+      { id: "a", booking_date: "2026-08-22", amount_cents: 764388, description_raw: "TRF NTT DATA", category_id: "ord", source: "banco" as const },
+      { id: "b", booking_date: "2026-09-22", amount_cents: 195157, description_raw: "TRF NTT DATA", category_id: "ord", source: "banco" as const },
+    ];
+    const aug = salarySplit(monthBreakdown(txs, ctx, "2026-08"));
+    expect(aug.normal + aug.extra).toBe(764388);
+    expect(aug.extra).toBe(569231);
+    expect(salarySplit(monthBreakdown(txs, ctx, "2026-09")).extra).toBe(0);
   });
 });

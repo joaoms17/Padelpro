@@ -153,12 +153,22 @@ describe("mesadaRows / forecastParts", () => {
 
 describe("prepSteps", () => {
   const closed = [
-    { month: "2026-08", semCount: 0, porValidar: 0 },
-    { month: "2026-09", semCount: 3, porValidar: 2 },
+    { month: "2026-08", porValidar: 0 },
+    { month: "2026-09", porValidar: 2 },
+  ];
+  // September: a shop, a transfer to João and representação the engine
+  // already places by name/words — all three still without a category.
+  const txs = [
+    t("2026-08-03", -30000, "COMPRA CONTINENTE", "sup"),
+    t("2026-09-02", -2899, "TEMU.COM DUBLIN"),
+    t("2026-09-01", -50000, "TRF IMED P/ JOAO MANUEL SILVA"),
+    t("2026-09-10", 54160, "TRF DESPESAS JOAO"),
+    t("2026-09-11", -999, "APPLE PAY NOTA", null, { source: "applepay" }),
+    t("2026-10-12", -2899, "TEMU.COM DUBLIN"),
   ];
   const totals = planTotals(incomes, categories, normalizePlan({}), ["mj", "ma"]);
   it("the six steps to the plan, each with its link", () => {
-    const s = prepSteps({ closed, incomes: [], plan: normalizePlan({}), categories: categories.map((x) => ({ ...x, budget_cents: null })), totals, members });
+    const s = prepSteps({ closed, txs, incomes: [], plan: normalizePlan({}), categories: categories.map((x) => ({ ...x, budget_cents: null })), totals, members });
     expect(s.map((x) => [x.key, x.done])).toEqual([
       ["categorizar", false],
       ["entradas", false],
@@ -167,19 +177,29 @@ describe("prepSteps", () => {
       ["dia", false],
       ["mesadas", false],
     ]);
-    expect(s[0]).toMatchObject({ label: "Categorizar agosto e setembro", sub: "Faltam 3 por categorizar · 2 por confirmar", to: "/movimentos?mes=2026-09&vista=categorizar" });
+    expect(s[0]).toMatchObject({ label: "Categorizar agosto e setembro", sub: "3 sem categoria · 2 por confirmar", to: "/movimentos?mes=2026-09&vista=categorizar" });
     expect(s.map((x) => x.to).slice(1)).toEqual(["/plano#entradas", "/plano#joana", "/plano#fixas", "/plano#dia-a-dia", "/plano#mesadas"]);
   });
   it("ticks what is filled in", () => {
     const plan = normalizePlan({ joana_cents: 100000, mesadas: { mj: 60000, ma: 60000 } });
-    const s = prepSteps({ closed: [closed[0], { ...closed[1], semCount: 0 }], incomes, plan, categories, totals, members });
+    const filed = txs.map((x) => (x.booking_date.startsWith("2026-09") ? { ...x, category_id: "sup" } : x));
+    const s = prepSteps({ closed, txs: filed, incomes, plan, categories, totals, members });
     expect(s.every((x) => x.done)).toBe(false);
-    expect(s[0]).toMatchObject({ done: false, to: "/movimentos?mes=2026-09&vista=validar" });
+    expect(s[0]).toMatchObject({ done: false, sub: "2 por confirmar", to: "/movimentos?mes=2026-09&vista=validar" });
     expect(s.slice(1).every((x) => x.done)).toBe(true);
-    const all = prepSteps({ closed: [closed[0]], incomes, plan: { ...plan, active: true }, categories, totals, members });
+    const all = prepSteps({ closed: [closed[0]], txs, incomes, plan: { ...plan, active: true }, categories, totals, members });
     expect(all.every((x) => x.done)).toBe(true);
     expect(all[0].label).toBe("Categorizar agosto");
     expect(all[5].sub.startsWith("Em vigor")).toBe(true);
+  });
+  it("counts what Movimentos lists as por categorizar, also what the engine already places", () => {
+    const sept = monthBreakdown(txs, ctx, "2026-09");
+    // The engine can't place only the shop (the transfer and representação it can)…
+    expect(sept.semCount).toBe(1);
+    // …but the step waits for every movement without a category, as Movimentos and the chip count them.
+    const s = prepSteps({ closed: [{ month: "2026-09", porValidar: 0 }], txs, incomes, plan: normalizePlan({}), categories, totals, members });
+    expect(s[0]).toMatchObject({ done: false, sub: "3 sem categoria" });
+    expect(reviewCount(txs, "2026-10").sem).toBe(4);
   });
 });
 

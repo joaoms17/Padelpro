@@ -7,6 +7,7 @@ import { isDueInMonth } from "./forecast";
 import { inScope, incomeKind, type EngineIncome, type EngineTx, type IncomeKey, type IncomeKind, type MonthBreakdown } from "./month";
 import type { MonthControl, PlanSettings, PlanTotals } from "./plan";
 import { formatEuros, monthName } from "./format";
+import { isSemCategoria, semCategoria } from "./semCategoria";
 import type { Category, Member } from "./types";
 
 const MINUTE = 60_000;
@@ -74,7 +75,7 @@ export function reviewCount(txs: Pick<EngineTx, "booking_date" | "category_id" |
   for (const t of txs) {
     if (t.source === "applepay") continue;
     const other = t.booking_date.slice(0, 7) !== month;
-    if (!t.category_id) {
+    if (isSemCategoria(t)) {
       sem++;
       if (other) semElsewhere = true;
     } else if (t.category_source && SUGGESTED.has(t.category_source)) {
@@ -239,7 +240,9 @@ export interface PrepStep {
 /** The six things to decide before the plan's first month. */
 export function prepSteps(input: {
   /** The closed months' breakdowns (real), oldest first. */
-  closed: Pick<MonthBreakdown, "month" | "semCount" | "porValidar">[];
+  closed: Pick<MonthBreakdown, "month" | "porValidar">[];
+  /** Every movement: those without a category are counted as Movimentos lists them. */
+  txs: Pick<EngineTx, "booking_date" | "category_id" | "source">[];
   incomes: EngineIncome[];
   plan: PlanSettings;
   categories: Pick<Category, "grp" | "budget_cents" | "archived">[];
@@ -247,21 +250,22 @@ export function prepSteps(input: {
   members: Pick<Member, "id" | "display_name">[];
 }): PrepStep[] {
   const { closed, plan, totals } = input;
-  const sem = closed.reduce((a, b) => a + b.semCount, 0);
+  const semOf = new Map(closed.map((b) => [b.month, semCategoria(input.txs, b.month).length]));
+  const sem = closed.reduce((a, b) => a + (semOf.get(b.month) ?? 0), 0);
   const validar = closed.reduce((a, b) => a + b.porValidar, 0);
-  const first = closed.find((b) => b.semCount + b.porValidar > 0);
+  const first = closed.find((b) => (semOf.get(b.month) ?? 0) + b.porValidar > 0);
   const budgeted = (grp: string) => input.categories.some((c) => c.grp === grp && !c.archived && (c.budget_cents ?? 0) > 0);
   const hasMesadas = Object.keys(plan.mesadas).length > 0;
   const nIncomes = input.incomes.filter((i) => i.active).length;
-  const pending = [sem > 0 && `${sem} por categorizar`, validar > 0 && `${validar} por confirmar`].filter(Boolean).join(" · ");
+  const pending = [sem > 0 && `${sem} sem categoria`, validar > 0 && `${validar} por confirmar`].filter(Boolean).join(" · ");
   const mesadas = input.members.map((m) => `${m.display_name} ${formatEuros(Math.max(0, plan.mesadas[m.id] ?? 0))}`).join(" · ");
   return [
     {
       key: "categorizar",
       label: closed.length ? `Categorizar ${monthsLabel(closed.map((b) => b.month))}` : "Categorizar os meses fechados",
       done: !first,
-      sub: first ? `Faltam ${pending}` : "Tudo categorizado e confirmado",
-      to: first ? `/movimentos?mes=${first.month}&vista=${first.semCount > 0 ? "categorizar" : "validar"}` : "/movimentos",
+      sub: first ? pending : "Tudo categorizado e confirmado",
+      to: first ? `/movimentos?mes=${first.month}&vista=${(semOf.get(first.month) ?? 0) > 0 ? "categorizar" : "validar"}` : "/movimentos",
     },
     {
       key: "entradas",
