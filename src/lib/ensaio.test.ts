@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ensaio } from "./ensaio";
+import { ensaio, sustainableMesada, withMesada } from "./ensaio";
 import type { CategoryGroup } from "./types";
 
 const group = new Map<string, CategoryGroup>([
@@ -17,7 +17,7 @@ describe("ensaio", () => {
       group,
       incomeRows: [[{ month: "2026-09", due: true, expectedCents: 240000, receivedCents: 0, missingCents: 240000, noData: false, credits: [] }]],
       joanaReceipts: [{ date: "2026-09-05", amount_cents: 80000 }, { date: "2026-08-05", amount_cents: 999 }],
-      mesadasCents: 60000,
+      mesadasFor: () => 60000,
     });
     expect(m).toMatchObject({
       partial: false,
@@ -31,13 +31,37 @@ describe("ensaio", () => {
   });
   it("João counts at the normal salary, ignoring a prémio paid with it", () => {
     const [m] = ensaio({
-      months: ["2026-08"], dataFrom: "2026-07-20", today: "2026-10-21", tx: [], group, joanaReceipts: [], mesadasCents: 0,
+      months: ["2026-08"], dataFrom: "2026-07-20", today: "2026-10-21", tx: [], group, joanaReceipts: [], mesadasFor: () => 0,
       incomeRows: [[{ month: "2026-08", due: true, expectedCents: 195157, receivedCents: 764388, missingCents: 0, noData: false, credits: [] }]],
     });
     expect(m.joaoCents).toBe(195157);
   });
   it("the first month (history from the 20th) and the current one are partial", () => {
-    const r = ensaio({ months: ["2026-07", "2026-08", "2026-10"], dataFrom: "2026-07-20", today: "2026-10-21", tx: [], group, incomeRows: [], joanaReceipts: [], mesadasCents: 0 });
+    const r = ensaio({ months: ["2026-07", "2026-08", "2026-10"], dataFrom: "2026-07-20", today: "2026-10-21", tx: [], group, incomeRows: [], joanaReceipts: [], mesadasFor: () => 0 });
     expect(r.map((m) => m.partial)).toEqual([true, false, true]);
+  });
+});
+
+describe("mesadas month by month", () => {
+  const base = { dataFrom: "2026-07-01", today: "2026-12-15", tx: [], group, incomeRows: [] };
+  const rows = ensaio({
+    ...base,
+    months: ["2026-09", "2026-10", "2026-12"],
+    joanaReceipts: [
+      { date: "2026-09-10", amount_cents: 200000 },
+      { date: "2026-10-10", amount_cents: 300000 },
+      { date: "2026-12-10", amount_cents: 999999 },
+    ],
+    mesadasFor: (m) => (m === "2026-10" ? 80000 : 60000),
+  });
+  it("uses each month's own mesadas", () => {
+    expect(rows.map((r) => [r.mesadasCents, r.sobraCents])).toEqual([[60000, 140000], [80000, 220000], [60000, 939999]]);
+  });
+  it("sustainable mesada per person from full months only", () => {
+    // full months: Sep (140000+60000) and Oct (220000+80000) → avg 250000 / 2 people
+    expect(sustainableMesada(rows, 2)).toBe(125000);
+  });
+  it("simulator: the same mesada every month", () => {
+    expect(withMesada(rows, 50000, 2).map((r) => r.sobraCents)).toEqual([100000, 200000, 899999]);
   });
 });

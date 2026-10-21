@@ -39,11 +39,12 @@ const ITEMS: Item[] = [
     ),
   },
   {
-    to: "/metricas",
-    label: "Métricas",
+    to: "/mesadas",
+    label: "Mesadas",
     icon: (a) => (
       <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
-        <path d="M5 20V10M12 20V4M19 20v-7" stroke={stroke(a)} strokeWidth="1.8" strokeLinecap="round" />
+        <circle cx="9" cy="12" r="5" stroke={stroke(a)} strokeWidth="1.8" />
+        <circle cx="15" cy="12" r="5" stroke={stroke(a)} strokeWidth="1.8" />
       </svg>
     ),
   },
