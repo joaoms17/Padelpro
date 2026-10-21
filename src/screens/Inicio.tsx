@@ -358,7 +358,7 @@ function Controlar({
       <section className="card p-5 bg-petroleo/5 border-petroleo/20 dark:bg-petroleo/10">
         {ensaio && (
           <div className="mb-2">
-            <Pill tone="amber">Ensaio — o plano começa em {monthName(plan.start_month)}</Pill>
+            <Pill tone="amber">A experimentar — o plano começa em {monthName(plan.start_month)}</Pill>
           </div>
         )}
         {over ? (

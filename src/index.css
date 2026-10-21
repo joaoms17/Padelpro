@@ -61,3 +61,12 @@
     @apply block text-sm font-medium text-tinta/70 dark:text-creme/70 mb-1.5;
   }
 }
+
+/* The brand petrol and terracotta are too dark to read on the dark
+   background: lighter shades for text in dark mode. */
+.dark .text-petroleo {
+  color: #6fc2b8;
+}
+.dark .text-terracota {
+  color: #f0a27f;
+}

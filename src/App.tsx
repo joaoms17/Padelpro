@@ -4,7 +4,9 @@ import { HouseholdProvider } from "@/data/household";
 import { PinLock } from "@/auth/PinLock";
 import { AppShell } from "@/components/AppShell";
 import { Login } from "@/screens/Login";
+import { Inicio } from "@/screens/Inicio";
 import { Movimentos } from "@/screens/Movimentos";
+import { Plano } from "@/screens/Plano";
 import { Meses } from "@/screens/Meses";
 import { Regras } from "@/screens/Regras";
 import { Categorias } from "@/screens/Categorias";
@@ -12,22 +14,6 @@ import { LigarBanco, LigarBancoCallback } from "@/screens/LigarBanco";
 import { ApplePay } from "@/screens/ApplePay";
 import { Notificacoes } from "@/screens/Notificacoes";
 import { Definicoes } from "@/screens/Definicoes";
-import { EmBreve } from "@/components/EmBreve";
-
-// Delivered in steps: these two arrive in the next delivery.
-const EM_BREVE_ESTE_MES = (
-  <EmBreve
-    title="Este mês"
-    what="Quanto ainda podem gastar este mês, os avisos e a previsão para o fim do mês. Até lá, vê os meses fechados e categoriza os movimentos."
-  />
-);
-const EM_BREVE_PLANO = (
-  <EmBreve
-    title="Plano"
-    what="A mesada possível para cada um, os limites do dia a dia e a transição de novembro. Primeiro convém categorizar agosto e setembro."
-  />
-);
-
 function Gate() {
   const { loading, session, member, memberError, signOut } = useAuth();
 
@@ -71,10 +57,10 @@ function Gate() {
       <HouseholdProvider>
         <Routes>
         <Route element={<AppShell />}>
-          <Route path="/" element={EM_BREVE_ESTE_MES} />
+          <Route path="/" element={<Inicio />} />
           <Route path="/meses" element={<Meses />} />
           <Route path="/meses/:mes" element={<Meses />} />
-          <Route path="/plano" element={EM_BREVE_PLANO} />
+          <Route path="/plano" element={<Plano />} />
           <Route path="/movimentos" element={<Movimentos />} />
           <Route path="/definicoes" element={<Definicoes />} />
           <Route path="/regras" element={<Regras />} />

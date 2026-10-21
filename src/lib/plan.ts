@@ -325,7 +325,8 @@ export function monthControl(
         porSair,
       };
     });
-  const dia = categorias.filter((c) => c.grp === "variavel");
+  // What the mesadas pay (once the plan is on) is no longer the house's dia a dia.
+  const dia = categorias.filter((c) => c.grp === "variavel" && !(planOn && plan.mesada_covers.includes(c.categoryId)));
   const diaLimit = dia.reduce((a, c) => a + (c.budget ?? 0), 0);
   const diaSpent = dia.reduce((a, c) => a + c.spent, 0);
   const daysLeft = Math.max(1, dim - day + 1);
