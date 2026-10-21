@@ -13,10 +13,14 @@ export interface EnsaioMonth {
   joanaCents: number;
   /** Real house spending: fixas, variáveis, atividade (net of refunds). */
   despesasCents: number;
-  /** The agreed mesadas of both. */
+  /** The agreed mesadas of both, for this month. */
   mesadasCents: number;
   /** Real mesadas, personal withdrawals and transfers out — replaced by the agreed mesadas. */
   retiradasCents: number;
+  /** Of which, paid in the mesada categories. */
+  mesadasPagasCents: number;
+  /** What was left after the house and what you really took: could have gone to the mesadas too. */
+  podiaMaisCents: number;
   /** Money out with no category: not counted until categorized. */
   semCategoriaCents: number;
   sobraCents: number;
@@ -39,7 +43,8 @@ export function ensaio(input: {
   group: Map<string, CategoryGroup>;
   incomeRows: IncomeMonth[][];
   joanaReceipts: { date: string; amount_cents: number }[];
-  mesadasCents: number;
+  /** Total agreed mesadas for a month (they can change month to month). */
+  mesadasFor: (month: string) => number;
 }): EnsaioMonth[] {
   return input.months.map((month) => {
     const partial = input.dataFrom.slice(0, 7) === month && input.dataFrom.slice(8, 10) !== "01"
@@ -47,12 +52,16 @@ export function ensaio(input: {
       : input.today.slice(0, 7) === month;
     let despesas = 0;
     let retiradas = 0;
+    let mesadasPagas = 0;
     let semCategoria = 0;
     for (const t of input.tx) {
       if (t.booking_date.slice(0, 7) !== month) continue;
       const g = t.category_id ? input.group.get(t.category_id) : undefined;
       if (g && HOUSE.includes(g)) despesas -= t.amount_cents;
-      else if (t.amount_cents < 0 && (g === "mesada" || g === "interna")) retiradas -= t.amount_cents;
+      else if (t.amount_cents < 0 && (g === "mesada" || g === "interna")) {
+        retiradas -= t.amount_cents;
+        if (g === "mesada") mesadasPagas -= t.amount_cents;
+      }
       else if (t.amount_cents < 0 && !g) semCategoria -= t.amount_cents;
     }
     let joao = 0;
@@ -66,17 +75,42 @@ export function ensaio(input: {
     const joana = input.joanaReceipts
       .filter((r) => r.date.slice(0, 7) === month)
       .reduce((a, r) => a + r.amount_cents, 0);
-    const sobra = joao + joana - despesas - input.mesadasCents;
+    const mesadas = input.mesadasFor(month);
+    const sobra = joao + joana - despesas - mesadas;
     return {
       month,
       partial,
       joaoCents: joao,
       joanaCents: joana,
       despesasCents: despesas,
-      mesadasCents: input.mesadasCents,
+      mesadasCents: mesadas,
       retiradasCents: retiradas,
+      mesadasPagasCents: mesadasPagas,
+      podiaMaisCents: joao + joana - despesas - retiradas,
       semCategoriaCents: semCategoria,
       sobraCents: sobra,
     };
+  });
+}
+
+/** Months the bank covers fully (the average uses only these). */
+export const fullMonths = (rows: EnsaioMonth[]) => rows.filter((r) => !r.partial);
+
+/**
+ * The highest mesada per person that would have closed the average full
+ * month at zero: (average sobra + average mesadas) / number of people.
+ */
+export function sustainableMesada(rows: EnsaioMonth[], people: number): number | null {
+  const full = fullMonths(rows);
+  if (!full.length || people <= 0) return null;
+  const avg = full.reduce((a, r) => a + r.sobraCents + r.mesadasCents, 0) / full.length;
+  return Math.floor(avg / people);
+}
+
+/** The months again, with every mesada set to `perPerson` (the simulator). */
+export function withMesada(rows: EnsaioMonth[], perPerson: number, people: number): EnsaioMonth[] {
+  return rows.map((r) => {
+    const mesadas = perPerson * people;
+    return { ...r, mesadasCents: mesadas, sobraCents: r.sobraCents + r.mesadasCents - mesadas };
   });
 }
