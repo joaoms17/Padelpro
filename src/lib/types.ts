@@ -72,7 +72,7 @@ export interface Category {
   merged_into?: string | null;
 }
 
-export type SystemRole = "salario" | "renda" | "eventos" | "mesada";
+export type SystemRole = "salario" | "representacao" | "renda" | "eventos" | "mesada";
 
 export interface Transaction {
   id: string;
@@ -92,6 +92,8 @@ export interface Transaction {
   status: TransactionStatus;
   matched_transaction_id: string | null;
   note: string | null;
+  /** One-off (prémio, a single big purchase): kept out of averages and the plan (migration 0015). */
+  pontual?: boolean;
 }
 
 export interface EventRow {

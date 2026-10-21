@@ -97,6 +97,43 @@ export async function setCategory(
   if (error) throw error;
 }
 
+/** File several movements at once (a group in "Por categorizar"). */
+export async function setCategoryMany(ids: string[], categoryId: string | null): Promise<void> {
+  for (let i = 0; i < ids.length; i += 100) {
+    const { error } = await supabase
+      .from("transactions")
+      .update({
+        category_id: categoryId,
+        category_source: categoryId ? "manual" : null,
+        updated_at: new Date().toISOString(),
+      })
+      .in("id", ids.slice(i, i + 100));
+    if (error) throw error;
+  }
+}
+
+/** Confirm what a suggestion (or the AI) filed: it becomes the couple's own choice. */
+export async function confirmSuggested(ids: string[]): Promise<void> {
+  for (let i = 0; i < ids.length; i += 100) {
+    const { error } = await supabase
+      .from("transactions")
+      .update({ category_source: "manual", updated_at: new Date().toISOString() })
+      .in("id", ids.slice(i, i + 100))
+      .in("category_source", ["sugestao", "ai"])
+      .not("category_id", "is", null);
+    if (error) throw error;
+  }
+}
+
+/** One-off (kept out of the averages and the plan). */
+export async function setPontual(transactionId: string, pontual: boolean): Promise<void> {
+  const { error } = await supabase
+    .from("transactions")
+    .update({ pontual, updated_at: new Date().toISOString() })
+    .eq("id", transactionId);
+  if (error) throw error;
+}
+
 export async function setNote(
   transactionId: string,
   note: string,
