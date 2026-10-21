@@ -47,8 +47,8 @@ const t = (date: string, cents: number, desc: string, category_id: string | null
 
 describe("planTotals", () => {
   it("R + J − F − V − A − P = what is left for both mesadas", () => {
-    const plan = normalizePlan({ joana_cents: 120000, savings_cents: 30000, mesadas: { mj: 50000, ma: 50000 } });
-    const p = planTotals(incomes, categories, plan, ["mj", "ma"]);
+    const plan = normalizePlan({ savings_cents: 30000, mesadas: { mj: 50000, ma: 50000 } });
+    const p = planTotals(incomes, categories, plan, ["mj", "ma"], 120000);
     expect(p).toMatchObject({ R: 369317, J: 120000, F: 170000, V: 90000, A: 10000, P: 30000 });
     expect(p.D).toBe(369317 + 120000 - 170000 - 90000 - 10000 - 30000);
     expect(p.mesadaPossivel).toBe(94000); // 189 317 / 2 → 946,58 → 940 €
@@ -104,18 +104,33 @@ describe("joanaHistory and modelMonth", () => {
   const sep = [t("2026-09-20", 150000, "TRF CRED SEPA+ DE JOANA X")];
   const bAug = monthBreakdown(aug, ctxSep, "2026-08", { semPontuais: true });
   const bSep = monthBreakdown(sep, ctxSep, "2026-09", { semPontuais: true });
-  it("the prudent Joana value is her weakest month that reached the account", () => {
-    const h = joanaHistory([bAug, bSep], { "2026-08": 172500, "2026-09": 247700 });
-    expect(h.suggestion).toBe(100000);
-    expect(h.share).toBeCloseTo(250000 / 420200, 5);
+  it("Joana's part is her Duet average (she puts in all she receives); the risk is her weakest month", () => {
+    const duet = { "2026-06": 90000, "2026-07": 254975, "2026-08": 172500, "2026-09": 247700, "2026-10": 177150 };
+    const h = joanaHistory([bAug, bSep], duet, "2026-10");
+    expect(h).toMatchObject({ count: 4, weakest: 90000, average: Math.round((90000 + 254975 + 172500 + 247700) / 4) });
+    expect(h.months.map((m) => m.month)).toEqual(["2026-06", "2026-07", "2026-08", "2026-09"]);
+    expect(h.months.find((m) => m.month === "2026-08")).toMatchObject({ bank: 100000, duet: 172500 });
+    expect(joanaHistory([bAug], null, "2026-10")).toMatchObject({ average: null, weakest: null, count: 0 });
   });
-  it("with the model: normal incomes, Joana's real money, the plan's mesadas", () => {
+  it("planTotals counts Joana's average, passed in", () => {
+    const p = planTotals(incomes, categories, normalizePlan({}), [], 150000);
+    expect(p.J).toBe(150000);
+    expect(planTotals(incomes, categories, normalizePlan({ joana_cents: 99999 }), []).J).toBe(0);
+  });
+  it("with the model: normal incomes, all Joana got on Duet (or what arrived), the plan's mesadas", () => {
     const plan = normalizePlan({ mesadas: { mj: 60000, ma: 60000 } });
-    const m = modelMonth(bAug, incomes, plan, members);
-    expect(m.entradas).toMatchObject({ ordenado: 195157, representacao: 54160, renda: 120000, joana: 100000 });
+    const m = modelMonth(bAug, incomes, plan, members, 172500);
+    expect(m.entradas).toMatchObject({ ordenado: 195157, representacao: 54160, renda: 120000, joana: 172500 });
+    expect(modelMonth(bAug, incomes, plan, members).entradas.joana).toBe(100000);
     expect(m.mesadas).toBe(120000);
     expect(m.sobra).toBe(m.entrou - 300000 - 120000);
     expect(m.pessoas[0]).toMatchObject({ name: "João", levou: 50000, modelo: 60000 });
+  });
+  it("projection uses what is booked on Duet for a month when given", () => {
+    const plan = normalizePlan({ start_month: "2026-12" });
+    const totals = { J: 150000, F: 0, V: 0, A: 0 };
+    const p = projection("2026-10", 2, 0, [], totals, plan, [], (m) => (m === "2026-11" ? 200000 : 150000));
+    expect(p.map((x) => x.entra)).toEqual([200000, 150000]);
   });
 });
 
