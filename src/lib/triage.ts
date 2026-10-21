@@ -108,8 +108,11 @@ export function groupUncategorized<T extends TriageTx>(rows: T[], suggest?: (t: 
     let keyword: string;
     let key: string;
     if (transfer) {
-      keyword = transferKeyword(t.description_raw) || suggestRuleKeyword(t.description_raw);
-      key = `t:${incoming ? "in" : "out"}:${keyword || merchant || "outros"}`;
+      // Only a person's name groups transfers; without one ("TRF IMED P/
+      // PT50…") each stays on its own — "imed" or "cred sepa" would catch
+      // every transfer.
+      keyword = transferKeyword(t.description_raw);
+      key = `t:${incoming ? "in" : "out"}:${keyword || `id:${t.id}`}`;
     } else {
       keyword = suggestRuleKeyword(t.description_raw);
       key = keyword ? `k:${keyword}` : merchant ? `m:${merchant}` : "outros";
