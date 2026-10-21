@@ -8,6 +8,8 @@ export interface MonthTx {
   counterparty: string | null;
   merchant_clean: string | null;
   account_id?: string;
+  id?: string;
+  description_raw?: string | null;
 }
 
 export type BudgetLevel = "ok" | "warn" | "over";

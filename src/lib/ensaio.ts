@@ -7,7 +7,7 @@ export interface EnsaioMonth {
   month: string;
   /** Bank data only covers part of it (history starts, or the month is not over). */
   partial: boolean;
-  /** João's expected incomes at their normal value (no prémios or subsídios). */
+  /** João's expected incomes: what really arrived (prémios included), or the expected value if nothing did. */
   joaoCents: number;
   /** Joana: what she marked as received in the App1. */
   joanaCents: number;
@@ -30,6 +30,7 @@ export interface EnsaioTx {
   category_id: string | null;
   amount_cents: number;
   booking_date: string;
+  description_raw?: string | null;
 }
 
 const HOUSE: CategoryGroup[] = ["fixa", "variavel", "atividade"];
@@ -45,7 +46,15 @@ export function ensaio(input: {
   joanaReceipts: { date: string; amount_cents: number }[];
   /** Total agreed mesadas for a month (they can change month to month). */
   mesadasFor: (month: string) => number;
+  /** Money out that went to one of you (default: mesada and "between accounts" categories). */
+  isPaidOut?: (t: EnsaioTx) => boolean;
 }): EnsaioMonth[] {
+  const paidOut =
+    input.isPaidOut ??
+    ((t: EnsaioTx) => {
+      const g = t.category_id ? input.group.get(t.category_id) : undefined;
+      return t.amount_cents < 0 && (g === "mesada" || g === "interna");
+    });
   return input.months.map((month) => {
     const partial = input.dataFrom.slice(0, 7) === month && input.dataFrom.slice(8, 10) !== "01"
       ? true
@@ -58,19 +67,18 @@ export function ensaio(input: {
       if (t.booking_date.slice(0, 7) !== month) continue;
       const g = t.category_id ? input.group.get(t.category_id) : undefined;
       if (g && HOUSE.includes(g)) despesas -= t.amount_cents;
-      else if (t.amount_cents < 0 && (g === "mesada" || g === "interna")) {
+      else if (paidOut(t)) {
         retiradas -= t.amount_cents;
         if (g === "mesada") mesadasPagas -= t.amount_cents;
-      }
-      else if (t.amount_cents < 0 && !g) semCategoria -= t.amount_cents;
+      } else if (t.amount_cents < 0 && !g) semCategoria -= t.amount_cents;
     }
     let joao = 0;
     for (const rows of input.incomeRows) {
       const r = rows.find((x) => x.month === month);
       if (!r || r.noData) continue;
-      // The normal amount only: a prémio or subsídio paid with the salary
-      // would make the mesadas look more affordable than they are.
-      if (r.due) joao += r.expectedCents;
+      // What really came in (a prémio too — when passed on to João it shows up
+      // as paid to him); the expected value when nothing arrived.
+      joao += r.due ? Math.max(r.receivedCents, r.expectedCents) : r.receivedCents;
     }
     const joana = input.joanaReceipts
       .filter((r) => r.date.slice(0, 7) === month)
