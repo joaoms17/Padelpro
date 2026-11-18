@@ -10,8 +10,8 @@ import { formatEuros } from "@/lib/format";
 
 const muted = "text-tinta/60 dark:text-creme/60";
 const faint = "text-tinta/50 dark:text-creme/50";
-const POS = "text-petroleo dark:text-teal-300";
-const NEG = "text-terracota dark:text-orange-300";
+const POS = "text-petroleo dark:text-petroleo";
+const NEG = "text-terracota dark:text-terracota";
 
 export function SaldoCard({ balance, series, prevLabel }: { balance: number | null; series: BalancePoint[]; prevLabel: string | null }) {
   if (balance == null) {
@@ -19,7 +19,7 @@ export function SaldoCard({ balance, series, prevLabel }: { balance: number | nu
       <section className="card p-5 text-sm">
         <p className={muted}>
           Ainda sem saldo do banco.{" "}
-          <Link to="/ligar-banco" className="font-medium text-petroleo dark:text-teal-300">
+          <Link to="/ligar-banco" className="font-medium text-petroleo dark:text-petroleo">
             Ligar o banco →
           </Link>
         </p>
@@ -46,7 +46,7 @@ export function SaldoCard({ balance, series, prevLabel }: { balance: number | nu
               <div className={`text-[11px] tnum truncate ${p.current ? "font-semibold" : faint}`}>{compactEuros(p.cents)}</div>
               <div className="mt-1 h-20 flex items-end">
                 <div
-                  className={`w-full rounded-t-lg ${p.cents < 0 ? "bg-terracota" : p.current ? "bg-petroleo" : "bg-petroleo/30 dark:bg-teal-300/25"}`}
+                  className={`w-full rounded-t-lg ${p.cents < 0 ? "bg-terracota" : p.current ? "bg-petroleo" : "bg-petroleo/30 dark:bg-petroleo/25"}`}
                   style={{ height: `${Math.max(4, (Math.abs(p.cents) / max) * 100)}%` }}
                 />
               </div>
@@ -93,7 +93,7 @@ export function VocesCard({ series, month }: { series: VocesPoint[]; month: stri
   );
 }
 
-const DOT = { ok: "bg-petroleo dark:bg-teal-300", wait: "bg-tinta/20 dark:bg-creme/30", late: "bg-amber-500" } as const;
+const DOT = { ok: "bg-petroleo dark:bg-petroleo", wait: "bg-tinta/20 dark:bg-creme/30", late: "bg-amber-500" } as const;
 
 function Quiet({ to, tone, children }: { to: string; tone: keyof typeof DOT; children: ReactNode }) {
   return (

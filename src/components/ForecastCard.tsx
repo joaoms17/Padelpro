@@ -23,7 +23,7 @@ export function ForecastCard({
     return (
       <div className="card p-5 text-sm text-tinta/60 dark:text-creme/60">
         Sem saldo do banco ainda — a previsão para {last} aparece quando o banco for atualizado.{" "}
-        <Link to="/ligar-banco" className="text-petroleo dark:text-teal-300 font-medium">Ligar o banco</Link>
+        <Link to="/ligar-banco" className="text-petroleo dark:text-petroleo font-medium">Ligar o banco</Link>
       </div>
     );
   }
@@ -32,7 +32,7 @@ export function ForecastCard({
   const comeTotal = come.reduce((a, l) => a + l.cents, 0);
   const end = balanceToday + comeTotal - go.reduce((a, l) => a + l.cents, 0);
 
-  const tone = end < 0 ? "text-terracota dark:text-orange-300" : "text-petroleo dark:text-teal-300";
+  const tone = end < 0 ? "text-terracota dark:text-terracota" : "text-petroleo dark:text-petroleo";
   return (
     <Fold
       title="Saldo no fim do mês"
@@ -58,11 +58,11 @@ export function ForecastCard({
         ))}
         <div className="flex items-baseline justify-between gap-3 pt-2 font-semibold">
           <span className="min-w-0 truncate">= Previsão a {last}</span>
-          <Eur cents={end} className={`shrink-0 ${end < 0 ? "text-terracota dark:text-orange-300" : ""}`} />
+          <Eur cents={end} className={`shrink-0 ${end < 0 ? "text-terracota dark:text-terracota" : ""}`} />
         </div>
       </div>
       {end < 0 && (
-        <p className="mt-2 text-xs text-terracota dark:text-orange-300">A conta acaba o mês a negativo: vai ser preciso ir à poupança.</p>
+        <p className="mt-2 text-xs text-terracota dark:text-terracota">A conta acaba o mês a negativo: vai ser preciso ir à poupança.</p>
       )}
     </Fold>
   );

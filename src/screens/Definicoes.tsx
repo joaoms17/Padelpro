@@ -128,7 +128,7 @@ export function Definicoes() {
                   onClick={() => chooseTheme(t)}
                   className={`px-3 py-1.5 ${
                     theme === t
-                      ? "bg-terracota text-creme"
+                      ? "bg-terracota text-creme dark:text-tinta"
                       : "text-tinta/60 dark:text-creme/60"
                   }`}
                 >

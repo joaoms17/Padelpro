@@ -161,7 +161,7 @@ export function ImportStatement({
                   onClick={() => updateMapping({ amountMode: mode })}
                   className={`flex-1 py-2 ${
                     mapping.amountMode === mode
-                      ? "bg-terracota text-creme"
+                      ? "bg-terracota text-creme dark:text-tinta"
                       : "text-tinta/60 dark:text-creme/60"
                   }`}
                 >

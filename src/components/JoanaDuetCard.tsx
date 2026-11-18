@@ -67,7 +67,7 @@ export function JoanaDuetCard({
         </p>
       ) : !waivers ? null : gap.missing > 0 ? (
         <div className="flex items-center justify-between gap-3">
-          <p className="min-w-0 font-medium text-terracota dark:text-orange-300">
+          <p className="min-w-0 font-medium text-terracota dark:text-terracota">
             Faltam <Eur cents={gap.missing} /> chegar à conta
           </p>
           <button
@@ -79,7 +79,7 @@ export function JoanaDuetCard({
           </button>
         </div>
       ) : gap.waived === 0 ? (
-        <p className="font-medium text-petroleo dark:text-teal-300">✓ Chegou tudo</p>
+        <p className="font-medium text-petroleo dark:text-petroleo">✓ Chegou tudo</p>
       ) : null}
       {owed && waivers && gap.waived > 0 && (
         <div className={`flex items-center justify-between gap-3 text-xs ${faint}`}>
@@ -87,7 +87,7 @@ export function JoanaDuetCard({
             Diferença de <Eur cents={gap.waived} /> marcada como não sendo dívida
           </span>
           <button
-            className="shrink-0 font-medium text-petroleo dark:text-teal-300 active:opacity-60 disabled:opacity-50"
+            className="shrink-0 font-medium text-petroleo dark:text-petroleo active:opacity-60 disabled:opacity-50"
             disabled={busy}
             onClick={() => void waive(null)}
           >
@@ -95,8 +95,8 @@ export function JoanaDuetCard({
           </button>
         </div>
       )}
-      {error && <p className="text-xs text-terracota dark:text-orange-300">Não consegui guardar: {error}</p>}
-      <Link to="/meses/joana" className="block text-xs font-medium text-petroleo dark:text-teal-300 active:opacity-60">
+      {error && <p className="text-xs text-terracota dark:text-terracota">Não consegui guardar: {error}</p>}
+      <Link to="/meses/joana" className="block text-xs font-medium text-petroleo dark:text-petroleo active:opacity-60">
         Histórico da Joana na Duet →
       </Link>
     </div>

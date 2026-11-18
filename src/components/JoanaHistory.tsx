@@ -24,9 +24,9 @@ import { Bar, Eur, Section } from "./kit";
 
 const muted = "text-tinta/60 dark:text-creme/60";
 const faint = "text-tinta/50 dark:text-creme/50";
-const POS = "text-petroleo dark:text-teal-300";
-const NEG = "text-terracota dark:text-orange-300";
-const LINK = "font-medium text-petroleo dark:text-teal-300 active:opacity-60";
+const POS = "text-petroleo dark:text-petroleo";
+const NEG = "text-terracota dark:text-terracota";
+const LINK = "font-medium text-petroleo dark:text-petroleo active:opacity-60";
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 /** "2026-09-12" → "12/09". */
