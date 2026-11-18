@@ -30,6 +30,8 @@ import {
 import { formatEuros, monthDay, monthName, monthTitle } from "@/lib/format";
 import { Bar, Eur, Loading, Pill, Ring, Section } from "@/components/kit";
 import { catIcon } from "@/lib/catIcon";
+import { JoanaLine, SaldoCard, VocesCard } from "@/components/Resumo";
+import { balanceSeries, vocesSeries } from "@/lib/resumo";
 import { ForecastCard } from "@/components/ForecastCard";
 
 const muted = "text-tinta/60 dark:text-creme/60";
@@ -65,6 +67,11 @@ function EsteMes({ data, view, error }: { data: EngineData; view: MonthsView; er
   // Joana puts in everything she receives on Duet: what she got this month.
   const duet = useDuetMonth(month);
   const { waivers } = useJoanaWaivers(data.householdId);
+  const saldo = balanceSeries(view.months, view.endBalance, month);
+  const prev = saldo.length > 1 ? saldo[saldo.length - 2] : null;
+  const joanaNow = duet?.configured
+    ? joanaGap(duet.cents, real.entradas.find((l) => l.key === "joana")?.cents ?? 0, waivers?.[month] ?? 0)
+    : null;
 
   return (
     <div className="space-y-6">
@@ -73,6 +80,11 @@ function EsteMes({ data, view, error }: { data: EngineData; view: MonthsView; er
         <StatusLine notes={bankNotes(data.lastSyncAt, data.consentUntil, Date.now())} review={reviewCount(data.txs, month)} />
       </div>
       {error && <p className="text-sm text-terracota dark:text-orange-300">Não consegui atualizar: {error}</p>}
+      <SaldoCard balance={data.balanceCents} series={saldo} prevLabel={prev ? monthName(prev.month) : null} />
+      <div className="space-y-3">
+        <VocesCard series={vocesSeries(view.months, (m) => view.real.get(m)?.voces ?? 0, month)} month={month} />
+        {month >= JOANA_FROM && <JoanaLine gap={joanaNow} loading={duet === null} />}
+      </div>
       {controlar ? (
         <Controlar data={data} real={real} sem={sem} control={control} lastClosed={lastClosed} duet={duet} waived={waivers?.[month] ?? 0} />
       ) : (
@@ -747,7 +759,7 @@ function Entradas({
             <Check done={joana != null && joana.missing === 0 && (joanaDuet ?? 0) > 0} />
             <span className="min-w-0 flex-1">
               <span className="block truncate">Joana</span>
-              <span className={`block text-xs ${joana && joana.missing > 0 ? NEG : faint}`}>
+              <span className={`block text-xs ${faint}`}>
                 {joanaDuet != null && joana ? (
                   joana.missing > 0 ? (
                     <>
