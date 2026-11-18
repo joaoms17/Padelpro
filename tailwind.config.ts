@@ -18,7 +18,7 @@ export default {
         sans: ["var(--font-sans)"],
       },
       borderRadius: {
-        card: "1.25rem",
+        card: "1rem",
       },
       boxShadow: {
         card: "0 1px 2px rgba(30,43,47,0.04), 0 8px 24px rgba(30,43,47,0.06)",

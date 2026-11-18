@@ -143,9 +143,9 @@ function SaveToast({ state, onDismiss }: { state: SaveState; onDismiss: () => vo
   if (state.kind === "idle") return null;
   const cls =
     state.kind === "error"
-      ? "bg-terracota text-creme"
+      ? "bg-terracota text-creme dark:text-tinta"
       : state.kind === "saved"
-        ? "bg-petroleo text-creme"
+        ? "bg-petroleo text-creme dark:text-tinta"
         : "bg-tinta/80 text-creme dark:bg-creme/90 dark:text-tinta";
   return (
     <div className="fixed inset-x-0 bottom-20 z-30 flex justify-center px-4 pointer-events-none" role="status" aria-live="polite">
@@ -182,7 +182,7 @@ function Step({ id, n, title, done, summary, children }: { id: string; n: number
       >
         <span
           className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${
-            done ? "bg-petroleo text-creme" : "border-2 border-tinta/20 dark:border-creme/25 text-tinta/60 dark:text-creme/60"
+            done ? "bg-petroleo text-creme dark:text-tinta" : "border-2 border-tinta/20 dark:border-creme/25 text-tinta/60 dark:text-creme/60"
           }`}
         >
           {done ? "✓" : n}
@@ -766,7 +766,7 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
           {joana.average != null && (
             <p className={`text-xs ${muted}`}>Meses acima da média reforçam a poupança; meses abaixo são cobertos por ela.</p>
           )}
-          <Link to="/meses/joana" className="block text-sm font-medium text-petroleo dark:text-teal-300 active:opacity-60">
+          <Link to="/meses/joana" className="block text-sm font-medium text-petroleo dark:text-petroleo active:opacity-60">
             Ver o histórico completo →
           </Link>
         </div>

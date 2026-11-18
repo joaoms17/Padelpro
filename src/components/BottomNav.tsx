@@ -10,7 +10,7 @@ interface Item {
 }
 
 const stroke = (active: boolean) =>
-  active ? "rgb(var(--terracota))" : "currentColor";
+  active ? "rgb(var(--nav-active))" : "currentColor";
 
 const ITEMS: Item[] = [
   {
@@ -77,7 +77,7 @@ export function BottomNav() {
   const toReview = useToReview();
   return (
     <nav
-      className="sticky bottom-0 z-20 border-t border-areia/70 dark:border-white/10 bg-creme/90 dark:bg-tinta/90 backdrop-blur"
+      className="sticky bottom-0 z-20 border-t border-areia bg-creme/95 dark:bg-tinta/95 backdrop-blur"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <div className="max-w-xl mx-auto grid grid-cols-4">
@@ -86,25 +86,19 @@ export function BottomNav() {
             key={it.to}
             to={it.to}
             end={it.to === "/"}
-            className="flex flex-col items-center gap-1 py-2.5 text-[11px]"
+            className="flex flex-col items-center gap-1 pt-2.5 pb-2 font-display text-[0.8125rem] tracking-[0.1em] uppercase"
           >
             {({ isActive }) => (
               <>
                 <span className="relative">
                   {it.icon(isActive)}
                   {it.to === "/movimentos" && toReview > 0 && (
-                    <span className="absolute -top-1.5 -right-3 min-w-[18px] h-[18px] px-1 rounded-full bg-terracota text-creme text-[10px] font-semibold leading-[18px] text-center tnum">
+                    <span className="absolute -top-1.5 -right-3 min-w-[18px] h-[18px] px-1 rounded-full bg-terracota text-creme dark:text-tinta text-[10px] font-semibold leading-[18px] text-center tnum">
                       {toReview > 99 ? "99+" : toReview}
                     </span>
                   )}
                 </span>
-                <span
-                  className={
-                    isActive
-                      ? "text-terracota font-medium"
-                      : "text-tinta/60 dark:text-creme/60"
-                  }
-                >
+                <span className={isActive ? "font-bold text-tinta dark:text-petroleo" : "font-semibold text-tinta/60 dark:text-creme/60"}>
                   {it.label}
                 </span>
               </>

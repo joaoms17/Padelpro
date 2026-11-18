@@ -36,8 +36,8 @@ import { ForecastCard } from "@/components/ForecastCard";
 
 const muted = "text-tinta/60 dark:text-creme/60";
 const faint = "text-tinta/50 dark:text-creme/50";
-const POS = "text-petroleo dark:text-teal-300";
-const NEG = "text-terracota dark:text-orange-300";
+const POS = "text-petroleo dark:text-petroleo";
+const NEG = "text-terracota dark:text-terracota";
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** Este mês: preparing the plan until December, then controlling the month. */
@@ -85,7 +85,7 @@ function EsteMes({ data, view, error }: { data: EngineData; view: MonthsView; er
         <Header month={month} />
         <StatusLine notes={bankNotes(data.lastSyncAt, data.consentUntil, Date.now())} review={reviewCount(data.txs, month)} />
       </div>
-      {error && <p className="text-sm text-terracota dark:text-orange-300">Não consegui atualizar: {error}</p>}
+      {error && <p className="text-sm text-terracota dark:text-terracota">Não consegui atualizar: {error}</p>}
       <SaldoCard balance={data.balanceCents} series={saldo} prevLabel={prev ? monthName(prev.month) : null} />
       <div className="space-y-3">
         <VocesCard series={vocesSeries(view.months, (m) => view.real.get(m)?.voces ?? 0, month)} month={month} />
@@ -119,7 +119,7 @@ function Header({ month }: { month?: string }) {
 const TONE: Record<StatusNote["tone"], string> = {
   grey: faint,
   amber: "text-amber-700 dark:text-amber-300",
-  red: "text-terracota dark:text-orange-300",
+  red: "text-terracota dark:text-terracota",
 };
 
 function StatusLine({ notes, review }: { notes: StatusNote[]; review: ReviewCount }) {
@@ -142,7 +142,7 @@ function StatusLine({ notes, review }: { notes: StatusNote[]; review: ReviewCoun
       {parts.length > 0 && (
         <Link
           to={review.to}
-          className="inline-block rounded-full border border-terracota/40 bg-terracota/5 px-3 py-1 text-xs font-medium text-terracota dark:text-orange-300 active:opacity-60"
+          className="inline-block rounded-full border border-terracota/40 bg-terracota/5 px-3 py-1 text-xs font-medium text-terracota dark:text-terracota active:opacity-60"
         >
           {parts.join(" · ")} →
         </Link>
@@ -161,7 +161,7 @@ function ClosedLink({ b }: { b: MonthBreakdown }) {
         <Eur cents={Math.abs(s)} className={`font-semibold ${s >= 0 ? POS : NEG}`} />
         {b.status === "provisorio" && <span className={`text-xs ${faint}`}> · provisório</span>}
       </span>
-      <span className="shrink-0 text-sm font-medium text-petroleo dark:text-teal-300">Ver →</span>
+      <span className="shrink-0 text-sm font-medium text-petroleo dark:text-petroleo">Ver →</span>
     </Link>
   );
 }
@@ -224,14 +224,14 @@ function Preparar({
                 <span
                   aria-label={s.done ? "feito" : "por fazer"}
                   className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs ${
-                    s.done ? "bg-petroleo text-creme" : "border-2 border-tinta/20 dark:border-creme/25"
+                    s.done ? "bg-petroleo text-creme dark:text-tinta" : "border-2 border-tinta/20 dark:border-creme/25"
                   }`}
                 >
                   {s.done ? "✓" : ""}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className={`block truncate ${s.done ? muted : "font-medium"}`}>{s.label}</span>
-                  <span className={`block truncate text-xs ${s.done ? faint : s.key === "categorizar" ? "text-terracota dark:text-orange-300" : faint}`}>{s.sub}</span>
+                  <span className={`block truncate text-xs ${s.done ? faint : s.key === "categorizar" ? "text-terracota dark:text-terracota" : faint}`}>{s.sub}</span>
                 </span>
                 <span className={`shrink-0 ${faint}`}>›</span>
               </Link>
@@ -290,7 +290,7 @@ function Preparar({
               </div>
             </div>
           )}
-          <Link to={`/meses/${month}`} className="block text-sm font-medium text-petroleo dark:text-teal-300">
+          <Link to={`/meses/${month}`} className="block text-sm font-medium text-petroleo dark:text-petroleo">
             Ver o mês em detalhe →
           </Link>
         </div>
@@ -313,7 +313,7 @@ function Preparar({
           ) : (
             <p>
               Ainda não há mesadas no plano.{" "}
-              <Link to="/plano#mesadas" className="font-medium text-petroleo dark:text-teal-300">
+              <Link to="/plano#mesadas" className="font-medium text-petroleo dark:text-petroleo">
                 Define-as no Plano →
               </Link>
             </p>
@@ -564,7 +564,7 @@ function DiaADia({
         ))}
       </div>
       {limited.length > FIRST && (
-        <button onClick={() => setAll((a) => !a)} aria-expanded={all} className="mt-3 w-full card px-4 py-3 text-sm font-medium text-petroleo dark:text-teal-300 active:opacity-60">
+        <button onClick={() => setAll((a) => !a)} aria-expanded={all} className="mt-3 w-full card px-4 py-3 text-sm font-medium text-petroleo dark:text-petroleo active:opacity-60">
           {all ? "Mostrar menos" : `Ver as outras ${limited.length - FIRST} categorias`}
         </button>
       )}
@@ -636,7 +636,7 @@ function Fixas({ control }: { control: MonthControl }) {
         ) : (
           <p className={`mt-1 text-sm ${faint}`}>
             Sem valores previstos.{" "}
-            <Link to="/plano#fixas" className="text-petroleo dark:text-teal-300 font-medium">
+            <Link to="/plano#fixas" className="text-petroleo dark:text-petroleo font-medium">
               Definir no Plano →
             </Link>
           </p>
@@ -656,7 +656,7 @@ function Mesadas({ rows }: { rows: MesadaRow[] }) {
           return (
             <div key={r.memberId} className={`card p-3.5 ${r.alem > 0 ? "border-terracota/40 bg-terracota/5" : ""}`}>
               <div className="flex items-center gap-2">
-                <span className="shrink-0 w-9 h-9 rounded-full bg-petroleo/15 text-petroleo dark:bg-teal-300/15 dark:text-teal-300 flex items-center justify-center font-display text-lg" aria-hidden>
+                <span className="shrink-0 w-9 h-9 rounded-full bg-petroleo/15 text-petroleo dark:bg-petroleo/15 dark:text-petroleo flex items-center justify-center font-display text-lg" aria-hidden>
                   {r.name.charAt(0)}
                 </span>
                 <span className="min-w-0 truncate text-sm font-medium">{r.name}</span>
@@ -711,7 +711,7 @@ function Check({ done }: { done: boolean }) {
     <span
       aria-label={done ? "já entrou" : "por entrar"}
       className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs ${
-        done ? "bg-petroleo text-creme" : "border-2 border-tinta/20 dark:border-creme/25"
+        done ? "bg-petroleo text-creme dark:text-tinta" : "border-2 border-tinta/20 dark:border-creme/25"
       }`}
     >
       {done ? "✓" : ""}
@@ -741,7 +741,7 @@ function Entradas({
     <Section
       title="Entradas"
       right={
-        <Link to={`/movimentos?mes=${month}&vista=entradas`} className="text-xs font-medium text-petroleo dark:text-teal-300">
+        <Link to={`/movimentos?mes=${month}&vista=entradas`} className="text-xs font-medium text-petroleo dark:text-petroleo">
           Ver todas →
         </Link>
       }
@@ -798,7 +798,7 @@ function Entradas({
         {incomes.groups.length === 0 && !showJoana && (
           <p className="py-3 text-sm">
             Ainda não há entradas previstas.{" "}
-            <Link to="/plano#entradas" className="font-medium text-petroleo dark:text-teal-300">
+            <Link to="/plano#entradas" className="font-medium text-petroleo dark:text-petroleo">
               Adicionar no Plano →
             </Link>
           </p>

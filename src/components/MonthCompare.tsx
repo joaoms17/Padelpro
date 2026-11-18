@@ -148,7 +148,7 @@ export function MonthCompare({ view, members }: { view: MonthsView; members: { i
             </Link>
           </p>
         )}
-        {receipts?.error && <p className="mt-1 text-[11px] text-terracota dark:text-orange-300">Não consegui ver a Duet: {receipts.error}</p>}
+        {receipts?.error && <p className="mt-1 text-[11px] text-terracota dark:text-terracota">Não consegui ver a Duet: {receipts.error}</p>}
         {hidden > 0 && <p className="mt-1 text-[11px] text-tinta/50 dark:text-creme/50">Mostro os últimos {MAX_MONTHS} meses fechados.</p>}
       </div>
 

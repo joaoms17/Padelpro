@@ -2,16 +2,35 @@
 @tailwind components;
 @tailwind utilities;
 
+/* The look is the one of our other app (Daily Track): «Cartaz» in the light,
+   «Dia de jogo» in the dark. Scoreboard letters (Barlow Condensed) for
+   numbers, titles and labels, Barlow for text. Colour only where it means
+   something: `petroleo` is "good / on track" (blue in the light, lime in the
+   dark) and `terracota` is "over / missing" (orange). The names are the old
+   palette's; the values are "R G B" so Tailwind can add opacity. */
 :root {
-  color-scheme: light dark;
-  /* The palette, as "R G B" so Tailwind can add opacity. */
-  --creme: 246 241 234;
-  --areia: 234 225 211;
-  --tinta: 30 43 47;
-  --terracota: 166 75 37;
-  --petroleo: 46 107 102;
-  --font-display: "Fraunces", Georgia, serif;
-  --font-sans: "DM Sans", system-ui, sans-serif;
+  color-scheme: light;
+  --creme: 241 238 231; /* background */
+  --areia: 214 209 198; /* lines */
+  --tinta: 18 18 18; /* text */
+  --terracota: 185 58 10;
+  --petroleo: 39 67 245;
+  --surface: 255 255 255;
+  --nav-active: 18 18 18;
+  --font-display: "Barlow Condensed", "Barlow", -apple-system, system-ui, sans-serif;
+  --font-sans: "Barlow", -apple-system, system-ui, sans-serif;
+}
+
+/* In the dark the page is `tinta` and the text `creme`. */
+.dark {
+  color-scheme: dark;
+  --creme: 238 242 232; /* text */
+  --areia: 36 48 41; /* lines */
+  --tinta: 12 17 14; /* background */
+  --terracota: 255 122 61;
+  --petroleo: 198 244 50;
+  --surface: 20 27 23;
+  --nav-active: 198 244 50;
 }
 
 @layer base {
@@ -23,6 +42,7 @@
 
   body {
     @apply bg-creme text-tinta font-sans antialiased;
+    font-size: 1.0625rem;
     /* safe areas for iPhone notch / home indicator */
     padding-top: env(safe-area-inset-top);
   }
@@ -35,7 +55,14 @@
   h2,
   h3 {
     font-family: var(--font-display);
-    font-optical-sizing: auto;
+    font-weight: 700;
+  }
+
+  /* Page titles: a poster headline. */
+  h1 {
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.01em;
   }
 
   /* tabular numbers everywhere money is shown */
@@ -46,23 +73,30 @@
 
 @layer components {
   .card {
-    @apply rounded-card bg-white/70 dark:bg-white/[0.04] shadow-card border border-areia/60 dark:border-white/5;
+    @apply rounded-card border border-areia;
+    background-color: rgb(var(--surface));
   }
 
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-full px-5 py-3 font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none;
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl px-5 py-3 font-semibold transition-colors disabled:opacity-50 disabled:pointer-events-none;
   }
 
+  /* The main button is neutral: black in the light, lime in the dark. */
   .btn-primary {
-    @apply btn bg-terracota text-creme hover:bg-terracota/90;
+    @apply btn bg-tinta text-creme;
+  }
+
+  .dark .btn-primary {
+    @apply bg-petroleo text-tinta;
   }
 
   .btn-ghost {
-    @apply btn bg-transparent border border-areia dark:border-white/10 hover:bg-areia/40 dark:hover:bg-white/5;
+    @apply btn bg-transparent border border-areia hover:bg-areia/40;
   }
 
   .input {
-    @apply w-full rounded-2xl border border-areia dark:border-white/10 bg-white/80 dark:bg-white/[0.04] px-4 py-3 text-tinta dark:text-creme outline-none focus:border-petroleo focus:ring-2 focus:ring-petroleo/20;
+    @apply w-full rounded-2xl border border-areia px-4 py-3 text-tinta dark:text-creme outline-none focus:border-petroleo focus:ring-2 focus:ring-petroleo/20;
+    background-color: rgb(var(--surface));
   }
 
   .label {
@@ -70,11 +104,14 @@
   }
 }
 
-/* The brand petrol and terracotta are too dark to read on the dark
-   background: lighter shades for text in dark mode. */
-.dark .text-petroleo {
-  color: #6fc2b8;
+/* Scoreboard numbers and titles. */
+.font-display {
+  font-weight: 700;
+  letter-spacing: 0;
 }
-.dark .text-terracota {
-  color: #f0a27f;
+
+/* Section labels: narrow, spaced capitals. */
+h2.uppercase {
+  font-weight: 600;
+  letter-spacing: 0.14em;
 }
