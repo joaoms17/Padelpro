@@ -1,14 +1,14 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useHousehold } from "@/data/household";
 import { useEngineData, type EngineData } from "@/data/engine";
 import { useDuetMonth, type DuetMonth } from "@/data/duet";
 import { useJoanaWaivers } from "@/data/incomes";
 import { buildMonthsView, type MonthsView } from "@/lib/view";
-import { avisos, modelMonth, monthControl, planTotals, type Aviso, type CategoryControl, type MonthControl } from "@/lib/plan";
+import { modelMonth, monthControl, planTotals, type CategoryControl, type MonthControl } from "@/lib/plan";
 import { JOANA_FROM, type MonthBreakdown } from "@/lib/month";
 import { mesadaFor } from "@/lib/mesadas";
-import { joanaGap } from "@/lib/meses";
+import { joanaGap, type JoanaGap } from "@/lib/meses";
 import { daysInMonth } from "@/lib/budget";
 import {
   applePayPending,
@@ -22,12 +22,14 @@ import {
   prepSteps,
   reviewCount,
   semSaiuBySource,
+  type IncomeProgress,
   type MesadaRow,
   type ReviewCount,
   type StatusNote,
 } from "@/lib/esteMes";
 import { formatEuros, monthDay, monthName, monthTitle } from "@/lib/format";
-import { Bar, Eur, Loading, Pill, Section } from "@/components/kit";
+import { Bar, Eur, Loading, Pill, Ring, Section } from "@/components/kit";
+import { catIcon } from "@/lib/catIcon";
 import { ForecastCard } from "@/components/ForecastCard";
 
 const muted = "text-tinta/60 dark:text-creme/60";
@@ -325,11 +327,8 @@ function Figure({ label, cents }: { label: string; cents: number }) {
 
 // ── Controlar: the month against the limits ────────────────────────────────
 
-const AVISO_DOT: Record<Aviso["level"], string> = {
-  over: "bg-terracota",
-  warn: "bg-amber-500",
-  info: "bg-tinta/30 dark:bg-creme/40",
-};
+const LEVEL_TEXT = { ok: POS, warn: "text-amber-700 dark:text-amber-300", over: NEG } as const;
+const LEVEL_RANK = { over: 0, warn: 1, ok: 2 } as const;
 
 function Controlar({
   data,
@@ -364,12 +363,6 @@ function Controlar({
   const joanaDuet = month >= JOANA_FROM && duet?.configured ? duet.cents : null;
   const joana = joanaDuet != null ? joanaGap(joanaDuet, joanaArrived, waived) : null;
   const mesadas = mesadaRows(data.members, sem, real, mesadaOf);
-  const list = avisos(
-    control,
-    sem,
-    mesadaOf,
-    incomes.missing.map((g) => ({ label: g.label, day: g.day, cents: g.pending })),
-  ).slice(0, 3);
   const forecast = forecastParts({
     control,
     incomes,
@@ -382,269 +375,189 @@ function Controlar({
   const semSaiu = semSaiuBySource(sem, data.txs);
   const pontualDia = Math.max(0, real.dia - sem.dia);
   const over = control.diaLeft < 0;
-  const paceOver = control.diaProjected > control.diaLimit;
-  const expectedIn = incomes.arrived + (month >= JOANA_FROM ? joanaArrived : 0);
+  const paceOver = !over && control.day >= 7 && control.day < dim && control.diaProjected > control.diaLimit;
+  const level = over ? "over" : paceOver ? "warn" : "ok";
+  const icons = new Map(data.allCategories.map((c) => [c.id, catIcon(c.name, c.icon)]));
 
   return (
     <>
-      <section className="card p-5 bg-petroleo/5 border-petroleo/20 dark:bg-petroleo/10">
+      <section className="card p-5">
         {ensaio && (
-          <div className="mb-2">
+          <div className="mb-3 text-center">
             <Pill tone="amber">A experimentar — o plano começa em {monthName(plan.start_month)}</Pill>
           </div>
         )}
-        {over ? (
-          <>
-            <p className={muted}>Passaram o limite do dia a dia em</p>
-            <p className="text-5xl font-display tnum text-terracota dark:text-orange-300">
-              <Eur cents={-control.diaLeft} />
-            </p>
-            <p className={`text-sm mt-1 ${muted}`}>
-              Limite <Eur cents={control.diaLimit} /> · já gastaram <Eur cents={control.diaSpent} />
-            </p>
-          </>
-        ) : (
-          <>
-            <p className={muted}>Ainda podem gastar</p>
-            <p className="text-5xl font-display tnum text-petroleo dark:text-teal-300">
-              <Eur cents={control.diaLeft} />
-            </p>
-            <p className={`text-sm mt-1 ${muted}`}>
-              no dia a dia até {monthDay(month, "last")}
-              {control.daysLeft > 1 ? ` · cerca de ${formatEuros(control.perDay)}/dia` : " · é o último dia"}
-            </p>
-          </>
-        )}
-        {control.day >= 7 && control.day < dim && control.diaSpent > 0 && (
-          <p className={`text-xs mt-2 ${paceOver ? "text-amber-700 dark:text-amber-300" : faint}`}>
-            Ao ritmo de agora, o dia a dia acaba em <Eur cents={control.diaProjected} /> (limite <Eur cents={control.diaLimit} />).
+        <div className="flex flex-col items-center text-center">
+          <Ring value={control.diaSpent} max={control.diaLimit} tick={tick} level={level}>
+            <span className={`text-xs ${muted}`}>{over ? "Acima do limite" : "Podem gastar"}</span>
+            <span className={`text-4xl font-display tnum leading-tight ${LEVEL_TEXT[over ? "over" : "ok"]}`}>
+              <Eur cents={Math.abs(control.diaLeft)} />
+            </span>
+            <span className={`text-xs ${faint}`}>
+              {over ? "no dia a dia" : control.daysLeft > 1 ? `${formatEuros(control.perDay)} por dia` : "é o último dia"}
+            </span>
+          </Ring>
+          <p className={`mt-3 text-lg font-display ${LEVEL_TEXT[level]}`}>
+            {over ? "Passaram o limite do dia a dia" : paceOver ? "A gastar depressa demais" : "No bom caminho"}
           </p>
-        )}
-        {semSaiu.banco > 0 && (
-          <p className="text-xs mt-2 text-amber-700 dark:text-amber-300">
-            <Eur cents={semSaiu.banco} /> ainda sem categoria não contam aqui.{" "}
-            <Link to={`/movimentos?mes=${month}&vista=categorizar`} className="font-medium underline underline-offset-2">
-              Categorizar
-            </Link>
-          </p>
-        )}
-        {semSaiu.applePay > 0 && (
-          <p className="text-xs mt-1 text-amber-700 dark:text-amber-300">
-            <Eur cents={semSaiu.applePay} /> do Apple Pay sem categoria também não contam.{" "}
-            <Link to={`/movimentos?mes=${month}&vista=todos`} className="font-medium underline underline-offset-2">
-              Ver
-            </Link>
-          </p>
+          {paceOver && (
+            <p className={`text-sm ${muted}`}>
+              A este ritmo o mês acaba em <Eur cents={control.diaProjected} />.
+            </p>
+          )}
+        </div>
+        <div className="mt-4 grid grid-cols-3 divide-x divide-areia/70 dark:divide-white/10 text-center">
+          <Figure label="Já gastaram" cents={control.diaSpent} />
+          <Figure label="Limite" cents={control.diaLimit} />
+          <div className="min-w-0">
+            <div className={`text-xs ${faint}`}>Faltam</div>
+            <div className="text-lg font-display tnum truncate">
+              {control.daysLeft} {control.daysLeft === 1 ? "dia" : "dias"}
+            </div>
+          </div>
+        </div>
+        {(semSaiu.banco > 0 || semSaiu.applePay > 0) && (
+          <Link
+            to={semSaiu.banco > 0 ? `/movimentos?mes=${month}&vista=categorizar` : `/movimentos?mes=${month}&vista=todos`}
+            className="mt-4 flex items-center justify-between gap-3 rounded-2xl bg-amber-500/10 px-4 py-2.5 text-sm text-amber-800 dark:text-amber-200 active:opacity-60"
+          >
+            <span className="min-w-0">
+              <Eur cents={semSaiu.banco + semSaiu.applePay} className="font-semibold" /> sem categoria ainda não contam
+            </span>
+            <span className="shrink-0 font-medium">Tratar →</span>
+          </Link>
         )}
         {pontualDia > 0 && (
-          <p className={`text-xs mt-1 ${faint}`}>
-            Os gastos pontuais (<Eur cents={pontualDia} />) não contam para o limite.
+          <p className={`mt-2 text-center text-xs ${faint}`}>
+            Os gastos pontuais (<Eur cents={pontualDia} />) ficam fora do limite.
           </p>
         )}
       </section>
 
-      {list.length > 0 && (
-        <Section title="Avisos">
-          <ul className="card p-4 space-y-2 text-sm">
-            {list.map((a) => (
-              <li key={a.text} className="flex items-start gap-2.5">
-                <span className={`mt-1.5 shrink-0 w-2 h-2 rounded-full ${AVISO_DOT[a.level]}`} />
-                <span className="min-w-0">{a.text}</span>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
+      <DiaADia control={control} tick={tick} month={month} covers={plan.mesada_covers} icons={icons} />
 
-      <Section title="Por área">
-        <div className="card p-5 space-y-5">
-          <Fixas control={control} />
-          <DiaADia control={control} tick={tick} month={month} covers={plan.mesada_covers} />
-          <Trabalho control={control} tick={tick} month={month} />
-          <Mesadas rows={mesadas} />
-        </div>
-      </Section>
+      <Fixas control={control} />
 
-      <Section title="Entradas">
-        <div className="card p-5 space-y-1.5 text-sm">
-          {incomes.groups.length > 0 ? (
-            <>
-              <p>
-                Entrou <Eur cents={incomes.arrived} className="font-semibold" /> de <Eur cents={incomes.expected} /> esperados
-              </p>
-              {incomes.missing.length > 0 ? (
-                <p className={muted}>
-                  Falta:{" "}
-                  {incomes.missing.map((g, i) => (
-                    <span key={g.kind}>
-                      {i > 0 && " · "}
-                      {g.label}
-                      {g.arrived > 0 && (
-                        <>
-                          {" "}
-                          <Eur cents={g.pending} />
-                        </>
-                      )}{" "}
-                      (dia {g.day})
-                    </span>
-                  ))}
-                </p>
-              ) : (
-                <p className="text-petroleo dark:text-teal-300">✓ Já entrou tudo o que era esperado</p>
-              )}
-            </>
-          ) : (
-            <p>
-              Ainda não há entradas previstas.{" "}
-              <Link to="/plano#entradas" className="font-medium text-petroleo dark:text-teal-300">
-                Adicionar no Plano →
-              </Link>
-            </p>
-          )}
-          {month >= JOANA_FROM &&
-            (joanaDuet != null && joana ? (
-              <Link to="/meses/joana" className="block active:opacity-60">
-                Joana: <Eur cents={joanaDuet} /> na Duet este mês · chegou <Eur cents={joanaArrived} />
-                {joana.missing > 0 ? (
-                  <span className={NEG}>
-                    {" "}
-                    · faltam <Eur cents={joana.missing} />
-                  </span>
-                ) : joana.waived > 0 ? (
-                  <span className={faint}> · o resto não é dívida</span>
-                ) : (
-                  joanaDuet > 0 && <span className={POS}> ✓</span>
-                )}
-                <span className={POS}> →</span>
-              </Link>
-            ) : (
-              <Link to="/meses/joana" className="block active:opacity-60">
-                Joana: <Eur cents={joanaArrived} /> na conta este mês
-                <span className={faint}>{duet === null ? " · a ver a Duet…" : " · sem dados da Duet"}</span>
-                <span className={POS}> →</span>
-              </Link>
-            ))}
-          {real.entrou !== expectedIn && (
-            <p className={`text-xs ${faint}`}>
-              Ao todo entrou <Eur cents={real.entrou} /> este mês.
-            </p>
-          )}
-          <Link to={`/movimentos?mes=${month}&vista=entradas`} className="block pt-1 text-xs font-medium text-petroleo dark:text-teal-300">
-            Ver as entradas →
-          </Link>
-        </div>
-      </Section>
+      <Mesadas rows={mesadas} />
 
-      <Section title="Fim do mês">
-        <ForecastCard month={month} balanceToday={data.balanceCents} toCome={forecast.toCome} toGo={forecast.toGo} />
-      </Section>
+      <Entradas
+        month={month}
+        incomes={incomes}
+        joanaDuet={joanaDuet}
+        joana={joana}
+        joanaArrived={joanaArrived}
+        duetLoading={duet === null}
+        total={real.entrou}
+      />
+
+      <ForecastCard month={month} balanceToday={data.balanceCents} toCome={forecast.toCome} toGo={forecast.toGo} />
 
       {control.day <= 5 && lastClosed && <ClosedLink b={lastClosed} />}
     </>
   );
 }
 
-function AreaHead({ title, right }: { title: string; right: ReactNode }) {
+/** One category against its limit: picture, name, how much, a bar. */
+function CatTile({ c, tick, month, icon }: { c: CategoryControl; tick: number; month: string; icon: string }) {
+  const left = (c.budget ?? 0) - c.spent;
+  const edge = c.level === "over" ? "border-terracota/40 bg-terracota/5" : c.level === "warn" ? "border-amber-500/40 bg-amber-500/5" : "";
   return (
-    <div className="flex items-baseline justify-between gap-3 mb-1.5">
-      <span className="font-medium min-w-0 truncate">{title}</span>
-      <span className="shrink-0 text-sm tnum">{right}</span>
-    </div>
-  );
-}
-
-function Fixas({ control }: { control: MonthControl }) {
-  const fixas = control.categorias.filter((c) => c.grp === "fixa");
-  const spent = fixas.reduce((a, c) => a + c.spent, 0);
-  const budget = fixas.reduce((a, c) => a + (c.budget ?? 0), 0);
-  return (
-    <div>
-      <AreaHead
-        title="Contas fixas"
-        right={
-          budget > 0 ? (
-            <>
-              <Eur cents={spent} /> <span className={faint}>de</span> <Eur cents={budget} />
-            </>
-          ) : (
-            <Eur cents={spent} />
-          )
-        }
-      />
-      {budget > 0 && <Bar value={spent} max={budget} level={spent > budget * 1.05 ? "warn" : "ok"} />}
-      <p className={`mt-1 text-xs ${faint}`}>
-        {budget === 0 ? (
-          <>
-            Sem valores previstos.{" "}
-            <Link to="/plano#fixas" className="text-petroleo dark:text-teal-300 font-medium">
-              Plano →
-            </Link>
-          </>
-        ) : control.fixasPendentes.length > 0 ? (
-          <>
-            Faltam:{" "}
-            {control.fixasPendentes.map((f, i) => (
-              <span key={f.name}>
-                {i > 0 && " · "}
-                {f.name} <Eur cents={f.cents} />
-              </span>
-            ))}
-          </>
-        ) : (
-          "✓ Todas pagas"
-        )}
-      </p>
-    </div>
-  );
-}
-
-function CatBar({ c, tick, month }: { c: CategoryControl; tick: number; month: string }) {
-  return (
-    <Link to={`/movimentos?mes=${month}&cat=${c.categoryId}`} className="block active:opacity-60">
-      <div className="flex items-baseline justify-between gap-3 text-sm mb-1">
-        <span className="min-w-0 truncate">{c.name}</span>
-        <span className="shrink-0 tnum">
-          <Eur cents={c.spent} className={c.level === "over" ? "text-terracota dark:text-orange-300" : ""} /> <span className={faint}>/ <Eur cents={c.budget ?? 0} /></span>
+    <Link to={`/movimentos?mes=${month}&cat=${c.categoryId}`} className={`card p-3.5 block active:opacity-60 ${edge}`}>
+      <div className="flex items-center gap-2">
+        <span className="shrink-0 w-9 h-9 rounded-full bg-areia/60 dark:bg-white/10 flex items-center justify-center text-lg" aria-hidden>
+          {icon}
+        </span>
+        <span className="min-w-0 text-sm font-medium leading-tight line-clamp-2">{c.name}</span>
+      </div>
+      <div className="mt-2.5 flex items-baseline justify-between gap-2">
+        <span className="text-xl font-display tnum">
+          <Eur cents={c.spent} />
+        </span>
+        <span className={`text-xs tnum ${faint}`}>
+          de <Eur cents={c.budget ?? 0} />
         </span>
       </div>
-      <Bar value={c.spent} max={c.budget ?? 0} tick={tick} level={c.level} />
+      <div className="mt-1.5">
+        <Bar value={c.spent} max={c.budget ?? 0} tick={tick} level={c.level} />
+      </div>
+      <div className={`mt-1.5 text-xs ${c.level === "ok" ? faint : LEVEL_TEXT[c.level]}`}>
+        {left < 0 ? (
+          <>
+            <Eur cents={-left} /> a mais
+          </>
+        ) : (
+          <>
+            sobram <Eur cents={left} />
+          </>
+        )}
+      </div>
     </Link>
   );
 }
 
-function DiaADia({ control, tick, month, covers }: { control: MonthControl; tick: number; month: string; covers: string[] }) {
+function DiaADia({
+  control,
+  tick,
+  month,
+  covers,
+  icons,
+}: {
+  control: MonthControl;
+  tick: number;
+  month: string;
+  covers: string[];
+  icons: Map<string, string>;
+}) {
   const [open, setOpen] = useState(false);
-  const dia = control.categorias.filter((c) => c.grp === "variavel");
-  const limited = dia.filter((c) => (c.budget ?? 0) > 0);
-  const free = dia.filter((c) => !((c.budget ?? 0) > 0) && c.spent !== 0);
+  const cats = control.categorias.filter((c) => c.grp === "variavel" || c.grp === "atividade");
+  const pct = (c: CategoryControl) => c.spent / (c.budget || 1);
+  const limited = cats.filter((c) => (c.budget ?? 0) > 0).sort((a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level] || pct(b) - pct(a));
+  const free = cats.filter((c) => !((c.budget ?? 0) > 0) && c.spent !== 0);
   const freeTotal = free.reduce((a, c) => a + c.spent, 0);
+  const trouble = limited.filter((c) => c.level !== "ok").length;
+  // Those needing attention always show; the rest up to six.
+  const FIRST = Math.max(6, trouble + (trouble % 2));
+  const [all, setAll] = useState(false);
+  const shown = all ? limited : limited.slice(0, FIRST);
+  if (limited.length === 0 && free.length === 0) return null;
   return (
-    <div>
-      <AreaHead
-        title="Dia a dia"
-        right={
-          <>
-            <Eur cents={control.diaSpent} /> <span className={faint}>de</span> <Eur cents={control.diaLimit} />
-          </>
-        }
-      />
-      <div className="space-y-2.5">
-        {limited.map((c) => (
-          <CatBar key={c.categoryId} c={c} tick={tick} month={month} />
+    <Section
+      title="Onde está a ir"
+      right={
+        trouble > 0 ? (
+          <span className={`text-xs ${NEG}`}>
+            {trouble} a precisar de atenção
+          </span>
+        ) : (
+          <span className={`text-xs ${POS}`}>tudo dentro dos limites</span>
+        )
+      }
+    >
+      <div className="grid grid-cols-2 gap-3">
+        {shown.map((c) => (
+          <CatTile key={c.categoryId} c={c} tick={tick} month={month} icon={icons.get(c.categoryId) ?? "•"} />
         ))}
       </div>
+      {limited.length > FIRST && (
+        <button onClick={() => setAll((a) => !a)} aria-expanded={all} className="mt-3 w-full card px-4 py-3 text-sm font-medium text-petroleo dark:text-teal-300 active:opacity-60">
+          {all ? "Mostrar menos" : `Ver as outras ${limited.length - FIRST} categorias`}
+        </button>
+      )}
       {free.length > 0 && (
-        <div className="mt-2">
-          <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className={`text-xs ${muted} active:opacity-60`}>
-            +{free.length} sem limite: <Eur cents={freeTotal} /> {open ? "▾" : "▸"}
+        <div className="mt-3 card px-4 py-3">
+          <button onClick={() => setOpen((o) => !o)} aria-expanded={open} className="w-full flex items-center justify-between gap-3 text-sm active:opacity-60">
+            <span className={muted}>
+              +{free.length} sem limite {open ? "▾" : "▸"}
+            </span>
+            <Eur cents={freeTotal} className="font-medium" />
           </button>
           {open && (
-            <ul className="mt-1 space-y-0.5 text-xs">
+            <ul className="mt-2 space-y-1 text-sm">
               {free.map((c) => (
                 <li key={c.categoryId}>
                   <Link to={`/movimentos?mes=${month}&cat=${c.categoryId}`} className="flex justify-between gap-3 py-0.5 active:opacity-60">
                     <span className={`min-w-0 truncate ${muted}`}>
-                      {c.name}
+                      {icons.get(c.categoryId)} {c.name}
                       {covers.includes(c.categoryId) && " · paga a mesada"}
                     </span>
                     <Eur cents={c.spent} className="shrink-0" />
@@ -655,66 +568,221 @@ function DiaADia({ control, tick, month, covers }: { control: MonthControl; tick
           )}
         </div>
       )}
-    </div>
+    </Section>
   );
 }
 
-function Trabalho({ control, tick, month }: { control: MonthControl; tick: number; month: string }) {
-  const cats = control.categorias.filter((c) => c.grp === "atividade" && ((c.budget ?? 0) > 0 || c.spent !== 0));
-  if (cats.length === 0) return null;
+function Fixas({ control }: { control: MonthControl }) {
+  const fixas = control.categorias.filter((c) => c.grp === "fixa");
+  const spent = fixas.reduce((a, c) => a + c.spent, 0);
+  const budget = fixas.reduce((a, c) => a + (c.budget ?? 0), 0);
+  const pending = control.fixasPendentes;
   return (
-    <div className="space-y-2.5">
-      {cats.map((c) =>
-        (c.budget ?? 0) > 0 ? (
-          <CatBar key={c.categoryId} c={c} tick={tick} month={month} />
+    <Section title="Contas fixas">
+      <div className="card p-5">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-2xl font-display tnum">
+            <Eur cents={spent} />
+          </span>
+          {budget > 0 && (
+            <span className={`text-sm tnum ${faint}`}>
+              de <Eur cents={budget} />
+            </span>
+          )}
+        </div>
+        {budget > 0 ? (
+          <>
+            <div className="mt-2">
+              <Bar value={spent} max={budget} level={spent > budget * 1.05 ? "warn" : "ok"} />
+            </div>
+            {pending.length > 0 ? (
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                <span className={`text-xs py-1 ${faint}`}>Por pagar:</span>
+                {pending.map((f) => (
+                  <span key={f.name} className="rounded-full bg-tinta/5 dark:bg-white/10 px-2.5 py-1 text-xs">
+                    {f.name} <Eur cents={f.cents} className="font-medium" />
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className={`mt-2 text-sm ${POS}`}>✓ Todas pagas</p>
+            )}
+          </>
         ) : (
-          <AreaHead key={c.categoryId} title={c.name} right={<Eur cents={c.spent} />} />
-        ),
-      )}
-    </div>
+          <p className={`mt-1 text-sm ${faint}`}>
+            Sem valores previstos.{" "}
+            <Link to="/plano#fixas" className="text-petroleo dark:text-teal-300 font-medium">
+              Definir no Plano →
+            </Link>
+          </p>
+        )}
+      </div>
+    </Section>
   );
 }
 
 function Mesadas({ rows }: { rows: MesadaRow[] }) {
   if (rows.length === 0) return null;
   return (
-    <div>
-      <div className="font-medium mb-1.5">Mesadas</div>
-      <div className="space-y-2.5">
-        {rows.map((r) => (
-          <div key={r.memberId}>
-            <div className="flex items-baseline justify-between gap-3 text-sm mb-1">
-              <span className="min-w-0 truncate">{r.name}</span>
-              <span className="shrink-0 tnum">
-                {r.mesada > 0 ? (
+    <Section title="Mesadas">
+      <div className="grid grid-cols-2 gap-3">
+        {rows.map((r) => {
+          const done = r.mesada > 0 && r.alem === 0 && r.levou >= r.mesada;
+          return (
+            <div key={r.memberId} className={`card p-3.5 ${r.alem > 0 ? "border-terracota/40 bg-terracota/5" : ""}`}>
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 w-9 h-9 rounded-full bg-petroleo/15 text-petroleo dark:bg-teal-300/15 dark:text-teal-300 flex items-center justify-center font-display text-lg" aria-hidden>
+                  {r.name.charAt(0)}
+                </span>
+                <span className="min-w-0 truncate text-sm font-medium">{r.name}</span>
+                {done && <span className={`ml-auto ${POS}`}>✓</span>}
+              </div>
+              <div className="mt-2.5 flex items-baseline justify-between gap-2">
+                <span className="text-xl font-display tnum">
+                  <Eur cents={r.levou} />
+                </span>
+                {r.mesada > 0 && (
+                  <span className={`text-xs tnum ${faint}`}>
+                    de <Eur cents={r.mesada} />
+                  </span>
+                )}
+              </div>
+              {r.mesada > 0 && (
+                <div className="mt-1.5">
+                  <Bar value={r.levou} max={r.mesada} level={r.alem > 0 ? "over" : "ok"} />
+                </div>
+              )}
+              <div className={`mt-1.5 text-xs ${r.alem > 0 ? NEG : faint}`}>
+                {r.mesada === 0 ? (
+                  "sem mesada este mês"
+                ) : r.alem > 0 ? (
                   <>
-                    <Eur cents={r.levou} className={r.alem > 0 ? "text-terracota dark:text-orange-300" : ""} /> <span className={faint}>de</span> <Eur cents={r.mesada} />
-                    {r.alem === 0 && r.levou >= r.mesada && <span className="text-petroleo dark:text-teal-300"> ✓</span>}
+                    <Eur cents={r.alem} /> além da mesada
                   </>
-                ) : r.levou !== 0 ? (
+                ) : r.porSair > 0 ? (
                   <>
-                    levou <Eur cents={r.levou} />
+                    faltam <Eur cents={r.porSair} />
                   </>
                 ) : (
-                  <span className={faint}>sem mesada este mês</span>
+                  "recebida"
                 )}
-              </span>
+                {r.pontual > 0 && (
+                  <>
+                    {" · +"}
+                    <Eur cents={r.pontual} /> pontual
+                  </>
+                )}
+              </div>
             </div>
-            {r.mesada > 0 && <Bar value={r.levou} max={r.mesada} level={r.alem > 0 ? "over" : "ok"} />}
-            {r.alem > 0 && (
-              <p className="mt-1 text-xs text-terracota dark:text-orange-300">
-                {r.name} levou <Eur cents={r.levou} /> (<Eur cents={r.alem} /> além da mesada)
-              </p>
-            )}
-            {r.mesada === 0 && r.levou !== 0 && <p className={`mt-0.5 text-xs ${faint}`}>Sem mesada este mês.</p>}
-            {r.pontual > 0 && (
-              <p className={`mt-0.5 text-xs ${faint}`}>
-                + <Eur cents={r.pontual} /> pontual, à parte
-              </p>
-            )}
+          );
+        })}
+      </div>
+    </Section>
+  );
+}
+
+function Check({ done }: { done: boolean }) {
+  return (
+    <span
+      aria-label={done ? "já entrou" : "por entrar"}
+      className={`shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs ${
+        done ? "bg-petroleo text-creme" : "border-2 border-tinta/20 dark:border-creme/25"
+      }`}
+    >
+      {done ? "✓" : ""}
+    </span>
+  );
+}
+
+function Entradas({
+  month,
+  incomes,
+  joanaDuet,
+  joana,
+  joanaArrived,
+  duetLoading,
+  total,
+}: {
+  month: string;
+  incomes: IncomeProgress;
+  joanaDuet: number | null;
+  joana: JoanaGap | null;
+  joanaArrived: number;
+  duetLoading: boolean;
+  total: number;
+}) {
+  const showJoana = month >= JOANA_FROM;
+  return (
+    <Section
+      title="Entradas"
+      right={
+        <Link to={`/movimentos?mes=${month}&vista=entradas`} className="text-xs font-medium text-petroleo dark:text-teal-300">
+          Ver todas →
+        </Link>
+      }
+    >
+      <div className="card px-5 py-2 divide-y divide-areia/60 dark:divide-white/10">
+        {incomes.groups.map((g) => (
+          <div key={g.kind} className="flex items-center gap-3 py-2.5">
+            <Check done={g.pending === 0} />
+            <span className="min-w-0 flex-1">
+              <span className={`block truncate ${g.pending === 0 ? "" : "font-medium"}`}>{g.label}</span>
+              {g.pending > 0 && (
+                <span className={`block text-xs ${faint}`}>
+                  {g.arrived > 0 ? (
+                    <>
+                      faltam <Eur cents={g.pending} /> · dia {g.day}
+                    </>
+                  ) : (
+                    `esperado no dia ${g.day}`
+                  )}
+                </span>
+              )}
+            </span>
+            <Eur cents={g.pending === 0 ? g.arrived : g.expected} className={`shrink-0 ${g.pending === 0 ? "" : faint}`} />
           </div>
         ))}
+        {showJoana && (
+          <Link to="/meses/joana" className="flex items-center gap-3 py-2.5 active:opacity-60">
+            <Check done={joana != null && joana.missing === 0 && (joanaDuet ?? 0) > 0} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate">Joana</span>
+              <span className={`block text-xs ${joana && joana.missing > 0 ? NEG : faint}`}>
+                {joanaDuet != null && joana ? (
+                  joana.missing > 0 ? (
+                    <>
+                      recebeu <Eur cents={joanaDuet} /> na Duet · faltam <Eur cents={joana.missing} />
+                    </>
+                  ) : joana.waived > 0 ? (
+                    "o resto não é dívida"
+                  ) : (
+                    <>
+                      recebeu <Eur cents={joanaDuet} /> na Duet
+                    </>
+                  )
+                ) : duetLoading ? (
+                  "a ver a Duet…"
+                ) : (
+                  "sem dados da Duet"
+                )}
+              </span>
+            </span>
+            <Eur cents={joanaArrived} className="shrink-0" />
+          </Link>
+        )}
+        {incomes.groups.length === 0 && !showJoana && (
+          <p className="py-3 text-sm">
+            Ainda não há entradas previstas.{" "}
+            <Link to="/plano#entradas" className="font-medium text-petroleo dark:text-teal-300">
+              Adicionar no Plano →
+            </Link>
+          </p>
+        )}
+        <div className="flex items-baseline justify-between gap-3 py-2.5 font-semibold">
+          <span>Já entrou este mês</span>
+          <Eur cents={total} />
+        </div>
       </div>
-    </div>
+    </Section>
   );
 }

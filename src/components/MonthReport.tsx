@@ -34,7 +34,7 @@ import {
 import { modelMonth, planMesada } from "@/lib/plan";
 import { semCategoria, semCategoriaBanner } from "@/lib/semCategoria";
 import type { MonthsView } from "@/lib/view";
-import { AREA_COLORS, Eur, Pill, Section, StackedBar } from "./kit";
+import { AREA_COLORS, Eur, Fold, Pill, Section, StackedBar } from "./kit";
 import { JoanaDuetCard } from "./JoanaDuetCard";
 
 export type ReportMode = "real" | "modelo";
@@ -404,15 +404,12 @@ function Entradas({ b, data, month, duet }: { b: MonthBreakdown; data: EngineDat
 
 // ── Para onde foi ───────────────────────────────────────────────────────────
 
+/** An area of the month: its total on one line, the detail on opening. */
 function AreaCard({ title, cents, children }: { title: string; cents: number; children: ReactNode }) {
   return (
-    <div className="card px-4 py-3 text-sm">
-      <div className="flex items-baseline justify-between gap-3 pb-1">
-        <h3 className="font-semibold text-base">{title}</h3>
-        <Eur cents={cents} className="font-semibold" />
-      </div>
-      {children}
-    </div>
+    <Fold title={title} right={<Eur cents={cents} className="font-semibold" />}>
+      <div className="text-sm">{children}</div>
+    </Fold>
   );
 }
 
@@ -634,7 +631,7 @@ function ComoSaiu({ metodo }: { metodo: Record<Method, number> }) {
   const items = (Object.keys(metodo) as Method[]).filter((m) => metodo[m] > 0).sort((a, b) => metodo[b] - metodo[a]);
   if (items.length === 0) return null;
   return (
-    <Section title="Como saiu">
+    <Fold title="Como saiu" sub="cartão, débitos diretos, transferências">
       <div className="flex flex-wrap gap-2">
         {items.map((m) => (
           <span key={m} className="rounded-full border border-areia dark:border-white/10 px-3 py-1.5 text-sm">
@@ -642,7 +639,7 @@ function ComoSaiu({ metodo }: { metodo: Record<Method, number> }) {
           </span>
         ))}
       </div>
-    </Section>
+    </Fold>
   );
 }
 
@@ -667,8 +664,8 @@ function Maiores({ b, categoryName, reload }: { b: MonthBreakdown; categoryName:
   }
 
   return (
-    <Section title={`Os ${b.maiores.length} maiores gastos do dia a dia`}>
-      <div className="card px-4 py-1 text-sm divide-y divide-areia/60 dark:divide-white/5">
+    <Fold title={`Os ${b.maiores.length} maiores gastos`} sub="do dia a dia · marcar os que não se repetem">
+      <div className="text-sm divide-y divide-areia/60 dark:divide-white/5">
         {b.maiores.map((t) => (
           <div key={t.id} className="flex items-center justify-between gap-2 py-2">
             <span className="min-w-0 flex-1">
@@ -692,7 +689,7 @@ function Maiores({ b, categoryName, reload }: { b: MonthBreakdown; categoryName:
       </div>
       {err && <p className="mt-2 text-sm text-terracota">Não consegui guardar: {err}</p>}
       <p className={`mt-1 text-xs ${muted}`}>Pontual: um gasto que não se repete (fica fora das médias e do plano).</p>
-    </Section>
+    </Fold>
   );
 }
 

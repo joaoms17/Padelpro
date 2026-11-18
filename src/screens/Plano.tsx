@@ -10,7 +10,7 @@ import { lastDayOf, loadDuetEvents, loadDuetReceipts, type DuetReceipt } from "@
 import { useJoanaWaivers } from "@/data/incomes";
 import { BudgetTable, EuroInput } from "@/components/BudgetTable";
 import { IncomeSheet, draftFromSuggestion, newIncomeDraft, amountText, type IncomeDraft } from "@/components/IncomeSheet";
-import { Chip, Eur, Loading, Pill, Row, Section } from "@/components/kit";
+import { AREA_COLORS, Chip, Eur, Loading, Pill, Row, Section, StackedBar } from "@/components/kit";
 import { buildMonthsView } from "@/lib/view";
 import { joanaHistory, monthlyEq, planTotals, projection, type ExtrasRule, type PlanSettings } from "@/lib/plan";
 import { incomeKind, JOANA_FROM } from "@/lib/month";
@@ -59,21 +59,16 @@ const EXTRAS: { value: ExtrasRule; label: string }[] = [
   { value: "decidir", label: "Decidimos cada vez" },
 ];
 
-const STEPS = [
-  { id: "entradas", short: "Entradas" },
-  { id: "joana", short: "Joana" },
-  { id: "fixas", short: "Contas fixas" },
-  { id: "dia-a-dia", short: "Dia a dia" },
-  { id: "poupanca", short: "Poupança" },
-  { id: "mesadas", short: "Mesadas" },
-] as const;
-
 const DAY_MS = 86400000;
 const daysBefore = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) - n * DAY_MS).toISOString().slice(0, 10);
 const capital = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
+const OPEN_EVENT = "plano:abrir";
+
+/** Open a step (they start closed) and bring it into view. */
 function go(id: string, behavior: ScrollBehavior = "smooth") {
-  document.getElementById(id)?.scrollIntoView({ behavior, block: "start" });
+  window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: id }));
+  requestAnimationFrame(() => document.getElementById(id)?.scrollIntoView({ behavior, block: "start" }));
 }
 
 function Header({ plan, current, pending = false }: { plan: PlanSettings | null; current: string | null; pending?: boolean }) {
@@ -168,19 +163,37 @@ function SaveToast({ state, onDismiss }: { state: SaveState; onDismiss: () => vo
   );
 }
 
-function Step({ id, n, title, done, children }: { id: string; n: number; title: string; done: boolean; children: ReactNode }) {
+/** One step of the plan: a line with its number, state and value, opening for the detail. */
+function Step({ id, n, title, done, summary, children }: { id: string; n: number; title: string; done: boolean; summary?: ReactNode; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      if ((e as CustomEvent<string>).detail === id) setOpen(true);
+    };
+    window.addEventListener(OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_EVENT, onOpen);
+  }, [id]);
   return (
     <div id={id} className="scroll-mt-16">
-      <Section
-        title={
-          <>
-            {n}. {title}
-            {done && <span className="ml-1.5 text-petroleo">✓</span>}
-          </>
-        }
+      <button
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className={`w-full card px-4 py-3.5 flex items-center gap-3 text-left active:opacity-60 ${open ? "border-petroleo/40" : ""}`}
       >
-        {children}
-      </Section>
+        <span
+          className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${
+            done ? "bg-petroleo text-creme" : "border-2 border-tinta/20 dark:border-creme/25 text-tinta/60 dark:text-creme/60"
+          }`}
+        >
+          {done ? "✓" : n}
+        </span>
+        <span className="min-w-0 flex-1 font-medium truncate">{title}</span>
+        {summary != null && <span className="shrink-0 tnum text-sm text-tinta/70 dark:text-creme/70">{summary}</span>}
+        <svg viewBox="0 0 24 24" fill="none" className={`shrink-0 w-4 h-4 text-tinta/40 dark:text-creme/40 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden>
+          <path d="m6 9 6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && <div className="mt-3 mb-2">{children}</div>}
     </div>
   );
 }
@@ -514,6 +527,20 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
 
       {/* ── A. The decision ──────────────────────────────────────────────── */}
       <div ref={cardRef} id="decisao" className="card p-5 space-y-4 scroll-mt-16">
+        {totals.R + totals.J > 0 && (
+          <div>
+            <p className={`mb-2 text-xs ${faint}`}>Para onde vai o que entra num mês</p>
+            <StackedBar
+              parts={[
+                { key: "fixa", label: "Contas fixas", cents: totals.F, color: AREA_COLORS.fixa },
+                { key: "dia", label: "Dia a dia", cents: totals.V, color: AREA_COLORS.dia },
+                { key: "trabalho", label: "Trabalho da Joana", cents: totals.A, color: AREA_COLORS.trabalho },
+                { key: "poupanca", label: "Poupança", cents: totals.P, color: "#5B8DB8" },
+                { key: "voces", label: "Mesadas", cents: Math.max(0, totals.D), color: AREA_COLORS.voces },
+              ]}
+            />
+          </div>
+        )}
         <div>
           <Row label="Entra todos os meses" right={<Eur cents={totals.R} />} onClick={() => go("entradas")} />
           <Row
@@ -622,26 +649,10 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
       </div>
 
       {/* ── B. The steps ─────────────────────────────────────────────────── */}
-      <nav className="-mx-4 px-4 flex gap-2 overflow-x-auto pb-1" aria-label="Passos">
-        {STEPS.map((s, i) => {
-          const done = [steps.entradas, steps.joana, steps.fixas, steps.dia, steps.poupanca, steps.mesadas][i];
-          return (
-            <button
-              key={s.id}
-              onClick={() => go(s.id)}
-              className={`shrink-0 rounded-full border px-3 py-1 text-xs ${
-                done ? "border-petroleo/40 text-petroleo" : "border-areia dark:border-white/10 text-tinta/70 dark:text-creme/70"
-              }`}
-            >
-              {i + 1}. {s.short}
-              {done && " ✓"}
-            </button>
-          );
-        })}
-      </nav>
-
+      <Section title="Os seis passos do plano">
+        <div className="space-y-3">
       {/* 1. Incomes */}
-      <Step id="entradas" n={1} title="O que entra todos os meses" done={steps.entradas}>
+      <Step id="entradas" n={1} title="O que entra" done={steps.entradas} summary={<Eur cents={totals.R} />}>
         {data.incomes.length === 0 ? (
           <p className={`card p-4 text-sm ${muted}`}>
             Ainda nada. Adiciona o ordenado, as despesas de representação e a renda{suggestions.length > 0 && " — ou escolhe abaixo o que encontrei no banco"}.
@@ -701,7 +712,7 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
       </Step>
 
       {/* 2. Joana */}
-      <Step id="joana" n={2} title="Joana" done={steps.joana}>
+      <Step id="joana" n={2} title="Joana" done={steps.joana} summary={<Eur cents={totals.J} />}>
         <div className="card p-4 space-y-3">
           <p className="font-medium">A Joana põe na conta tudo o que recebe na Duet.</p>
           {duetRes === undefined ? (
@@ -762,7 +773,7 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
       </Step>
 
       {/* 3. Contas fixas */}
-      <Step id="fixas" n={3} title="Contas fixas" done={steps.fixas}>
+      <Step id="fixas" n={3} title="Contas fixas" done={steps.fixas} summary={<Eur cents={totals.F} />}>
         <div className="card p-3">
           <BudgetTable
             rows={fixaRows}
@@ -792,7 +803,7 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
       </Step>
 
       {/* 4. Dia a dia */}
-      <Step id="dia-a-dia" n={4} title="Dia a dia" done={steps.dia}>
+      <Step id="dia-a-dia" n={4} title="Dia a dia" done={steps.dia} summary={<Eur cents={totals.V + totals.A} />}>
         {view.averages.provisorio && (
           <p className="mb-3 rounded-2xl bg-amber-500/10 px-3 py-2 text-sm text-amber-800 dark:text-amber-200">
             Ainda há movimentos sem categoria em {monthsList(view.averages.months, true)} — as médias podem estar baixas.{" "}
@@ -850,7 +861,7 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
       </Step>
 
       {/* 5. Poupança e extras */}
-      <Step id="poupanca" n={5} title="Poupança e extras" done={steps.poupanca}>
+      <Step id="poupanca" n={5} title="Poupança e extras" done={steps.poupanca} summary={<Eur cents={totals.P} />}>
         <div className="card p-4 space-y-4">
           <div>
             <label className="label" htmlFor="poupar">
@@ -887,7 +898,7 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
       </Step>
 
       {/* 6. Mesadas */}
-      <Step id="mesadas" n={6} title="Mesadas" done={steps.mesadas}>
+      <Step id="mesadas" n={6} title="Mesadas" done={steps.mesadas} summary={<Eur cents={totals.mesadasTotal} />}>
         <div className="card p-4 space-y-4">
           <div className="space-y-2">
             <p className="text-sm font-medium">A partir de {monthDay(plan.start_month, "first")}</p>
@@ -1012,6 +1023,9 @@ function PlanoScreen({ data, householdId, reload }: { data: EngineData; househol
       </Step>
 
       {/* ── C. The next six months ──────────────────────────────────────── */}
+        </div>
+      </Section>
+
       <Section title="Próximos 6 meses">
         {!steps.entradas ? (
           <p className={`card p-4 text-sm ${muted}`}>Preenche o que entra todos os meses para ver os próximos meses.</p>

@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { Eur } from "@/components/kit";
+import { Eur, Fold } from "@/components/kit";
 import type { ForecastItem } from "@/lib/esteMes";
 import { monthDay } from "@/lib/format";
 
@@ -32,14 +32,18 @@ export function ForecastCard({
   const comeTotal = come.reduce((a, l) => a + l.cents, 0);
   const end = balanceToday + comeTotal - go.reduce((a, l) => a + l.cents, 0);
 
+  const tone = end < 0 ? "text-terracota dark:text-orange-300" : "text-petroleo dark:text-teal-300";
   return (
-    <div className="card p-5">
-      <div className="text-sm text-tinta/60 dark:text-creme/60">Previsão para {last}</div>
-      <div className={`text-4xl font-display tnum ${end < 0 ? "text-terracota dark:text-orange-300" : "text-petroleo dark:text-teal-300"}`}>
-        <Eur cents={end} />
-      </div>
-
-      <div className="mt-3 text-sm divide-y divide-areia/60 dark:divide-white/10">
+    <Fold
+      title="Saldo no fim do mês"
+      sub={
+        <>
+          hoje <Eur cents={balanceToday} /> · previsão a {last}
+        </>
+      }
+      right={<Eur cents={end} className={`text-2xl font-display ${tone}`} />}
+    >
+      <div className="text-sm divide-y divide-areia/60 dark:divide-white/10">
         <Line label="Saldo hoje" cents={balanceToday} />
         <div className="py-1.5">
           <Line label="Ainda vai entrar" cents={comeTotal} sign="+" bare />
@@ -60,7 +64,7 @@ export function ForecastCard({
       {end < 0 && (
         <p className="mt-2 text-xs text-terracota dark:text-orange-300">A conta acaba o mês a negativo: vai ser preciso ir à poupança.</p>
       )}
-    </div>
+    </Fold>
   );
 }
 

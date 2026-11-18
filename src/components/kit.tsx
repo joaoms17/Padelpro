@@ -169,3 +169,96 @@ export function Loading({ error }: { error?: string | null }) {
   if (error) return <p className="py-10 text-center text-sm text-terracota">Não consegui carregar: {error}</p>;
   return <div className="py-10 text-center text-tinta/50 dark:text-creme/50">A carregar…</div>;
 }
+
+const LEVEL_STROKE = { ok: "#2E6B66", warn: "#D9952B", over: "#A64B25" } as const;
+
+/**
+ * A ring filled up to value/max, with what matters written in the middle.
+ * `tick` (0–1) marks where the month is, to compare the pace at a glance.
+ */
+export function Ring({
+  value,
+  max,
+  tick,
+  level = "ok",
+  size = 176,
+  stroke = 14,
+  children,
+}: {
+  value: number;
+  max: number;
+  tick?: number;
+  level?: "ok" | "warn" | "over";
+  size?: number;
+  stroke?: number;
+  children?: ReactNode;
+}) {
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const pct = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
+  const angle = tick != null ? Math.min(1, Math.max(0, tick)) * 2 * Math.PI - Math.PI / 2 : null;
+  const mid = size / 2;
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden>
+        <circle cx={mid} cy={mid} r={r} fill="none" strokeWidth={stroke} className="stroke-areia/80 dark:stroke-white/10" />
+        {pct > 0 && (
+          <circle
+            cx={mid}
+            cy={mid}
+            r={r}
+            fill="none"
+            stroke={LEVEL_STROKE[level]}
+            strokeWidth={stroke}
+            strokeLinecap="round"
+            strokeDasharray={`${pct * c} ${c}`}
+            transform={`rotate(-90 ${mid} ${mid})`}
+          />
+        )}
+        {angle != null && (
+          <line
+            x1={mid + (r - stroke / 2 - 2) * Math.cos(angle)}
+            y1={mid + (r - stroke / 2 - 2) * Math.sin(angle)}
+            x2={mid + (r + stroke / 2 + 2) * Math.cos(angle)}
+            y2={mid + (r + stroke / 2 + 2) * Math.sin(angle)}
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            className="stroke-tinta dark:stroke-creme"
+          />
+        )}
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-5">{children}</div>
+    </div>
+  );
+}
+
+/** A card that shows one line and opens for the detail. */
+export function Fold({
+  title,
+  right,
+  sub,
+  defaultOpen = false,
+  children,
+}: {
+  title: ReactNode;
+  right?: ReactNode;
+  sub?: ReactNode;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <details className="card group" open={defaultOpen}>
+      <summary className="list-none [&::-webkit-details-marker]:hidden cursor-pointer select-none px-5 py-4 flex items-center gap-3">
+        <span className="min-w-0 flex-1">
+          <span className="block font-medium truncate">{title}</span>
+          {sub && <span className="block text-xs text-tinta/50 dark:text-creme/50 truncate">{sub}</span>}
+        </span>
+        {right && <span className="shrink-0 text-right">{right}</span>}
+        <svg viewBox="0 0 24 24" fill="none" className="shrink-0 w-4 h-4 text-tinta/40 dark:text-creme/40 transition-transform group-open:rotate-180" aria-hidden>
+          <path d="m6 9 6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </summary>
+      <div className="px-5 pb-5">{children}</div>
+    </details>
+  );
+}
