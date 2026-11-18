@@ -7,15 +7,15 @@ export default {
     extend: {
       colors: {
         // Paleta "Contas a Dois"
-        creme: "#F6F1EA",
-        areia: "#EAE1D3",
-        tinta: "#1E2B2F",
-        terracota: "#A64B25",
-        petroleo: "#2E6B66",
+        creme: "rgb(var(--creme) / <alpha-value>)",
+        areia: "rgb(var(--areia) / <alpha-value>)",
+        tinta: "rgb(var(--tinta) / <alpha-value>)",
+        terracota: "rgb(var(--terracota) / <alpha-value>)",
+        petroleo: "rgb(var(--petroleo) / <alpha-value>)",
       },
       fontFamily: {
-        display: ["Fraunces", "Georgia", "serif"],
-        sans: ["'DM Sans'", "system-ui", "sans-serif"],
+        display: ["var(--font-display)"],
+        sans: ["var(--font-sans)"],
       },
       borderRadius: {
         card: "1.25rem",

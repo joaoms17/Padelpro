@@ -1,10 +1,11 @@
 // The first look of Este mês: the account's balance now and over the last
 // months, what the two of you took, and (quietly) whether Joana's Duet money
 // is all in the account.
+import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Bar, Eur } from "@/components/kit";
 import { compactEuros, type JoanaGap } from "@/lib/meses";
-import { VOCES_MARK, balanceChange, type BalancePoint, type VocesPoint } from "@/lib/resumo";
+import { VOCES_MARK, balanceChange, type BalancePoint, type OwedStatus, type VocesPoint } from "@/lib/resumo";
 import { formatEuros } from "@/lib/format";
 
 const muted = "text-tinta/60 dark:text-creme/60";
@@ -92,22 +93,72 @@ export function VocesCard({ series, month }: { series: VocesPoint[]; month: stri
   );
 }
 
-/** One quiet line: is everything Joana received on Duet in the account? */
-export function JoanaLine({ gap, loading }: { gap: JoanaGap | null; loading: boolean }) {
-  if (!gap && !loading) return null;
-  const done = gap != null && gap.missing === 0;
+const DOT = { ok: "bg-petroleo dark:bg-teal-300", wait: "bg-tinta/20 dark:bg-creme/30", late: "bg-amber-500" } as const;
+
+function Quiet({ to, tone, children }: { to: string; tone: keyof typeof DOT; children: ReactNode }) {
   return (
-    <Link to="/meses/joana" className={`flex items-center justify-center gap-2 text-xs ${faint} active:opacity-60`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${gap == null ? "bg-tinta/20 dark:bg-creme/30" : done ? "bg-petroleo dark:bg-teal-300" : "bg-amber-500"}`} />
-      {gap == null ? (
-        "Joana · a ver a Duet…"
-      ) : done ? (
-        "Joana · tudo da Duet já está na conta"
-      ) : (
-        <span>
-          Joana · faltam <Eur cents={gap.missing} /> da Duet
-        </span>
-      )}
+    <Link to={to} className={`flex items-center gap-2 text-xs ${faint} active:opacity-60`}>
+      <span className={`shrink-0 w-1.5 h-1.5 rounded-full ${DOT[tone]}`} />
+      <span className="min-w-0 truncate">{children}</span>
     </Link>
+  );
+}
+
+/**
+ * Two quiet lines, one for each of you, asking the same thing: is what you
+ * bring in already in the account? Joana: what she received on Duet. João:
+ * the salary and the despesas de representação.
+ */
+export function EmDia({
+  month,
+  joana,
+  joanaLoading,
+  joao,
+  joaoName,
+  joanaName,
+}: {
+  month: string;
+  /** null: not from this month yet, or no Duet data. */
+  joana: JoanaGap | null;
+  joanaLoading: boolean;
+  /** null: no salary set up in the plan. */
+  joao: OwedStatus | null;
+  joaoName: string;
+  joanaName: string;
+}) {
+  if (!joao && !joana && !joanaLoading) return null;
+  return (
+    <div className="flex flex-col items-center gap-1.5">
+      {joao && (
+        <Quiet to={`/movimentos?mes=${month}&vista=entradas`} tone={joao.late > 0 ? "late" : joao.upcoming > 0 ? "wait" : "ok"}>
+          {joaoName} ·{" "}
+          {joao.late > 0 ? (
+            <>
+              faltam <Eur cents={joao.late} /> do ordenado e despesas
+            </>
+          ) : joao.upcoming > 0 ? (
+            <>
+              ordenado e despesas: <Eur cents={joao.upcoming} /> por entrar (dia {joao.nextDay})
+            </>
+          ) : (
+            "ordenado e despesas já estão na conta"
+          )}
+        </Quiet>
+      )}
+      {(joana || joanaLoading) && (
+        <Quiet to="/meses/joana" tone={joana == null ? "wait" : joana.missing > 0 ? "late" : "ok"}>
+          {joanaName} ·{" "}
+          {joana == null ? (
+            "a ver a Duet…"
+          ) : joana.missing > 0 ? (
+            <>
+              faltam <Eur cents={joana.missing} /> da Duet
+            </>
+          ) : (
+            "tudo da Duet já está na conta"
+          )}
+        </Quiet>
+      )}
+    </div>
   );
 }

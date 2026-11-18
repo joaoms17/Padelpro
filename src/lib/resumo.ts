@@ -45,3 +45,28 @@ export function vocesSeries(months: string[], voces: (month: string) => number, 
       return { month: m, label: monthShort(m), cents, over: cents >= mark };
     });
 }
+
+export interface OwedStatus {
+  /** Past its usual day and not in the account yet. */
+  late: number;
+  /** Still to come, not late: the earliest day it is expected. */
+  nextDay: number | null;
+  /** What is still to come and not late. */
+  upcoming: number;
+}
+
+/**
+ * João's side of the same question asked of Joana: did the salary and the
+ * despesas de representação due this month reach the account? Before their
+ * usual day they are only "to come"; after it they are missing.
+ */
+export function salaryStatus(groups: { kind: string; day: number; pending: number }[], dayOfMonth: number): OwedStatus {
+  const mine = groups.filter((g) => (g.kind === "salario" || g.kind === "representacao") && g.pending > 0);
+  const late = mine.filter((g) => g.day < dayOfMonth);
+  const soon = mine.filter((g) => g.day >= dayOfMonth);
+  return {
+    late: late.reduce((a, g) => a + g.pending, 0),
+    upcoming: soon.reduce((a, g) => a + g.pending, 0),
+    nextDay: soon.length ? Math.min(...soon.map((g) => g.day)) : null,
+  };
+}

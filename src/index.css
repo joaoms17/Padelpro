@@ -4,6 +4,14 @@
 
 :root {
   color-scheme: light dark;
+  /* The palette, as "R G B" so Tailwind can add opacity. */
+  --creme: 246 241 234;
+  --areia: 234 225 211;
+  --tinta: 30 43 47;
+  --terracota: 166 75 37;
+  --petroleo: 46 107 102;
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "DM Sans", system-ui, sans-serif;
 }
 
 @layer base {
@@ -26,7 +34,7 @@
   h1,
   h2,
   h3 {
-    font-family: "Fraunces", Georgia, serif;
+    font-family: var(--font-display);
     font-optical-sizing: auto;
   }
 

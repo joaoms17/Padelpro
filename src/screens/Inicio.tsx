@@ -30,8 +30,8 @@ import {
 import { formatEuros, monthDay, monthName, monthTitle } from "@/lib/format";
 import { Bar, Eur, Loading, Pill, Ring, Section } from "@/components/kit";
 import { catIcon } from "@/lib/catIcon";
-import { JoanaLine, SaldoCard, VocesCard } from "@/components/Resumo";
-import { balanceSeries, vocesSeries } from "@/lib/resumo";
+import { EmDia, SaldoCard, VocesCard } from "@/components/Resumo";
+import { balanceSeries, salaryStatus, vocesSeries } from "@/lib/resumo";
 import { ForecastCard } from "@/components/ForecastCard";
 
 const muted = "text-tinta/60 dark:text-creme/60";
@@ -67,6 +67,12 @@ function EsteMes({ data, view, error }: { data: EngineData; view: MonthsView; er
   // Joana puts in everything she receives on Duet: what she got this month.
   const duet = useDuetMonth(month);
   const { waivers } = useJoanaWaivers(data.householdId);
+  // The same question for each: is what you bring in already in the account?
+  const mine = incomeProgress(data.incomes, real).groups.filter((g) => g.kind === "salario" || g.kind === "representacao");
+  const salary = mine.length > 0 ? salaryStatus(mine, Number(data.ctx.today.slice(8, 10))) : null;
+  const isJoana = (n: string) => n.trim().toLowerCase() === "joana";
+  const joanaName = data.members.find((m) => isJoana(m.display_name))?.display_name ?? "Joana";
+  const joaoName = data.members.find((m) => !isJoana(m.display_name))?.display_name ?? "João";
   const saldo = balanceSeries(view.months, view.endBalance, month);
   const prev = saldo.length > 1 ? saldo[saldo.length - 2] : null;
   const joanaNow = duet?.configured
@@ -83,7 +89,14 @@ function EsteMes({ data, view, error }: { data: EngineData; view: MonthsView; er
       <SaldoCard balance={data.balanceCents} series={saldo} prevLabel={prev ? monthName(prev.month) : null} />
       <div className="space-y-3">
         <VocesCard series={vocesSeries(view.months, (m) => view.real.get(m)?.voces ?? 0, month)} month={month} />
-        {month >= JOANA_FROM && <JoanaLine gap={joanaNow} loading={duet === null} />}
+        <EmDia
+          month={month}
+          joana={month >= JOANA_FROM ? joanaNow : null}
+          joanaLoading={month >= JOANA_FROM && duet === null}
+          joao={salary}
+          joaoName={joaoName}
+          joanaName={joanaName}
+        />
       </div>
       {controlar ? (
         <Controlar data={data} real={real} sem={sem} control={control} lastClosed={lastClosed} duet={duet} waived={waivers?.[month] ?? 0} />

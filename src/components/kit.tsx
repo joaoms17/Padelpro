@@ -133,8 +133,8 @@ export function Bar({ value, max, tick, level = "ok" }: { value: number; max: nu
 }
 
 export const AREA_COLORS = {
-  fixa: "#2E6B66",
-  dia: "#A64B25",
+  fixa: "rgb(var(--petroleo))",
+  dia: "rgb(var(--terracota))",
   trabalho: "#C99A3B",
   voces: "#6B5B95",
   sem: "#9AA3A6",
@@ -170,7 +170,7 @@ export function Loading({ error }: { error?: string | null }) {
   return <div className="py-10 text-center text-tinta/50 dark:text-creme/50">A carregar…</div>;
 }
 
-const LEVEL_STROKE = { ok: "#2E6B66", warn: "#D9952B", over: "#A64B25" } as const;
+const LEVEL_STROKE = { ok: "rgb(var(--petroleo))", warn: "#D9952B", over: "rgb(var(--terracota))" } as const;
 
 /**
  * A ring filled up to value/max, with what matters written in the middle.

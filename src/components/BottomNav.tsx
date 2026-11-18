@@ -10,7 +10,7 @@ interface Item {
 }
 
 const stroke = (active: boolean) =>
-  active ? "#A64B25" : "currentColor";
+  active ? "rgb(var(--terracota))" : "currentColor";
 
 const ITEMS: Item[] = [
   {
